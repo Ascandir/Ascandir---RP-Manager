@@ -17,6 +17,15 @@ if (app.isPackaged) {
 }
 
 let win = null;
+// ---------------------------------------------------------------- Server-Verbindung (optional)
+function configPath() { return path.join(app.getPath('userData'), 'config.json'); }
+function readConfig() { try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { return {}; } }
+function writeConfig(c) { fs.writeFileSync(configPath(), JSON.stringify(c, null, 2), 'utf8'); }
+const serverUrl = () => readConfig().serverUrl || null;
+function loadUi() {
+  const u = serverUrl();
+  if (u) win.loadURL(u); else win.loadFile(path.join(__dirname, 'src', 'index.html'));
+}
 function send(ch, ...args) { if (win && !win.isDestroyed()) win.webContents.send(ch, ...args); }
 
 function createWindow() {
@@ -27,7 +36,12 @@ function createWindow() {
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.js') }
   });
   Menu.setApplicationMenu(null);
-  win.loadFile(path.join(__dirname, 'src', 'index.html'));
+  loadUi();
+  // Server nicht erreichbar -> lokale Version mit Hinweis
+  win.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
+    if (!isMain || !serverUrl() || url.startsWith('file:')) return;
+    win.loadFile(path.join(__dirname, 'src', 'index.html'), { query: { offline: serverUrl() } });
+  });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return;
@@ -53,6 +67,16 @@ function setupFiles() {
   base = app.getPath('userData');
   for (const d of DIRS) fs.mkdirSync(path.join(base, d), { recursive: true });
   ipcMain.handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged, dataDir: base }));
+  ipcMain.handle('app:getServer', () => serverUrl());
+  ipcMain.handle('app:setServer', (_e, url) => {
+    const c = readConfig();
+    if (url) {
+      let u; try { u = new URL(String(url).trim()); } catch { throw new Error('Ungültige Adresse'); }
+      if (!/^https?:$/.test(u.protocol)) throw new Error('Adresse muss mit http:// oder https:// beginnen');
+      c.serverUrl = u.origin + (u.pathname.endsWith('/') ? u.pathname : u.pathname + '/');
+    } else delete c.serverUrl;
+    writeConfig(c); setImmediate(loadUi); return c.serverUrl || null;
+  });
   ipcMain.handle('fs:list', (_e, dir) => fs.readdirSync(dirPath(dir)).filter(f => f.toLowerCase().endsWith('.json')).map(f => {
     try { return { file: f, content: fs.readFileSync(path.join(dirPath(dir), f), 'utf8') }; } catch (err) { return { file: f, error: err.message }; }
   }));

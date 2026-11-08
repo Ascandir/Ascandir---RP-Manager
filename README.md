@@ -109,6 +109,8 @@ Ein neues Polygon mit den Properties `kind: "zone"`, `eraName` und `factionName`
 
 ## Server-Version (Docker / Portainer / Cloudflare-Tunnel)
 
+> **Desktop-App mit dem Server verbinden:** In der installierten App unter *Einstellungen → Mit Server verbinden* die Adresse (z. B. `https://map.ascandir.com`) eintragen. Die App zeigt dann dieselben Daten wie die Browser-Version, Änderungen erscheinen live auf beiden Seiten; Anmeldung wie im Browser über *🔒 Anmelden*. Oben rechts zeigt ☁ die Verbindung, ein Klick darauf trennt sie wieder (dann erscheinen die lokalen Daten). Ist der Server nicht erreichbar, startet die App mit den lokalen Daten und einem Hinweis. Lokale Zeitlinien überträgt man per *Datei → Exportieren* und auf dem Server *Datei → Importieren*.
+
 Die Karte läuft auch als Webserver im Browser, z. B. auf einem Heimserver mit Portainer und über einen Cloudflare-Tunnel von überall erreichbar. Alle Daten liegen im Docker-Volume `/data`; mehrere offene Browserfenster aktualisieren sich live.
 
 ### 1. Stack in Portainer anlegen

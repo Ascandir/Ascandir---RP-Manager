@@ -543,7 +543,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 401, { error: 'Benutzername oder Passwort falsch.' });
     }
     if (url.pathname === '/api/logout') return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': 'iam_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
-    if (url.pathname === '/api/info') return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, loginRequired: !!PASSWORD, admin: isAdmin(req), publicView: PUBLIC_VIEW, dataDir: isAdmin(req) ? DATA_DIR : null });
+    if (url.pathname === '/api/info') return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, loginRequired: !!PASSWORD, admin: isAdmin(req), publicView: PUBLIC_VIEW, dataDir: isAdmin(req) ? DATA_DIR : null }, 'application/json; charset=utf-8', { 'Access-Control-Allow-Origin': '*' });
     if (!canRead(req, url)) {
       if (url.pathname.startsWith('/api/')) return send(res, 401, { error: 'unauthorized' }, 'application/json', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
       return send(res, 401, 'Anmeldung erforderlich', 'text/plain; charset=utf-8', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });

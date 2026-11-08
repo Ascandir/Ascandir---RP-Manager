@@ -34,7 +34,10 @@
       return true;
     },
     logout: () => fetch('api/logout', { method: 'POST' }).then(() => true),
-    updCheck: async () => ({ state: 'docker' }),
-    updDownload: async () => true, updInstall: async () => true, onUpdate: () => { }
+    desktop: !!window.iamDesktop,
+    updCheck: window.iamDesktop ? window.iamDesktop.updCheck : async () => ({ state: 'docker' }),
+    updDownload: window.iamDesktop ? window.iamDesktop.updDownload : async () => true,
+    updInstall: window.iamDesktop ? window.iamDesktop.updInstall : async () => true,
+    onUpdate: window.iamDesktop ? window.iamDesktop.onUpdate : () => { }
   };
 })();

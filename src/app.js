@@ -1581,6 +1581,7 @@
     const guest = isGuest();
     for (const id of ['#tabEdit', '#tabSettings', '#btnNewWorld', '#btnNewTl', '#btnDupTl', '#btnDelTl', '#btnImport', '#btnJson', '#btnFolder']) $(id).hidden = guest;
     $('#btnLogin').hidden = !guest;
+    const sb = $('#btnServer'); if (sb) { sb.hidden = !(FS && FS.server && FS.desktop); sb.textContent = '☁ ' + location.host; sb.title = t('srvTitle'); }
     $('#btnLogin').textContent = '🔒 ' + t('login');
   }
   function loginDialog() {
@@ -1598,6 +1599,10 @@
     setTimeout(() => $('#mUser').focus(), 0);
   }
   $('#btnLogin').addEventListener('click', loginDialog);
+  $('#btnServer').addEventListener('click', () => {
+    modal(t('srvTitle'), `<p>${esc(t('srvConnected', location.origin))}</p><p class="hint">${esc(t('srvDisconnectHint'))}</p>`,
+      () => { window.iamDesktop.setServer(null); }, { ok: t('srvDisconnect') });
+  });
   $$('#langSwitch button').forEach(b => b.addEventListener('click', () => { if (b.dataset.l !== settings.lang) setLang(b.dataset.l); }));
   $('#worldSelect').addEventListener('change', e => switchWorld(e.target.value));
   $('#tlSelect').addEventListener('change', e => selectTimeline(e.target.value));
@@ -1768,11 +1773,15 @@
       <div class="settings-head"><h2>${esc(t('settings'))}</h2><button id="setBack">${esc(t('back'))}</button></div>
       <section class="card"><h3>${esc(t('theme'))}</h3>
         <div class="seg">${['auto', 'scifi', 'fantasy'].map(k => `<button data-theme="${k}" class="${settings.theme === k ? 'active' : ''}">${esc(t(k === 'auto' ? 'themeAuto' : k === 'scifi' ? 'themeScifi' : 'themeFantasy'))}</button>`).join('')}</div></section>
+      ${window.iamDesktop ? `<section class="card"><h3>☁ ${esc(t('srvTitle'))}</h3>
+        ${FS && FS.server ? `<p>${esc(t('srvConnected', location.origin))}</p><button id="srvOff">${esc(t('srvDisconnect'))}</button>`
+          : `<p class="hint">${esc(t('srvHint'))}</p><div class="row"><input id="srvUrl" placeholder="https://map.example.com"><button id="srvOn" class="fixed primary">${esc(t('srvConnect'))}</button></div>`}
+      </section>` : ''}
       <section class="card"><h3>${esc(t('terrStyle'))}</h3>
         <div class="seg">${['borders', 'bubbles'].map(k => `<button data-terr="${k}" class="${settings.terrStyle === k ? 'active' : ''}">${esc(t(k === 'borders' ? 'terrBorders' : 'terrBubbles'))}</button>`).join('')}</div></section>
       <section class="card"><h3>${esc(t('updates'))}</h3>
         <div class="kv"><span class="k">${esc(t('currentVersion'))}</span><span><b>${esc(info.version)}</b></span></div>
-        ${FS && FS.server ? `<p class="hint">${esc(t('updDocker'))}</p>` : `<label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
+        ${FS && FS.server && !FS.desktop ? `<p class="hint">${esc(t('updDocker'))}</p>` : `<label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
         <div class="row" style="margin-top:8px"><button id="setCheck" class="fixed">${esc(t('checkNow'))}</button><span id="setUpdStatus" class="dim"></span></div>`}
         <p class="hint"><a href="#" id="setReleases">${esc(t('releases'))}</a></p></section>
       <section class="card"><h3>${esc(t('worldSettings'))}: ${esc(worldName(w))}</h3>
@@ -1799,6 +1808,21 @@
     </div>`;
     $('#setBack').addEventListener('click', () => setMode('view'));
     const lo = $('#setLogout'); if (lo) lo.addEventListener('click', () => FS.logout().then(() => location.reload()));
+    const so = $('#srvOn'); if (so) so.onclick = async () => {
+      const u = $('#srvUrl').value.trim(); if (!u) return;
+      try { const r = await fetch(u.replace(/\/?$/, '/') + 'api/info'); const j = await r.json(); if (!j.server) throw new Error('kein InteractiveMap-Server'); }
+      catch (e) { if (!confirm(t('srvCheckFailed', e.message))) return; }
+      window.iamDesktop.setServer(u).catch(e => alert(e.message));
+    };
+    const sf = $('#srvOff'); if (sf) sf.onclick = () => { if (confirm(t('srvDisconnectQ'))) window.iamDesktop.setServer(null); };
+    if (window.iamDesktop && !(FS && FS.server) && $('#srvUrl')) window.iamDesktop.getServer().then(u => {
+      if (!u || !$('#srvUrl')) return;
+      const card = $('#srvUrl').closest('.card');
+      card.innerHTML = `<h3>☁ ${esc(t('srvTitle'))}</h3><p class="warn">${esc(t('srvOffline', u))}</p>
+        <div class="row"><button id="srvRetry2" class="primary">${esc(t('srvRetry'))}</button><button id="srvOff2">${esc(t('srvDisconnect'))}</button></div>`;
+      $('#srvRetry2').onclick = () => window.iamDesktop.setServer(u);
+      $('#srvOff2').onclick = () => window.iamDesktop.setServer(null);
+    });
     $$('.seg [data-terr]').forEach(b => b.addEventListener('click', () => { settings.terrStyle = b.dataset.terr; saveSoon(); renderSettings(); draw(); }));
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
     if ($('#setAuto')) { $('#setAuto').addEventListener('change', e => { settings.autoUpdate = e.target.checked; saveSoon(); }); $('#setCheck').addEventListener('click', () => checkUpdates(true)); }
@@ -1901,7 +1925,10 @@
     resize();
     switchWorld(state.world.id);
     saveSoon();
-    if (settings.autoUpdate && FS && !FS.server) setTimeout(() => checkUpdates(false), 2500);
+    if (settings.autoUpdate && FS && (!FS.server || FS.desktop)) setTimeout(() => checkUpdates(false), 2500);
+    const off = new URLSearchParams(location.search).get('offline');
+    if (off) setTimeout(() => { let b = $('#offBanner'); if (!b) { b = document.createElement('div'); b.id = 'offBanner'; $('#mapWrap').appendChild(b); } b.innerHTML = `<b>☁</b> ${esc(t('srvOffline', off))} <button id="offRetry" class="primary">${esc(t('srvRetry'))}</button> <button id="offClose">${esc(t('close'))}</button>`; b.hidden = false;
+      $('#offRetry').onclick = () => window.iamDesktop && window.iamDesktop.getServer().then(u => u && window.iamDesktop.setServer(u)); $('#offClose').onclick = () => { b.hidden = true; }; }, 600);
   })();
   window.__iam = { state, setYear, regionAt, settings, setLang, switchWorld, fmtYear, parseYear };
 })();
