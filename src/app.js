@@ -904,19 +904,23 @@
     const r = track.getBoundingClientRect(); TW = r.width; TH = r.height;
     track.width = Math.max(1, Math.round(TW * DPR)); track.height = Math.max(1, Math.round(TH * DPR)); drawTrack();
   }
-  // all=false: bei sehr großen Lücken (z.B. Alte Republik ↔ Filmzeit) auf den jüngsten dichten Bereich zoomen
+  // all=false: auf die Zeitalter rund um das eingestellte Jahr zoomen (vorheriges, aktuelles, nächstes);
+  // all=true: komplette Zeitlinie zeigen (Doppelklick)
   function fitTrack(all) {
     const eras = sortedEras();
     let ys = eras.map(e => e.year);
     if (!all && ys.length > 2) {
-      const span = ys[ys.length - 1] - ys[0]; let gi = -1, gap = 0;
-      for (let i = 1; i < ys.length; i++) if (ys[i] - ys[i - 1] > gap) { gap = ys[i] - ys[i - 1]; gi = i; }
-      if (gap > span * 0.6) ys = ys.slice(gi);
+      const cur = era(); let i = cur ? eras.indexOf(cur) : -1;
+      const prev = i > 0 ? eras[i - 1].year : (cur ? cur.year : state.year) - 20;
+      let next = i >= 0 && i < eras.length - 1 ? eras[i + 1].year : (i < 0 ? eras[0].year : (cur.year + 20));
+      if (i >= 0 && i < eras.length - 2 && eras[i + 2].year - next < (next - prev) * 2) next = eras[i + 2].year;
+      ys = [prev, state.year, next];
+      if (next - prev > 600) ys = [cur ? cur.year : state.year - 50, state.year, Math.min(next, (cur ? cur.year : state.year) + 120)];
     }
     if (!ys.length) ys = state.tl.objects.flatMap(o => [o.from, o.to]).filter(v => v != null && v !== '').map(Number);
     let a = ys.length ? Math.min(...ys) : -100, b = ys.length ? Math.max(...ys) : 100;
-    const pad = Math.max(10, (b - a) * 0.04); a -= pad; b += pad;
-    if (b - a < 40) { const m = (a + b) / 2; a = m - 20; b = m + 20; }
+    const pad = Math.max(2, (b - a) * 0.06); a -= pad; b += pad;
+    if (b - a < 24) { const m = (a + b) / 2; a = m - 12; b = m + 12; }
     state.track = { a, b };
     ensureYearVisible(); drawTrack();
   }
@@ -928,7 +932,7 @@
   const tx = y => (y - state.track.a) / (state.track.b - state.track.a) * TW;
   const tyear = x => state.track.a + x / TW * (state.track.b - state.track.a);
   function niceStep(span) {
-    const target = span / Math.max(2, TW / 90);
+    const target = span / Math.max(2, TW / 80);
     const p = Math.pow(10, Math.floor(Math.log10(Math.max(1, target))));
     for (const m of [1, 2, 5, 10]) if (m * p >= target) return Math.max(1, m * p);
     return Math.max(1, 10 * p);
@@ -940,19 +944,21 @@
     tctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     tctx.clearRect(0, 0, TW, TH);
     tctx.fillStyle = fan ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.03)'; tctx.fillRect(0, 0, TW, TH);
-    const eras = sortedEras(), barY = 4, barH = 22;
+    const eras = sortedEras(), barY = 6, barH = 30;
     eras.forEach((e, i) => {
       const x0 = Math.max(0, tx(e.year)), x1 = Math.min(TW, i < eras.length - 1 ? tx(eras[i + 1].year) : TW);
       if (x1 <= 0 || x0 >= TW) return;
       tctx.fillStyle = eraColor(i); tctx.fillRect(x0, barY, x1 - x0, barH);
       tctx.fillStyle = fan ? 'rgba(255,217,138,0.85)' : 'rgba(245,184,61,0.8)'; tctx.fillRect(tx(e.year), barY, 2, barH);
       tctx.save(); tctx.beginPath(); tctx.rect(x0 + 4, barY, Math.max(0, x1 - x0 - 6), barH); tctx.clip();
-      tctx.font = `600 11px ${fan ? 'Georgia, serif' : '"Segoe UI", sans-serif'}`; tctx.fillStyle = fan ? '#f4e7c8' : '#dbe4ee'; tctx.textBaseline = 'middle';
+      tctx.font = `600 13px ${fan ? 'Georgia, serif' : '"Segoe UI", sans-serif'}`; tctx.fillStyle = fan ? '#f4e7c8' : '#dbe4ee'; tctx.textBaseline = 'middle'; tctx.textAlign = 'left';
       tctx.fillText(e.name, x0 + 6, barY + barH / 2); tctx.restore();
     });
     const span = state.track.b - state.track.a, step = niceStep(span);
-    tctx.font = `10px ${fan ? 'Georgia, serif' : '"Segoe UI", sans-serif'}`; tctx.textAlign = 'center'; tctx.textBaseline = 'alphabetic';
+    tctx.font = `11.5px ${fan ? 'Georgia, serif' : '"Segoe UI", sans-serif'}`; tctx.textAlign = 'center'; tctx.textBaseline = 'alphabetic';
     tctx.strokeStyle = fan ? 'rgba(244,231,200,0.5)' : 'rgba(160,180,210,0.45)'; tctx.fillStyle = fan ? '#e3cfa6' : '#8a99ad';
+    const minor = step >= 10 ? step / (step % 5 === 0 && step / 5 >= 1 ? 5 : 2) : (step > 1 ? 1 : 0);
+    if (minor) { tctx.globalAlpha = 0.5; for (let y = Math.ceil(state.track.a / minor) * minor; y <= state.track.b; y += minor) { const x = tx(y); tctx.beginPath(); tctx.moveTo(x, barY + barH + 2); tctx.lineTo(x, barY + barH + 4); tctx.stroke(); } tctx.globalAlpha = 1; }
     for (let y = Math.ceil(state.track.a / step) * step; y <= state.track.b; y += step) {
       const x = tx(y); tctx.beginPath(); tctx.moveTo(x, barY + barH + 2); tctx.lineTo(x, barY + barH + 7); tctx.stroke();
       tctx.fillText(fmtYear(y), x, TH - 3);
@@ -973,6 +979,11 @@
     window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
   });
   track.addEventListener('dblclick', () => fitTrack(true));
+  function zoomTrack(f) { const m = state.year, span = state.track.b - state.track.a, ns = Math.max(4, Math.min(1e6, span * f)), r = (m - state.track.a) / span; state.track = { a: m - r * ns, b: m - r * ns + ns }; drawTrack(); }
+  $('#trkIn').addEventListener('click', () => zoomTrack(1 / 2));
+  $('#trkOut').addEventListener('click', () => zoomTrack(2));
+  $('#trkEra').addEventListener('click', () => fitTrack(false));
+  $('#trkAll').addEventListener('click', () => fitTrack(true));
   track.addEventListener('wheel', e => {
     e.preventDefault();
     const r = track.getBoundingClientRect(), x = e.clientX - r.left, span = state.track.b - state.track.a;
@@ -1001,8 +1012,8 @@
   }
   function jumpEra(dir) {
     const eras = sortedEras(); if (!eras.length) return;
-    if (dir < 0) { const prev = eras.filter(e => e.year < state.year); const cur = era(); const tgt = cur && cur.year < state.year ? cur : prev[prev.length - 1]; if (tgt) setYear(tgt.year); }
-    else { const nx = eras.find(e => e.year > state.year); if (nx) setYear(nx.year); }
+    if (dir < 0) { const prev = eras.filter(e => e.year < state.year); const cur = era(); const tgt = cur && cur.year < state.year ? cur : prev[prev.length - 1]; if (tgt) { setYear(tgt.year); fitTrack(); } }
+    else { const nx = eras.find(e => e.year > state.year); if (nx) { setYear(nx.year); fitTrack(); } }
   }
   function renderYear() {
     const inp = $('#yearInput'); if (document.activeElement !== inp) inp.value = fmtYear(state.year);
@@ -1013,7 +1024,7 @@
     $('#eraDesc').textContent = e ? (e.desc || '') : t('beforeFirstEra');
     drawTrack();
   }
-  $('#yearInput').addEventListener('keydown', e => { if (e.key === 'Enter') { const y = parseYear(e.target.value); if (y != null) setYear(y); e.target.blur(); } else if (e.key === 'Escape') e.target.blur(); });
+  $('#yearInput').addEventListener('keydown', e => { if (e.key === 'Enter') { const y = parseYear(e.target.value); if (y != null) { setYear(y); fitTrack(); } e.target.blur(); } else if (e.key === 'Escape') e.target.blur(); });
   $('#yearInput').addEventListener('blur', e => { const y = parseYear(e.target.value); if (y != null && y !== state.year) setYear(y); else renderYear(); });
   $('#yearInput').addEventListener('wheel', e => { e.preventDefault(); setYear(state.year + (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 10 : 1)); }, { passive: false });
   $('#yearPrev').addEventListener('click', e => setYear(state.year - (e.shiftKey ? 10 : 1)));

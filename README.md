@@ -26,7 +26,7 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
 | Karte zoomen | Mausrad (bis 120-fach; ab einer gewissen Stufe „fliegst“ du in Systeme mit Sonnen und Monden hinein) |
 | Karte verschieben | Ziehen mit linker, mittlerer oder rechter Maustaste |
 | Jahr wählen | auf die Zeitleiste klicken oder darauf ziehen, Jahr eintippen (z. B. `22 VSY`, `3 NSY`, `-500`), ◀ ▶ oder Pfeiltasten (Umschalt = 10 Jahre), Mausrad auf dem Jahresfeld |
-| Zeitleiste zoomen / verschieben | Mausrad auf der Zeitleiste / Umschalt + Mausrad, Doppelklick zeigt alles |
+| Zeitleiste zoomen / verschieben | Mausrad auf der Zeitleiste oder 🔍＋ / 🔍－, Umschalt + Mausrad verschiebt; *Zeitalter* zoomt auf das aktuelle Zeitalter, *Alles* (oder Doppelklick) zeigt die ganze Zeitlinie |
 | Zeitalter springen | ⏮ ⏭ oder Bild↑ / Bild↓ |
 | Vollbild | F11 |
 | Rückgängig (Editor) | Strg+Z |
@@ -38,7 +38,7 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
 
 ### Welten
 
-- **Star Wars ★** ist eingebaut, mit über 230 Systemen, Sonnen, Monden, Stationen, 13 Hyperraumrouten, Sektoren, den Regionen von Tiefkern bis Unbekannte Regionen und 12 Zeitaltern von der Alten Republik (3653 VSY, Legends/SWTOR) bis zur Endgültigen Ordnung (35 NSY). Die Kanon-Zeitlinie ist schreibgeschützt; *Kopieren* erzeugt eine bearbeitbare Version.
+- **Star Wars ★** ist eingebaut, mit über 230 Systemen, Sonnen, Monden, Stationen, 13 Hyperraumrouten, Sektoren, den Regionen von Tiefkern bis Unbekannte Regionen und 18 Zeitaltern vom Großen Galaktischen Krieg (3681 VSY) bis zur Endgültigen Ordnung (35 NSY). Sieben davon decken die SWTOR-Zeit ab (Legends; Jahreszahlen angenähert). Die Kanon-Zeitlinie ist schreibgeschützt; *Kopieren* erzeugt eine bearbeitbare Version.
 - **＋ Welt** legt eine eigene Welt an:
   - **Sci-Fi:** Galaxie-Hintergrund mit Sonnen, Planeten, Monden und Stationen
   - **Fantasy:** Pergamentkarte mit Hauptstädten, Städten, Dörfern, Festungen und Wahrzeichen

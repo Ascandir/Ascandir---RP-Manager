@@ -114,13 +114,14 @@ h4 { margin: 10px 0 6px; font-size: 12px; color: var(--text); }
 .zoom-ctrl button { width: 34px; height: 34px; font-size: 16px; padding: 0; background: #0e1420dd; }
 
 #timebar {
-  grid-area: time; display: grid; grid-template-columns: auto minmax(320px, 1.5fr) minmax(220px, 1fr); gap: 14px;
-  align-items: center; padding: 10px 16px 12px; background: var(--bar-bg2); border-top: 1px solid var(--line);
+  grid-area: time; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; gap: 8px 16px;
+  align-items: center; padding: 8px 16px 10px; background: var(--bar-bg2); border-top: 1px solid var(--line);
 }
+#trackWrap { grid-column: 1 / -1; grid-row: 1; }
 .tb-left { display: flex; gap: 4px; align-items: center; }
 .tb-left button { width: 32px; height: 32px; padding: 0; }
 #yearInput { width: 120px; text-align: center; font-weight: 700; font-size: 14px; color: var(--accent); }
-#trackWrap { height: 48px; position: relative; }
+#trackWrap { height: 64px; position: relative; }
 #track { width: 100%; height: 100%; display: block; cursor: ew-resize; }
 .era-info #eraName { font-size: 16px; font-weight: 700; color: var(--accent); }
 .era-info .year { color: var(--accent2); margin-left: 6px; font-size: 12px; }
@@ -202,3 +203,6 @@ body[data-theme="fantasy"] #toolHint { background: #f7edd6ee; color: #8b1e1e; bo
 .tl-controls { overflow: visible; }
 #topbar .menu-list button { background: transparent !important; color: var(--text) !important; border-color: transparent !important; }
 #topbar .menu-list button:hover { background: var(--panel2) !important; border-color: var(--line) !important; }
+.tb-sep { width: 1px; height: 24px; background: var(--line); margin: 0 6px; }
+#trkIn, #trkOut { width: auto !important; padding: 0 8px !important; font-size: 12px; }
+#trkEra, #trkAll { width: auto !important; padding: 0 10px !important; }

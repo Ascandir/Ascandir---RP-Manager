@@ -439,7 +439,9 @@ lwotil|Sarvchi|C8|ur|Chiss
     ['res', 'Widerstand/Resistance', '#ffb74d', 120],
     ['sith', 'Sith Eternal/Sith Eternal', '#c2185b', 120],
     ['hutt', 'Huttenkartell/Hutt Cartel', '#9ccc65', 120],
-    ['chiss', 'Chiss-Aszendenz/Chiss Ascendancy', '#1e88e5', 130]
+    ['chiss', 'Chiss-Aszendenz/Chiss Ascendancy', '#1e88e5', 130],
+    ['zakuul', 'Ewiges Imperium (Zakuul)/Eternal Empire (Zakuul)', '#d9d4ff', 140],
+    ['alliance', 'Allianz von Odessen/Odessen Alliance', '#26c6da', 120]
   ].map(([id, name, color, reach]) => { const [de, en] = name.split('/'); return { id, name: de, nameEn: en, color, reach }; });
 
   // ---------------------------------------------------------------- Zeitalter
@@ -448,17 +450,68 @@ lwotil|Sarvchi|C8|ur|Chiss
   const ALL_KNOWN = UPTO_MID.concat(['outerrim', 'wildspace']);
   const regs = (list, f) => Object.fromEntries(list.map(r => [r, f]));
   const CHISS = { f: 'chiss', x: 230, y: 900, r: 200 };
+  // Gemeinsame Grundlage der Alten-Republik-Zeitalter (Legends/SWTOR)
+  const OR_BASE = { korriban: 'sithemp', dromundkaas: 'sithemp', ziost: 'sithemp', balmorra: 'sithemp', oricon: 'sithemp', raxusprime: 'sithemp',
+    taris: 'rep', ordmantell: 'rep', belsavis: 'rep', tython: 'rep', coruscant: 'rep', alderaan: 'rep', corellia: 'rep', kashyyyk: 'rep', naboo: 'rep',
+    ossus: 'rep', ryloth: 'rep', moncala: 'rep', quesh: 'hutt', makeb: 'hutt', nalhutta: 'hutt', tatooine: null, hoth: null, voss: null, rishi: null,
+    mandalore: 'mando', concorddawn: 'mando', csilla: 'chiss', naporar: 'chiss', rhigar: 'chiss' };
 
   const ERA_DEFS = [
     {
-      name: ['Alte Republik: Kalter Krieg', 'Old Republic: Cold War'], year: -3653,
-      desc: ['Legends/SWTOR-Ära: Nach dem Vertrag von Coruscant stehen sich die Galaktische Republik und das wiedererstandene Sith-Imperium gegenüber.',
-        'Legends/SWTOR era: after the Treaty of Coruscant, the Galactic Republic faces the resurgent Sith Empire.'],
+      name: ['Großer Galaktischer Krieg', 'Great Galactic War'], year: -3681,
+      desc: ['Legends/SWTOR (Jahre angenähert): Das Sith-Imperium kehrt aus dem Unbekannten zurück und überrollt große Teile des Äußeren Randes.',
+        'Legends/SWTOR (approximate years): the Sith Empire returns from the unknown and overruns much of the Outer Rim.'],
+      regions: Object.assign(regs(['deepcore', 'core', 'colonies', 'innerrim', 'expansion', 'midrim'], 'rep'), { huttspace: 'hutt' }),
+      set: Object.assign({}, OR_BASE, { balmorra: 'sithemp', taris: 'sithemp', ordmantell: null, corellia: 'rep' }),
+      zones: [{ f: 'sithemp', x: 1480, y: 300, r: 260 }, { f: 'sithemp', x: 1700, y: 360, r: 200 }, { f: 'sithemp', x: 1300, y: 260, r: 170 }, CHISS]
+    },
+    {
+      name: ['Vertrag von Coruscant / Kalter Krieg', 'Treaty of Coruscant / Cold War'], year: -3653,
+      desc: ['Legends/SWTOR: Nach der Plünderung Coruscants wird der Vertrag geschlossen. Republik und Sith-Imperium belauern sich in einem Kalten Krieg.',
+        'Legends/SWTOR: after the Sacking of Coruscant the treaty is signed. Republic and Sith Empire face off in a cold war.'],
       regions: Object.assign(regs(['deepcore', 'core', 'colonies', 'innerrim', 'expansion'], 'rep'), { huttspace: 'hutt' }),
-      set: { korriban: 'sithemp', dromundkaas: 'sithemp', ziost: 'sithemp', taris: 'rep', balmorra: 'sithemp', ordmantell: 'rep', voss: null, belsavis: 'rep', quesh: 'hutt',
-        hoth: null, ilum: null, makeb: 'hutt', rishi: null, oricon: 'sithemp', raxusprime: 'sithemp', nalhutta: 'hutt', tatooine: null, alderaan: 'rep', corellia: 'rep', tython: 'rep',
-        coruscant: 'rep', kashyyyk: 'rep', naboo: 'rep', ossus: 'rep', ryloth: 'rep', mandalore: 'mando', csilla: 'chiss', taris2: null },
+      set: Object.assign({}, OR_BASE),
       zones: [{ f: 'sithemp', x: 1480, y: 300, r: 230 }, { f: 'sithemp', x: 1700, y: 360, r: 170 }, CHISS]
+    },
+    {
+      name: ['Galaktischer Krieg (SWTOR)', 'Galactic War (SWTOR)'], year: -3642,
+      desc: ['Legends/SWTOR: Der Krieg bricht erneut offen aus – Schlachten um Corellia, Ilum und Belsavis. Zeit der Klassengeschichten.',
+        'Legends/SWTOR: open war breaks out again – battles for Corellia, Ilum and Belsavis. Time of the class stories.'],
+      regions: Object.assign(regs(['deepcore', 'core', 'colonies', 'innerrim', 'expansion'], 'rep'), { huttspace: 'hutt' }),
+      set: Object.assign({}, OR_BASE, { taris: 'rep', ilum: 'sithemp', corellia: 'rep', makeb: 'hutt', voss: null, hoth: null }),
+      zones: [{ f: 'sithemp', x: 1480, y: 300, r: 240 }, { f: 'sithemp', x: 1700, y: 360, r: 180 }, { f: 'sithemp', x: 1180, y: 300, r: 120 }, CHISS]
+    },
+    {
+      name: ['Schatten von Revan', 'Shadow of Revan'], year: -3637,
+      desc: ['Legends/SWTOR: Die Revaniter bedrohen beide Seiten; Republik und Imperium kämpfen auf Rishi und Yavin 4 Seite an Seite. 3636 VSY wird Ziost ausgelöscht.',
+        'Legends/SWTOR: the Revanites threaten both sides; Republic and Empire fight together on Rishi and Yavin 4. In 3636 BBY Ziost is wiped out.'],
+      regions: Object.assign(regs(['deepcore', 'core', 'colonies', 'innerrim', 'expansion'], 'rep'), { huttspace: 'hutt' }),
+      set: Object.assign({}, OR_BASE, { taris: 'rep', ilum: 'sithemp', rishi: null, yavin: null, makeb: 'hutt' }),
+      zones: [{ f: 'sithemp', x: 1480, y: 300, r: 240 }, { f: 'sithemp', x: 1700, y: 360, r: 180 }, CHISS]
+    },
+    {
+      name: ['Ewiges Imperium von Zakuul', 'Eternal Empire of Zakuul'], year: -3636,
+      desc: ['Legends/SWTOR: Das Ewige Imperium aus dem Wilden Raum unterwirft Republik und Sith-Imperium, beide zahlen Tribut.',
+        'Legends/SWTOR: the Eternal Empire from Wild Space subjugates both the Republic and the Sith Empire, which pay tribute.'],
+      regions: Object.assign(regs(['deepcore', 'core', 'colonies', 'innerrim', 'expansion'], 'rep'), { huttspace: 'hutt', wildspace: 'zakuul' }),
+      set: Object.assign({}, OR_BASE, { zakuul: 'zakuul', iokath: 'zakuul', odessen: null, ziost: null }),
+      zones: [{ f: 'sithemp', x: 1480, y: 300, r: 220 }, { f: 'zakuul', x: 1950, y: 560, r: 260 }, { f: 'zakuul', x: 2050, y: 900, r: 220 }, CHISS]
+    },
+    {
+      name: ['Allianz gegen Zakuul', 'Alliance against Zakuul'], year: -3631,
+      desc: ['Legends/SWTOR: Der Fremdling gründet auf Odessen die Allianz und stürzt schließlich den Ewigen Thron.',
+        'Legends/SWTOR: the Outlander founds the Alliance on Odessen and finally overthrows the Eternal Throne.'],
+      regions: Object.assign(regs(['deepcore', 'core', 'colonies', 'innerrim', 'expansion'], 'rep'), { huttspace: 'hutt', wildspace: 'zakuul' }),
+      set: Object.assign({}, OR_BASE, { zakuul: 'zakuul', iokath: 'zakuul', odessen: 'alliance', ziost: null }),
+      zones: [{ f: 'sithemp', x: 1480, y: 300, r: 220 }, { f: 'zakuul', x: 1950, y: 560, r: 240 }, { f: 'alliance', x: 1780, y: 260, r: 150 }, CHISS]
+    },
+    {
+      name: ['Ansturm – neuer Krieg', 'Onslaught – war renewed'], year: -3629,
+      desc: ['Legends/SWTOR: Nach dem Fall Zakuuls flammt der Krieg zwischen Republik und Sith-Imperium wieder auf; die Allianz zerfällt. Kämpfe um Onderon, Mek-Sha und Ossus.',
+        'Legends/SWTOR: after Zakuul falls, war between Republic and Sith Empire flares up again and the Alliance breaks apart. Fighting over Onderon, Mek-Sha and Ossus.'],
+      regions: Object.assign(regs(['deepcore', 'core', 'colonies', 'innerrim', 'expansion'], 'rep'), { huttspace: 'hutt' }),
+      set: Object.assign({}, OR_BASE, { onderon: 'sithemp', ossus: 'rep', odessen: 'alliance', zakuul: null, ziost: null }),
+      zones: [{ f: 'sithemp', x: 1480, y: 300, r: 240 }, { f: 'sithemp', x: 1700, y: 360, r: 180 }, CHISS]
     },
     {
       name: ['Hohe Republik', 'High Republic'], year: -232,
