@@ -12,7 +12,7 @@
   const uid = p => p + Math.random().toString(36).slice(2, 9);
   const clone = o => JSON.parse(JSON.stringify(o));
   const FS = window.iamFS || null;
-  let dataVersion = 0, interactUntil = 0, interactTimer = null;
+  let dataVersion = 0, editVersion = 0, interactUntil = 0, interactTimer = null;
   const bump = () => { dataVersion++; };
   function interacting() {
     interactUntil = performance.now() + 220;
@@ -34,10 +34,11 @@
   const oldSet = loadJSON('swgm.settings.v1', {});
   const settings = Object.assign({
     lang: (navigator.language || 'de').toLowerCase().startsWith('de') ? 'de' : 'en',
-    theme: 'auto', autoUpdate: true, activeWorld: 'starwars', activeTl: {}, years: {},
+    theme: 'auto', autoUpdate: true, terrStyle: 'borders', activeWorld: 'starwars', activeTl: {}, years: {},
     types: Object.assign({ sun: true, planet: true, moon: true, station: true, capital: true, city: true, village: true, fortress: true, landmark: true }, oldSet.types || {}),
     opts: Object.assign({ influence: true, regions: true, grid: false, names: true, routes: true, sectors: true }, oldSet.opts || {}),
-    hiddenFactions: oldSet.hiddenFactions || []
+    hiddenFactions: oldSet.hiddenFactions || [],
+    planner: { stops: ['', ''], cls: 1, stay: 0, mode: 'horse', km: 1 }
   }, loadJSON(STORE_SET, {}));
   window.I18N.setLang(settings.lang);
 
@@ -50,7 +51,8 @@
     selected: null, hover: null,
     view: { cx: GEO.center.x, cy: GEO.center.y, z: 0.35 },
     track: { a: -100, b: 100 },
-    undo: [], appInfo: { version: 'dev', packaged: false }, upd: null
+    undo: [], appInfo: { version: 'dev', packaged: false }, upd: null,
+    plannerOpen: false, pick: null, plan: null
   };
   const wtype = () => WORLD_TYPES[state.world.type] || WORLD_TYPES.scifi;
   // Gast = Server-Version mit Passwort, aber nicht angemeldet -> nur ansehen
@@ -224,7 +226,7 @@
     } catch (e) { toast(t('fileError', file, e.message)); }
   }
 
-  function pushUndo() { state.undo.push(JSON.stringify({ id: state.tl.id, data: state.tl })); if (state.undo.length > 60) state.undo.shift(); }
+  function pushUndo() { editVersion++; state.undo.push(JSON.stringify({ id: state.tl.id, data: state.tl })); if (state.undo.length > 60) state.undo.shift(); }
   function undo() {
     const s = state.undo.pop(); if (!s) return;
     const { id, data } = JSON.parse(s);
@@ -420,13 +422,13 @@
     const lowRes = performance.now() < interactUntil;
     const v = state.view;
     const key = [v.cx, v.cy, v.z, W, H, DPR, state.year, dataVersion, state.tl.id, state.world.id, state.theme, state.selected, lowRes,
-      JSON.stringify(settings.opts), JSON.stringify(settings.types), [...state.hiddenFactions].join(','), window.I18N.lang].join('|');
+      JSON.stringify(settings.opts), JSON.stringify(settings.types), settings.terrStyle, [...state.hiddenFactions].join(','), window.I18N.lang].join('|');
     if (key !== baseKey) {
       rebuildTree(); computePositions();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       if (state.world.type === 'fantasy') drawParchment(); else drawSpace();
       if (isSW() && settings.opts.regions) drawRegions();
-      if (settings.opts.influence && era()) drawInfluence(lowRes);
+      if (settings.opts.influence && era()) { if (settings.terrStyle === 'bubbles') drawInfluence(lowRes); else drawTerritories(); }
       if (settings.opts.grid) drawGrid();
       if (settings.opts.routes) drawRoutes();
       if (isSW() && settings.opts.sectors) drawSectors();
@@ -437,9 +439,115 @@
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(base, 0, 0);
     }
     drawHover();
+    drawPlan();
     drawRouteDraft();
     drawBrush();
   }
+  // ------------------------------------------------------------- Reiseplaner
+  const TR = window.IAM_TRAVEL;
+  function drawPlan() {
+    const r = state.plannerOpen && state.plan; if (!r || !r.ok) return;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const fan = fantasy(), col = fan ? '#8b1e1e' : '#59e1ff';
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    for (const leg of r.legs) {
+      const pts = leg.points.map(p => w2s(p.x, p.y)); if (pts.length < 2) continue;
+      ctx.strokeStyle = fan ? 'rgba(139,30,30,0.25)' : 'rgba(89,225,255,0.25)'; ctx.lineWidth = 9;
+      ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.setLineDash(leg.offLaneShare > 0.5 ? [8, 6] : []);
+      ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke(); ctx.setLineDash([]);
+    }
+    const marks = [r.legs[0].points[0]].concat(r.legs.map(l => l.points[l.points.length - 1]));
+    marks.forEach((m, i) => {
+      const p = w2s(m.x, m.y);
+      ctx.fillStyle = i === 0 ? '#3ddc84' : i === marks.length - 1 ? '#ff5a5a' : (fan ? '#8b1e1e' : '#f5b83d');
+      ctx.beginPath(); ctx.arc(p.x, p.y, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#0b111c'; ctx.font = 'bold 11px "Segoe UI", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(i === 0 ? 'A' : i === marks.length - 1 ? 'Z' : String(i), p.x, p.y + 0.5);
+    });
+    ctx.textBaseline = 'alphabetic';
+  }
+  function computePlan() {
+    const P = settings.planner, stops = P.stops.map(x => (x || '').trim());
+    if (stops.filter(Boolean).length < 2 || !stops[0] || !stops[stops.length - 1]) { state.plan = null; return; }
+    state.plan = TR.plan(state.tl, { stops: stops.filter(Boolean), year: state.year, worldType: state.world.type, hyperClass: P.cls, stayHours: P.stay, mode: P.mode, kmPerUnit: P.km });
+  }
+  const dur = h => TR.fmtDuration(h, settings.lang);
+  function planText() {
+    const r = state.plan; if (!r || !r.ok) return '';
+    const L = [`${t('planner')}: ${r.stops.join(' → ')} (${fmtYear(state.year)})`];
+    L.push(state.world.type === 'fantasy' ? `${t('plMode')}: ${t('modes.' + r.mode)}` : `${t('plClass')}: ${String(r.hyperClass).replace('.', ',')}`);
+    r.legs.forEach((l, i) => L.push(`${i + 1}. ${l.from} → ${l.to}: ${dur(l.hours)}${l.lanes.length ? ' · ' + l.lanes.join(', ') : ''}${l.via.length ? ' · ' + t('plVia') + ' ' + l.via.join(', ') : ''}`));
+    L.push(`${t('plTotal')}: ${dur(r.totalHours)}${r.stayHours ? ` (${t('plStayTotal')} ${dur(r.stayHours)})` : ''} · ${r.lightYears != null ? '≈ ' + r.lightYears.toLocaleString() + ' ' + t('plLy') : '≈ ' + r.km.toLocaleString() + ' km'}`);
+    return L.join('\n');
+  }
+  function renderPlanner() {
+    const box = $('#planner');
+    $('#btnPlanner').textContent = '🧭 ' + t('planner');
+    $('#btnPlanner').classList.toggle('active', state.plannerOpen);
+    box.hidden = !state.plannerOpen;
+    $('#info').hidden = state.plannerOpen;
+    if (!state.plannerOpen) return;
+    const P = settings.planner, fan = state.world.type === 'fantasy';
+    computePlan();
+    const r = state.plan;
+    const label = i => i === 0 ? t('plStart') : i === P.stops.length - 1 ? t('plDest') : t('plStop') + ' ' + i;
+    box.innerHTML = `
+      <h3>🧭 ${esc(t('planner'))} <button id="plClose" title="${esc(t('close'))}">✕</button></h3>
+      <p class="hint" style="margin-top:0">${esc(t('plHint'))}</p>
+      ${P.stops.map((v, i) => `
+        <div class="pl-row ${state.pick === i ? 'picking' : ''}">
+          <span class="pl-dot ${i === 0 ? 'a' : i === P.stops.length - 1 ? 'z' : ''}">${i === 0 ? 'A' : i === P.stops.length - 1 ? 'Z' : i}</span>
+          <input class="pl-in" data-i="${i}" list="searchList" placeholder="${esc(label(i))}" value="${esc(v)}">
+          <button class="pl-pick fixed" data-i="${i}" title="${esc(t('plPick'))}">📍</button>
+          ${i > 0 && i < P.stops.length - 1 ? `<button class="pl-del fixed" data-i="${i}">✕</button>` : ''}
+        </div>`).join('')}
+      <div class="row" style="margin:6px 0 10px"><button id="plAdd">＋ ${esc(t('plAdd'))}</button><button id="plSwap" class="fixed" title="${esc(t('plSwap'))}">⇅</button></div>
+      ${fan ? `
+        <div class="row">
+          <label class="field"><span>${esc(t('plMode'))}</span><select id="plMode">${Object.keys(TR.TRAVEL_MODES).map(k => `<option value="${k}" ${k === P.mode ? 'selected' : ''}>${esc(t('modes.' + k))}</option>`).join('')}</select></label>
+          <label class="field fixed" style="width:110px"><span>${esc(t('plKm'))}</span><input id="plKm" type="number" min="0.01" step="0.1" value="${P.km}"></label>
+        </div>` : `
+        <label class="field"><span>${esc(t('plClass'))}</span><select id="plCls">${TR.HYPER_CLASSES.map(c => `<option value="${c}" ${+c === +P.cls ? 'selected' : ''}>${esc(t('plClassN', String(c).replace('.', settings.lang === 'en' ? '.' : ',')))}${esc(classHint(c))}</option>`).join('')}</select></label>`}
+      <label class="field"><span>${esc(t('plStay'))}</span><input id="plStay" type="number" min="0" step="1" value="${P.stay}"></label>
+      <div id="plResult">${planResultHtml(r)}</div>`;
+    $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); draw(); };
+    $$('.pl-in').forEach(inp => inp.addEventListener('change', () => { P.stops[+inp.dataset.i] = inp.value; saveSoon(); renderPlanner(); draw(); }));
+    $$('.pl-pick').forEach(b => b.addEventListener('click', () => { state.pick = state.pick === +b.dataset.i ? null : +b.dataset.i; renderPlanner(); if (state.pick != null) toast(t('plPickHint')); }));
+    $$('.pl-del').forEach(b => b.addEventListener('click', () => { P.stops.splice(+b.dataset.i, 1); saveSoon(); renderPlanner(); draw(); }));
+    $('#plAdd').onclick = () => { P.stops.splice(P.stops.length - 1, 0, ''); saveSoon(); renderPlanner(); };
+    $('#plSwap').onclick = () => { P.stops.reverse(); saveSoon(); renderPlanner(); draw(); };
+    const bindNum = (id, key, cast) => { const el = $(id); if (el) el.addEventListener('change', () => { P[key] = cast(el.value); saveSoon(); renderPlanner(); draw(); }); };
+    bindNum('#plCls', 'cls', Number); bindNum('#plStay', 'stay', v => Math.max(0, +v || 0)); bindNum('#plKm', 'km', v => Math.max(0.01, +v || 1));
+    const pm = $('#plMode'); if (pm) pm.addEventListener('change', () => { P.mode = pm.value; saveSoon(); renderPlanner(); draw(); });
+    const cp = $('#plCopy'); if (cp) cp.onclick = () => { navigator.clipboard.writeText(planText()).then(() => toast(t('plCopied'))).catch(() => alert(planText())); };
+    const fit = $('#plFit'); if (fit) fit.onclick = fitPlan;
+  }
+  function classHint(c) {
+    const k = c <= 0.5 ? 'cls05' : c <= 1 ? 'cls1' : c <= 2 ? 'cls2' : c <= 4 ? 'cls4' : 'cls10';
+    return ' – ' + t(k);
+  }
+  function planResultHtml(r) {
+    if (!r) return `<p class="hint">${esc(t('plEmpty'))}</p>`;
+    if (!r.ok) return `<p class="warn">${esc(r.error === 'notFound' ? t('plNotFound', r.missing.join(', ')) : t('plEmpty'))}</p>`;
+    return `
+      <div class="pl-total"><div class="big">${esc(dur(r.totalHours))}</div>
+        <div class="dim">${r.lightYears != null ? '≈ ' + r.lightYears.toLocaleString() + ' ' + esc(t('plLy')) : '≈ ' + r.km.toLocaleString() + ' km'}${r.jumps && state.world.type !== 'fantasy' ? ' · ' + r.jumps + ' ' + esc(t('plJumps')) : ''}${r.stayHours ? ' · ' + esc(t('plStayTotal')) + ' ' + esc(dur(r.stayHours)) : ''}</div></div>
+      <ol class="pl-legs">${r.legs.map(l => `<li><b>${esc(l.from)} → ${esc(l.to)}</b> <span class="dur">${esc(dur(l.hours))}</span>
+        ${l.lanes.length ? `<div class="dim">${esc(l.lanes.join(', '))}</div>` : ''}${l.offLaneShare > 0.5 ? `<div class="dim">${esc(t('plOffLane'))}</div>` : ''}
+        ${l.via.length ? `<div class="dim">${esc(t('plVia'))} ${esc(l.via.slice(0, 8).join(', '))}${l.via.length > 8 ? ' …' : ''}</div>` : ''}</li>`).join('')}</ol>
+      <div class="row"><button id="plFit">${esc(t('plShow'))}</button><button id="plCopy">${esc(t('plCopy'))}</button></div>
+      <p class="hint">${esc(t('plNote'))}</p>`;
+  }
+  function fitPlan() {
+    const r = state.plan; if (!r || !r.ok) return;
+    const pts = r.legs.flatMap(l => l.points); const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    state.view.cx = (x0 + x1) / 2; state.view.cy = (y0 + y1) / 2;
+    state.view.z = Math.max(0.2, Math.min(6, Math.min(W / (x1 - x0 + 160), H / (y1 - y0 + 160)))); draw();
+  }
+  $('#btnPlanner').addEventListener('click', () => { state.plannerOpen = !state.plannerOpen; state.pick = null; renderPlanner(); draw(); });
+
   function drawHover() {
     if (!state.hover || state.hover === state.selected) return;
     const o = objMap[state.hover]; if (!o || !visibleObj(o)) return;
@@ -587,6 +695,45 @@
       infCtx.globalAlpha = 0.85; infCtx.drawImage(off, 0, 0); infCtx.globalAlpha = 1;
     }
     if (any) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.drawImage(inf, 0, 0, canvas.width, canvas.height); }
+  }
+
+  // ------------------------------------------------------------- Territorien mit Grenzen
+  let terrCache = { key: '', rings: {}, paths: {} };
+  function territories() {
+    const e = era(); if (!e) return {};
+    const timed = state.tl.objects.filter(o => (o.from != null && o.from !== '') || (o.to != null && o.to !== '')).filter(existsNow).map(o => o.id).join(',');
+    const key = [state.tl.id, e.id, editVersion, state.world.id, timed].join('|');
+    if (terrCache.key === key) return terrCache.paths;
+    const fan = state.world.type === 'fantasy';
+    const points = [];
+    for (const [k, f] of Object.entries(e.control)) { const o = objMap[k]; if (!o || !existsNow(o)) continue; const r = rootOf(o); points.push({ x: r.x, y: r.y, f }); }
+    const zones = (e.zones || []).map(z => ({ f: z.faction, x: z.x, y: z.y, r: z.r, poly: z.poly }));
+    const bounds = fan ? { x0: 0, y0: 0, x1: FANTASY_SIZE.w, y1: FANTASY_SIZE.h } : { x0: 140, y0: 180, x1: 2160, y1: 2200 };
+    const inside = fan ? null : (x, y) => { const dx = x - GEO.center.x, dy = y - GEO.center.y, th = Math.atan2(dy, dx); return Math.hypot(dx, dy) / GEO.scale(th) <= GEO.edge * 1.02; };
+    const rings = window.IAM_TERRITORY.compute({ bounds, cell: 9, inside, regionAt: isSW() ? regionAt : null, regionClaims: isSW() ? (e.regionClaims || {}) : null,
+      factions: state.tl.factions, points, zones });
+    const paths = {};
+    for (const [fid, rs] of Object.entries(rings)) { const p = new Path2D(); for (const ring of rs) { ring.forEach(([x, y], i) => i ? p.lineTo(x, y) : p.moveTo(x, y)); p.closePath(); } paths[fid] = p; }
+    terrCache = { key, rings, paths };
+    return paths;
+  }
+  function drawTerritories() {
+    const paths = territories(), z = state.view.z, fan = fantasy();
+    worldTransform(ctx);
+    for (const f of state.tl.factions) {
+      const p = paths[f.id]; if (!p || state.hiddenFactions.has(f.id)) continue;
+      ctx.globalAlpha = fan ? 0.24 : 0.2; ctx.fillStyle = f.color; ctx.fill(p, 'evenodd');
+    }
+    ctx.globalAlpha = 1; ctx.lineJoin = 'round';
+    for (const f of state.tl.factions) {
+      const p = paths[f.id]; if (!p || state.hiddenFactions.has(f.id)) continue;
+      ctx.strokeStyle = fan ? 'rgba(40,25,10,0.55)' : 'rgba(0,0,0,0.55)'; ctx.lineWidth = 4 / z; ctx.stroke(p);
+    }
+    for (const f of state.tl.factions) {
+      const p = paths[f.id]; if (!p || state.hiddenFactions.has(f.id)) continue;
+      ctx.strokeStyle = f.color; ctx.lineWidth = 1.8 / z; ctx.globalAlpha = 0.95; ctx.stroke(p);
+    }
+    ctx.globalAlpha = 1;
   }
 
   function drawGrid() {
@@ -838,7 +985,9 @@
     if (trackDrag) { trackDrag = false; return; }
     if (!drag) return;
     const d = drag; drag = null; canvas.classList.remove('dragging');
-    if (d.kind === 'pan' && !d.moved && e.button === 0) { state.selected = d.hit ? d.hit.id : null; renderInfo(); draw(); }
+    if (d.kind === 'pan' && !d.moved && e.button === 0 && state.pick != null && d.hit) {
+      settings.planner.stops[state.pick] = d.hit.name; state.pick = null; saveSoon(); renderPlanner(); draw();
+    } else if (d.kind === 'pan' && !d.moved && e.button === 0) { state.selected = d.hit ? d.hit.id : null; renderInfo(); draw(); }
     else if (d.kind === 'move') {
       if (!d.moved) { state.undo.pop(); state.selected = d.hit.id; renderInfo(); draw(); }
       else { if (isSW()) d.obj.region = regionAt(d.obj.x, d.obj.y) || d.obj.region; state.selected = d.hit.id; afterEdit(); }
@@ -1054,6 +1203,7 @@
     const e = era(), eid = e ? e.id : null;
     renderYear();
     if (eid !== lastEraId) { lastEraId = eid; renderFactionFilter(); if (state.mode === 'edit') renderEditor(); }
+    if (state.plannerOpen) renderPlanner();
     renderInfo(); saveSoon(); draw();
   }
   function jumpEra(dir) {
@@ -1131,9 +1281,10 @@
   const descOf = o => o.desc || (canonObj(o) || {}).desc || '';
   // Beschreibungstext: Zeilenumbrüche, **fett**, *kursiv*
   const rich = txt => esc(txt).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<i>$2</i>');
-  function hasImage(o) { const b = biomeOf(o); return state.world.type === 'scifi' && (o.type === 'sun' || ((o.type === 'planet' || o.type === 'moon') && b && PL.BIOMES[b])); }
+  function hasImage(o) { if (o.image) return true; const b = biomeOf(o); return state.world.type === 'scifi' && (o.type === 'sun' || ((o.type === 'planet' || o.type === 'moon') && b && PL.BIOMES[b])); }
   function imgHtml(o) {
     if (!hasImage(o)) return '';
+    if (o.image) return `<figure class="planet-img own"><img src="${esc(o.image)}" alt=""><figcaption>${esc(t('imgOwn'))}</figcaption></figure>`;
     return `<figure class="planet-img"><img src="${PL.render(o, biomeOf(o) || 'barren')}" alt=""><figcaption>${esc(t('imgNote'))}</figcaption></figure>`;
   }
   function tempText(o, ownOnly) {
@@ -1205,6 +1356,7 @@
       <label class="field"><span>${esc(t('description'))}</span><textarea id="oDesc">${esc(o.desc || '')}</textarea></label>
       <h3 class="facts-h">${esc(t('facts'))}</h3>
       ${imgHtml(o)}
+      <div class="row" style="margin-bottom:8px"><button id="imgUp">🖼 ${esc(t(o.image ? 'imgChange' : 'imgUpload'))}</button>${o.image ? `<button id="imgDel" class="fixed danger">✕</button>` : ''}<input type="file" id="imgFile" accept="image/*" hidden></div>
       ${state.world.type === 'scifi' && (o.type === 'planet' || o.type === 'moon') ? `<label class="field"><span>${esc(t('biome'))}</span><select id="oBiome"><option value="">${esc(canonObj(o) && canonObj(o).biome ? t('biomeCanon', t('biomes.' + canonObj(o).biome)) : t('biomeUnknown'))}</option>${PL.keys.map(k => `<option value="${k}" ${k === o.biome ? 'selected' : ''}>${esc(t('biomes.' + k))}</option>`).join('')}</select></label>` : ''}
       <label class="field"><span>${esc(t('temp'))}</span><input id="fTemp" value="${esc((o.facts || {}).temp || '')}" placeholder="${esc(tempText(o) || t('tempPh'))}"></label>
       ${FACT_KEYS.map(k => `<label class="field"><span>${esc(t(k))}</span><input data-fact="${k}" value="${esc((o.facts || {})[k] || '')}" placeholder="${esc(((canonObj(o) || {}).facts || {})[k] || '')}"></label>`).join('')}
@@ -1229,6 +1381,20 @@
     bind('#oTo', 'change', ev => { mark(); o.to = ev.target.value === '' ? null : +ev.target.value; afterEdit(); });
     bind('#oDesc', 'input', ev => { mark(); o.desc = ev.target.value; saveSoon(); });
     const facts = () => (o.facts ||= {});
+    bind('#imgUp', 'click', () => $('#imgFile').click());
+    bind('#imgFile', 'change', ev => {
+      const file = ev.target.files[0]; if (!file) return;
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => {
+        const max = 512, sc = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        mark(); o.image = c.toDataURL('image/jpeg', 0.85); renderInfo(); saveSoon();
+      };
+      img.onerror = () => alert(t('imgError'));
+      img.src = url;
+    });
+    const idl = $('#imgDel'); if (idl) idl.addEventListener('click', () => { mark(); delete o.image; renderInfo(); saveSoon(); });
     const ob = $('#oBiome'); if (ob) ob.addEventListener('change', ev => { mark(); o.biome = ev.target.value || null; renderInfo(); saveSoon(); });
     bind('#fTemp', 'change', ev => { mark(); facts().temp = ev.target.value.trim() || undefined; saveSoon(); });
     $$('#info [data-fact]').forEach(el => el.addEventListener('change', ev => { mark(); facts()[el.dataset.fact] = ev.target.value.trim() || undefined; saveSoon(); }));
@@ -1602,6 +1768,8 @@
         <div class="seg">${Object.entries(window.I18N.langs).map(([k, n]) => `<button data-lang="${k}" class="${settings.lang === k ? 'active' : ''}">${esc(n)}</button>`).join('')}</div></section>
       <section class="card"><h3>${esc(t('theme'))}</h3>
         <div class="seg">${['auto', 'scifi', 'fantasy'].map(k => `<button data-theme="${k}" class="${settings.theme === k ? 'active' : ''}">${esc(t(k === 'auto' ? 'themeAuto' : k === 'scifi' ? 'themeScifi' : 'themeFantasy'))}</button>`).join('')}</div></section>
+      <section class="card"><h3>${esc(t('terrStyle'))}</h3>
+        <div class="seg">${['borders', 'bubbles'].map(k => `<button data-terr="${k}" class="${settings.terrStyle === k ? 'active' : ''}">${esc(t(k === 'borders' ? 'terrBorders' : 'terrBubbles'))}</button>`).join('')}</div></section>
       <section class="card"><h3>${esc(t('updates'))}</h3>
         <div class="kv"><span class="k">${esc(t('currentVersion'))}</span><span><b>${esc(info.version)}</b></span></div>
         ${FS && FS.server ? `<p class="hint">${esc(t('updDocker'))}</p>` : `<label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
@@ -1629,6 +1797,7 @@
     $('#setBack').addEventListener('click', () => setMode('view'));
     const lo = $('#setLogout'); if (lo) lo.addEventListener('click', () => FS.logout().then(() => location.reload()));
     $$('[data-lang]').forEach(b => b.addEventListener('click', () => setLang(b.dataset.lang)));
+    $$('.seg [data-terr]').forEach(b => b.addEventListener('click', () => { settings.terrStyle = b.dataset.terr; saveSoon(); renderSettings(); draw(); }));
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
     if ($('#setAuto')) { $('#setAuto').addEventListener('change', e => { settings.autoUpdate = e.target.checked; saveSoon(); }); $('#setCheck').addEventListener('click', () => checkUpdates(true)); }
     $('#setReleases').addEventListener('click', e => { e.preventDefault(); window.open(APP_REPO, '_blank'); });
@@ -1707,11 +1876,12 @@
   $('#zoomFit').addEventListener('click', fitView);
 
   // ------------------------------------------------------------- Gesamt-Render
-  function afterEdit(full) { rebuildTree(); if (full) renderAll(true); else { renderFactionFilter(); renderInfo(); renderYear(); updateToolHint(); draw(); } saveSoon(); }
+  function afterEdit(full) { editVersion++; rebuildTree(); if (full) renderAll(true); else { renderFactionFilter(); renderInfo(); renderYear(); updateToolHint(); draw(); } saveSoon(); }
   function renderAll() {
+    editVersion++;
     rebuildTree();
     document.body.classList.toggle('is-sw', isSW());
-    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo();
+    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner();
     lastEraId = era() ? era().id : null; renderYear(); updateToolHint(); draw();
   }
 

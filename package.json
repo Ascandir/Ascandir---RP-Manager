@@ -1,7 +1,7 @@
 {
   "name": "ascandir-interactivemap",
   "productName": "Ascandir InteractiveMap",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Interaktive Karte für Star Wars und eigene Welten – mit Zeitaltern, Fraktionen und eigenen Zeitlinien",
   "main": "main.js",
   "author": "Ascandir",

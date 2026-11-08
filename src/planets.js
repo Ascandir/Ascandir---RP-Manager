@@ -25,6 +25,7 @@
     toxic:     { stops: [[0, '#3a3a10'], [0.4, '#6d6a1c'], [0.7, '#9da433'], [1, '#d0d77a']], clouds: 0.5, cloudColor: '210,220,120', atmo: 'rgba(200,230,90,', temp: [20, 70] },
     crystal:   { stops: [[0, '#2a2f6a'], [0.4, '#4b5bb0'], [0.7, '#8fa4e8'], [1, '#e2e8ff']], sparkle: true, clouds: 0.15, atmo: 'rgba(170,180,255,', temp: [-40, 20] },
     storm:     { stops: [[0, '#14161c'], [0.45, '#2a2d36'], [0.7, '#43474f'], [1, '#6a6e78']], clouds: 0.7, cloudColor: '120,125,140', lightning: true, atmo: 'rgba(140,150,200,', temp: [-20, 20] },
+    neon:      { stops: [[0, '#1c1a22'], [0.5, '#34313c'], [0.8, '#4a4652'], [1, '#6a6570']], lights: true, neon: true, clouds: 0.35, cloudColor: '150,140,105', atmo: 'rgba(255,140,220,', temp: [15, 35] },
     machine:   { stops: [[0, '#2b3036'], [0.5, '#4a525c'], [0.8, '#6e7884'], [1, '#9aa4ae']], lights: true, grid: true, clouds: 0, atmo: 'rgba(140,220,255,', temp: [-50, 50] }
   };
   const PICK = ['desert', 'ice', 'ocean', 'forest', 'jungle', 'swamp', 'grassland', 'mountains', 'barren', 'tundra', 'volcanic', 'toxic', 'gas'];
@@ -109,6 +110,7 @@
       let light = Math.max(0, ndl) * 0.95 + 0.06;
       let r = col[0] * light, gr = col[1] * light, b = col[2] * light;
       if (B.glow) { const n2 = noise(sx * 3 + 9, yt * 3, sz * 3); if (n2 < 0.38) { const k = (0.38 - n2) * 4; r += 255 * k; gr += 90 * k; b += 10 * k; } }
+      if (B.neon) { const n4 = noise(sx * 30, yt * 30, sz * 30, 2); if (n4 > 0.6) { const k = Math.min(1, (n4 - 0.6) * 4) * (ndl < 0.1 ? 1 : 0.18); const hue = noise(sx * 6 + 7, yt * 6, sz * 6, 1); const c = hue < 0.4 ? [255, 60, 200] : hue < 0.6 ? [60, 220, 255] : [255, 190, 60]; r += c[0] * k; gr += c[1] * k; b += c[2] * k; } }
       if (B.lights && ndl < 0.15) { const n3 = noise(sx * 25, yt * 25, sz * 25, 2); if (n3 > 0.55) { const k = Math.min(1, (n3 - 0.55) * 4) * Math.min(1, (0.15 - ndl) * 4); r += 255 * k; gr += 200 * k; b += 110 * k; } }
       // Wolken
       if (B.clouds) {

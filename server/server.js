@@ -51,11 +51,12 @@ const loginAttempts = new Map();
 const sandbox = { window: {}, navigator: { language: 'de' }, console };
 sandbox.window.window = sandbox.window;
 vm.createContext(sandbox);
-for (const f of ['i18n.js', 'worlds/starwars.js', 'worlds/starwars-facts.js']) {
+for (const f of ['i18n.js', 'worlds/starwars.js', 'worlds/starwars-facts.js', 'travel.js']) {
   vm.runInContext(fs.readFileSync(path.join(SRC_DIR, f), 'utf8'), sandbox, { filename: f });
 }
 const SW = sandbox.window.IAM_WORLDS.starwars;
 const I18N = sandbox.window.I18N;
+const TRAVEL = sandbox.window.IAM_TRAVEL;
 
 // ---------------------------------------------------------------- Hilfen
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -342,6 +343,7 @@ function openApi(req) {
     paths: {
       '/api/v1/timelines': { get: { operationId: 'listTimelines', summary: 'Alle Zeitlinien mit ihren Zeitaltern', parameters: [qp('world', 'Welt-ID'), lP], responses: ok } },
       '/api/v1/summary': { get: { operationId: 'getSummary', summary: 'Kurzer Text zum Zustand in einem Jahr (Zeitalter, Mächte, optional Orte)', parameters: [tlP, yP, lP, { name: 'place', in: 'query', description: 'Ortsname (mehrfach möglich)', schema: { type: 'array', items: { type: 'string' } }, style: 'form', explode: true }], responses: ok } },
+      '/api/v1/travel': { get: { operationId: 'planTravel', summary: 'Reisezeit und Route zwischen Orten berechnen (bevorzugt Hyperraumrouten)', parameters: [qp('from', 'Start', 'Nar Shaddaa', true), qp('to', 'Ziel', 'Dromund Kaas', true), { name: 'via', in: 'query', description: 'Zwischenstopps (mehrfach möglich)', schema: { type: 'array', items: { type: 'string' } }, style: 'form', explode: true }, qp('class', 'Hyperantrieb-Klasse, z.B. 0.5, 1, 2', '1'), qp('stay', 'Aufenthalt pro Zwischenstopp in Stunden', '0'), tlP, yP, lP, qp('format', '"text" für reinen Text')], responses: ok } },
       '/api/v1/state': { get: { operationId: 'getState', summary: 'Zeitalter und Fraktionen mit Gebieten in einem Jahr (JSON)', parameters: [tlP, yP, lP], responses: ok } },
       '/api/v1/place': {
         get: { operationId: 'getPlace', summary: 'Eckdaten und Kontrolle eines Ortes', parameters: [qp('name', 'Ortsname', 'Tatooine', true), tlP, yP, lP], responses: ok },
@@ -380,6 +382,7 @@ async function apiV1(req, res, url) {
       'GET /api/v1/place?name=&timeline=&year=&lang=': 'Eckdaten und Kontrolle eines Ortes im Jahr',
       'GET /api/v1/search?q=&timeline=': 'Orte suchen',
       'GET /api/v1/summary?timeline=&year=&place=&place=&lang=&max=': 'Fertiger Text für den KI-Kontext (text/plain)',
+      'GET /api/v1/travel?from=&to=&via=&class=&stay=&timeline=&year=&format=text': 'Reiseplaner: Route und Reisezeit (Hyperantrieb-Klasse)',
       'GET /api/v1/openapi.json': 'OpenAPI-Beschreibung (z.B. für ChatGPT-Actions)',
       'POST /api/v1/timeline/copy': 'Zeitlinie kopieren (Schreibzugriff mit IAM_API_TOKEN)',
       'POST /api/v1/place | DELETE /api/v1/place': 'Ort anlegen/ändern/löschen',
@@ -408,6 +411,19 @@ async function apiV1(req, res, url) {
   if (ep === 'search') {
     const t = tl(), qq = (q.get('q') || '').toLowerCase();
     return send(res, 200, t.objects.filter(o => !qq || o.name.toLowerCase().includes(qq)).slice(0, 100).map(o => ({ id: o.id, name: o.name, type: o.type, region: o.region || null, sector: o.sector || null })));
+  }
+  if (ep === 'travel') {
+    const t = tl(), y = year(t), stops = [q.get('from')].concat(q.getAll('via'), [q.get('to')]).filter(Boolean);
+    const wtype = (allWorlds(lang).find(w => w.id === t.world) || {}).type || 'scifi';
+    const r = TRAVEL.plan(t, { stops, year: y, worldType: wtype, hyperClass: +q.get('class') || 1, stayHours: +q.get('stay') || 0, mode: q.get('mode') || 'horse', kmPerUnit: +q.get('km') || 1 });
+    if (!r.ok) return send(res, r.error === 'notFound' ? 404 : 400, r);
+    const de = lang !== 'en', d = h => TRAVEL.fmtDuration(h, lang);
+    const text = [`${de ? 'Reise' : 'Journey'}: ${r.stops.join(' → ')}`]
+      .concat(r.legs.map((l, i) => `${i + 1}. ${l.from} → ${l.to}: ${d(l.hours)}${l.lanes.length ? ' (' + l.lanes.join(', ') + ')' : ''}${l.via.length ? (de ? ' über ' : ' via ') + l.via.join(', ') : ''}`))
+      .concat([`${de ? 'Gesamt' : 'Total'}: ${d(r.totalHours)}${r.lightYears != null ? ` · ≈ ${r.lightYears.toLocaleString(de ? 'de-DE' : 'en-US')} ${de ? 'Lichtjahre' : 'light-years'}` : ` · ≈ ${r.km.toLocaleString(de ? 'de-DE' : 'en-US')} km`}${r.hyperClass ? ` · ${de ? 'Hyperantrieb Klasse' : 'hyperdrive class'} ${r.hyperClass}` : ''}`]).join('\n');
+    if (q.get('format') === 'text') return send(res, 200, text, 'text/plain; charset=utf-8');
+    r.legs.forEach(l => { delete l.points; l.duration = d(l.hours); });
+    return send(res, 200, Object.assign({ year: y, totalDuration: d(r.totalHours), text }, r));
   }
   if (ep === 'summary') {
     const t = tl(), y = year(t);

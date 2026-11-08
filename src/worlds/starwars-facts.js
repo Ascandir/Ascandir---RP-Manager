@@ -102,7 +102,7 @@
     geonosis: 'reddesert', ryloth: 'desert', rodia: 'jungle', christophsis: 'crystal', hoth: 'ice', bespin: 'gas', dagobah: 'swamp', mustafar: 'volcanic',
     eriadu: 'city', sullust: 'volcanic', utapau: 'barren', crait: 'salt', endor: 'gas', endormoon: 'forest', kefbir: 'ocean', yavin: 'gas', yavin4: 'jungle',
     mandalore: 'desert', concordia: 'barren', dathomir: 'redforest', felucia: 'jungle', moncala: 'ocean', dantooine: 'grassland', mygeeto: 'crystal',
-    muunilinst: 'city', kessel: 'barren', lothal: 'grassland', lothalmoon: 'barren', scarif: 'islands', kamino: 'ocean', nalhutta: 'swamp', narshaddaa: 'city',
+    muunilinst: 'city', kessel: 'barren', lothal: 'grassland', lothalmoon: 'barren', scarif: 'islands', kamino: 'ocean', nalhutta: 'swamp', narshaddaa: 'neon',
     ilum: 'ice', ahchto: 'islands', exegol: 'storm', csilla: 'ice', naporar: 'tundra', rhigar: 'ice', korriban: 'reddesert', dromundkaas: 'jungle', ziost: 'tundra',
     taris: 'city', balmorra: 'grassland', belsavis: 'ice', voss: 'mountains', quesh: 'toxic', makeb: 'mountains', rishi: 'islands', oricon: 'volcanic',
     odessen: 'forest', zakuul: 'city', iokath: 'machine', ossus: 'forest', onderon: 'jungle', dxun: 'jungle', umbara: 'storm', thyferra: 'jungle', fondor: 'city',

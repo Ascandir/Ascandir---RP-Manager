@@ -224,3 +224,18 @@ body[data-theme="fantasy"] #toolHint { background: #f7edd6ee; color: #8b1e1e; bo
 .notable { margin-top: 8px; }
 #btnLogin { background: var(--accent); color: #1a1205; border-color: var(--accent); font-weight: 600; }
 [hidden] { display: none !important; }
+
+/* Reiseplaner */
+.planner-btn { font-weight: 600; }
+#planner { padding: 12px 14px; }
+.pl-row { display: flex; gap: 6px; align-items: center; margin-bottom: 5px; }
+.pl-row input { flex: 1; min-width: 0; }
+.pl-row.picking input { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.pl-dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: #f5b83d; color: #0b111c; flex: none; }
+.pl-dot.a { background: #3ddc84; } .pl-dot.z { background: #ff5a5a; }
+.pl-total { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.pl-total .big { font-size: 20px; font-weight: 700; color: var(--accent); }
+.pl-legs { padding-left: 20px; margin: 8px 0; }
+.pl-legs li { margin-bottom: 8px; }
+.pl-legs .dur { float: right; color: var(--accent2); font-weight: 600; }
+.planet-img.own img { object-fit: cover; }

@@ -44,9 +44,18 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
   - **Fantasy:** Pergamentkarte mit Hauptstädten, Städten, Dörfern, Festungen und Wahrzeichen
 - Das Design passt sich automatisch an den Welttyp an.
 
+### Territorien
+
+Gebiete werden als echte Territorien mit Grenzlinien dargestellt: Jeder Bereich gehört der Fraktion mit dem nächstgelegenen kontrollierten Ort (Reichweite je Fraktion einstellbar), beanspruchte Regionen und gemalte Gebiete fließen mit ein. Wo zwei Mächte aufeinandertreffen, entsteht eine klare Grenze. Der alte Stil mit Einfluss-Blasen ist unter *Einstellungen → Darstellung der Gebiete* wählbar.
+
+### Reiseplaner
+
+*🧭 Reiseplaner* (links oben) plant eine Route wie ein Navi: Start, Ziel und beliebig viele Zwischenstopps eintippen oder mit 📍 auf der Karte wählen, dazu Hyperantrieb-Klasse (0,5 bis 20) und Aufenthalt pro Stopp. Hyperraumrouten werden bevorzugt, abseits davon geht es langsamer. Ergebnis: Gesamtdauer, Lichtjahre, Sprünge und jede Etappe mit Route; die Strecke wird auf der Karte eingezeichnet und lässt sich als Text kopieren. In Fantasy-Welten wählt man stattdessen die Reiseart (zu Fuß, Pferd, Kutsche, Schiff, Flugtier) und den Maßstab (km je Karteneinheit).
+Die Zeiten sind eine spielfreundliche Schätzung (Klasse 1 auf einer Hauptroute ≈ 225 Karteneinheiten ≈ 11.700 Lichtjahre pro Tag).
+
 ### Eckdaten und Planetenbilder
 
-Ein Klick auf einen Ort zeigt rechts seine Eckdaten: Biom, Temperatur, Bevölkerung, Klima, Gelände, Bewohner, Hauptort und Besonderheiten. Für die bekannten Star-Wars-Welten sind sie vorausgefüllt (angenähert; Kanon und Legends weichen teils ab). Planeten und Monde zeigen ein **automatisch erzeugtes Bild passend zum Biom** (Wüste, Eis, Ozean, Dschungel, Vulkan, Gasriese, Stadtplanet usw.). Das ist eine künstlerische Darstellung, keine offizielle Abbildung. Im Editor kannst du Biom, Temperatur und alle Eckdaten ändern und eigene Zeilen ergänzen, etwa „Herrscher“ oder „Handelsgüter“.
+Ein Klick auf einen Ort zeigt rechts seine Eckdaten: Biom, Temperatur, Bevölkerung, Klima, Gelände, Bewohner, Hauptort und Besonderheiten. Für die bekannten Star-Wars-Welten sind sie vorausgefüllt (angenähert; Kanon und Legends weichen teils ab). Planeten und Monde zeigen ein **automatisch erzeugtes Bild passend zum Biom** (Wüste, Eis, Ozean, Dschungel, Vulkan, Gasriese, Stadtplanet usw.). Das ist eine künstlerische Darstellung, keine offizielle Abbildung. Im Editor kannst du Biom, Temperatur und alle Eckdaten ändern und eigene Zeilen ergänzen, etwa „Herrscher“ oder „Handelsgüter“, und **ein eigenes Bild hochladen** (wird auf 512 px verkleinert und in der Zeitlinie gespeichert). Bei Zeitlinien, die vor Version 0.3 kopiert wurden, ergänzt die App fehlende Eckdaten automatisch aus dem Kanon.
 
 ### Zeitalter und Jahre
 
@@ -148,6 +157,7 @@ Lesende Aufrufe sind bei `IAM_PUBLIC_VIEW=true` ohne Schlüssel möglich, sonst 
 | `GET /api/v1/summary?year=3640 BBY&timeline=Meine Zeitlinie&place=Tatooine&lang=de` | **Fertigen Text** für den KI-Kontext: Jahr, Zeitalter, Mächte mit Gebieten, Eckdaten zu den genannten Orten |
 | `GET /api/v1/state?year=…` | dasselbe als JSON |
 | `GET /api/v1/place?name=Dromund Kaas&year=…` | Eckdaten und Kontrolle eines Ortes |
+| `GET /api/v1/travel?from=Nar Shaddaa&to=Dromund Kaas&via=Taris&class=1.5&format=text` | Reiseplaner: Route und Reisezeit |
 | `GET /api/v1/search?q=…` · `/timelines` · `/worlds` · `/timeline` | Suche, Listen, komplette Zeitlinie |
 
 Jahre gehen als `3640 VSY`, `3640 BBY`, `-3640` oder `4 NSY`. Ohne `timeline` wird die Kanon-Zeitlinie genutzt. In der App unter *Einstellungen → API für Story-KI* steht die passende Adresse für dein aktuelles Jahr.
