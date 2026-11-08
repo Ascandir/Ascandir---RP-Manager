@@ -350,11 +350,11 @@ lwotil|Sarvchi|C8|ur|Chiss
 
   // Sonnen (Planet wird Kind der Sonne)
   const SUNS = [['tatoo1', 'Tatoo I', 'tatooine'], ['tatoo2', 'Tatoo II', 'tatooine'], ['coruscantprime', 'Coruscant Prime', 'coruscant'],
-    ['corell', 'Corell', 'corellia'], ['yavinprime', 'Yavin Prime', 'yavin'], ['hothstar', 'Hoth', 'hoth'], ['kesselstar', 'Kessel', 'kessel'],
-    ['endorstar', 'Endor I', 'endor'], ['alderaanstar', 'Alderaan', 'alderaan'], ['nabooStar', 'Naboo', 'naboo']];
-  for (const [id, name, pid] of SUNS) {
-    const p = byId[pid];
-    add({ id, name, type: 'sun', x: p.x, y: p.y, region: p.region, sector: p.sector, desc: '', descEn: '', parent: null, from: null, to: null });
+    ['corell', 'Corell', 'corellia'], ['yavinprime', 'Yavin Prime', 'yavin'], ['hothstar', 'Hoth (Stern)/Hoth (star)', 'hoth'], ['kesselstar', 'Kessel (Stern)/Kessel (star)', 'kessel'],
+    ['endorstar', 'Endor I', 'endor'], ['alderaanstar', 'Alderaan (Stern)/Alderaan (star)', 'alderaan'], ['nabooStar', 'Naboo (Stern)/Naboo (star)', 'naboo']];
+  for (const [id, nm, pid] of SUNS) {
+    const p = byId[pid]; const [name, nameEn] = nm.split('/');
+    add({ id, name, nameEn: nameEn || name, type: 'sun', x: p.x, y: p.y, region: p.region, sector: p.sector, desc: '', descEn: '', parent: null, from: null, to: null });
   }
   byId.tatooine.parent = 'tatoo1'; byId.tatoo2.parent = 'tatoo1';
   byId.coruscant.parent = 'coruscantprime'; byId.corellia.parent = 'corell'; byId.yavin.parent = 'yavinprime';

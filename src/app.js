@@ -71,12 +71,13 @@
     if (y == null || y === '' || isNaN(y)) return '–';
     y = Math.round(+y);
     const f = yearFmt();
-    if (y < 0 && f.neg) return `${(-y).toLocaleString()} ${f.neg}`;
-    if (y >= 0 && f.pos) return `${y.toLocaleString()} ${f.pos}`;
-    return y.toLocaleString();
+    const loc = window.I18N.lang === 'en' ? 'en-US' : 'de-DE';
+    if (y < 0 && f.neg) return `${(-y).toLocaleString(loc)} ${f.neg}`;
+    if (y >= 0 && f.pos) return `${y.toLocaleString(loc)} ${f.pos}`;
+    return y.toLocaleString(loc);
   }
   function parseYear(str) {
-    const s = String(str).trim().replace(/[.\s](?=\d{3}\b)/g, '');
+    const s = String(str).trim().replace(/[.,\s](?=\d{3}\b)/g, '');
     const m = s.match(/^([+-]?\d+)\s*(.*)$/); if (!m) return null;
     let n = parseInt(m[1], 10);
     const suf = m[2].trim().toLowerCase();
@@ -1068,7 +1069,14 @@
   }
   $('#yearInput').addEventListener('keydown', e => { if (e.key === 'Enter') { const y = parseYear(e.target.value); if (y != null) { setYear(y); fitTrack(); } e.target.blur(); } else if (e.key === 'Escape') e.target.blur(); });
   $('#yearInput').addEventListener('blur', e => { const y = parseYear(e.target.value); if (y != null && y !== state.year) setYear(y); else renderYear(); });
-  $('#yearInput').addEventListener('wheel', e => { e.preventDefault(); setYear(state.year + (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 10 : 1)); }, { passive: false });
+  let yearWheelAcc = 0;
+  $('#yearInput').addEventListener('wheel', e => {
+    if (document.activeElement !== e.target) return; // nur wenn das Feld angeklickt ist
+    e.preventDefault(); yearWheelAcc += e.deltaY;
+    if (Math.abs(yearWheelAcc) < 60) return; // Touchpads liefern viele kleine Schritte
+    const steps = Math.trunc(yearWheelAcc / 60); yearWheelAcc -= steps * 60;
+    setYear(state.year - steps * (e.shiftKey ? 10 : 1));
+  }, { passive: false });
   $('#yearPrev').addEventListener('click', e => setYear(state.year - (e.shiftKey ? 10 : 1)));
   $('#yearNext').addEventListener('click', e => setYear(state.year + (e.shiftKey ? 10 : 1)));
   $('#eraPrev').addEventListener('click', () => jumpEra(-1));
@@ -1107,20 +1115,33 @@
   // ------------------------------------------------------------- Eckdaten & Bild
   const PL = window.IAM_PLANETS;
   const FACT_KEYS = ['pop', 'climate', 'terrain', 'species', 'capital'];
-  function hasImage(o) { return state.world.type === 'scifi' && (o.type === 'sun' || ((o.type === 'planet' || o.type === 'moon') && o.biome && PL.BIOMES[o.biome])); }
+  // Für Star-Wars-Zeitlinien: fehlende Angaben aus dem Kanon ergänzen (eigene Angaben haben Vorrang)
+  let canonCache = null;
+  function canonObj(o) {
+    if (state.world.id !== 'starwars' || state.tl.id === 'canon') return null;
+    const c = state.timelines.find(x => x.id === 'canon'); if (!c) return null;
+    if (!canonCache || canonCache.tl !== c) canonCache = { tl: c, map: Object.fromEntries(c.objects.map(x => [x.id, x])) };
+    return canonCache.map[o.id] || null;
+  }
+  const biomeOf = o => o.biome || (canonObj(o) || {}).biome || null;
+  const factsOf = o => Object.assign({}, (canonObj(o) || {}).facts || {}, o.facts || {});
+  const descOf = o => o.desc || (canonObj(o) || {}).desc || '';
+  // Beschreibungstext: Zeilenumbrüche, **fett**, *kursiv*
+  const rich = txt => esc(txt).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<i>$2</i>');
+  function hasImage(o) { const b = biomeOf(o); return state.world.type === 'scifi' && (o.type === 'sun' || ((o.type === 'planet' || o.type === 'moon') && b && PL.BIOMES[b])); }
   function imgHtml(o) {
     if (!hasImage(o)) return '';
-    return `<figure class="planet-img"><img src="${PL.render(o, o.biome || 'barren')}" alt=""><figcaption>${esc(t('imgNote'))}</figcaption></figure>`;
+    return `<figure class="planet-img"><img src="${PL.render(o, biomeOf(o) || 'barren')}" alt=""><figcaption>${esc(t('imgNote'))}</figcaption></figure>`;
   }
-  function tempText(o) {
-    const f = o.facts || {};
+  function tempText(o, ownOnly) {
+    const f = ownOnly ? (o.facts || {}) : factsOf(o);
     if (f.temp) return f.temp;
-    const b = o.biome && PL.BIOMES[o.biome];
+    const bk = biomeOf(o), b = bk && PL.BIOMES[bk];
     return b && b.temp && o.type !== 'sun' ? t('tempTypical', b.temp[0], b.temp[1]) : '';
   }
   function factsRows(o) {
-    const f = o.facts || {}, rows = [];
-    if (o.biome && PL.BIOMES[o.biome]) rows.push([t('biome'), t('biomes.' + o.biome)]);
+    const f = factsOf(o), rows = [], bk = biomeOf(o);
+    if (bk && PL.BIOMES[bk]) rows.push([t('biome'), t('biomes.' + bk)]);
     const tt = tempText(o); if (tt) rows.push([t('temp'), tt]);
     for (const k of FACT_KEYS) if (f[k]) rows.push([t(k), f[k]]);
     for (const [l, v] of (f.extra || [])) if (l || v) rows.push([l, v]);
@@ -1151,9 +1172,9 @@
           ${kids.length ? `<span class="k">${esc(t('contains'))}</span><span>${kids.map(k => `<a href="#" data-go="${esc(k.id)}">${esc(k.name)}</a>`).join(', ')}</span>` : ''}
           ${(o.from != null && o.from !== '') || (o.to != null && o.to !== '') ? `<span class="k">${esc(t('exists'))}</span><span>${fmtYear(o.from)} ${esc(t('to'))} ${fmtYear(o.to)}</span>` : ''}
         </div>
-        <p>${esc(o.desc || '')}</p>
+        <div class="desc">${rich(descOf(o))}</div>
         ${factsRows(o) ? `<h3 class="facts-h">${esc(t('facts'))}</h3><div class="kv facts">${factsRows(o)}</div>` : ''}
-        ${o.facts && o.facts.notable ? `<p class="notable"><b>${esc(t('notable'))}:</b> ${esc(o.facts.notable)}</p>` : ''}`;
+        ${factsOf(o).notable ? `<div class="notable"><b>${esc(t('notable'))}:</b> ${rich(factsOf(o).notable)}</div>` : ''}`;
       box.querySelectorAll('[data-go]').forEach(a => a.addEventListener('click', ev => { ev.preventDefault(); centerOn(objMap[a.dataset.go]); }));
       return;
     }
@@ -1180,10 +1201,10 @@
       <label class="field"><span>${esc(t('description'))}</span><textarea id="oDesc">${esc(o.desc || '')}</textarea></label>
       <h3 class="facts-h">${esc(t('facts'))}</h3>
       ${imgHtml(o)}
-      ${state.world.type === 'scifi' && (o.type === 'planet' || o.type === 'moon') ? `<label class="field"><span>${esc(t('biome'))}</span><select id="oBiome"><option value="">${esc(t('biomeUnknown'))}</option>${PL.keys.map(k => `<option value="${k}" ${k === o.biome ? 'selected' : ''}>${esc(t('biomes.' + k))}</option>`).join('')}</select></label>` : ''}
-      <label class="field"><span>${esc(t('temp'))}</span><input id="fTemp" value="${esc((o.facts || {}).temp || '')}" placeholder="${esc(tempText(Object.assign({}, o, { facts: {} })) || t('tempPh'))}"></label>
-      ${FACT_KEYS.map(k => `<label class="field"><span>${esc(t(k))}</span><input data-fact="${k}" value="${esc((o.facts || {})[k] || '')}"></label>`).join('')}
-      <label class="field"><span>${esc(t('notable'))}</span><textarea data-fact="notable">${esc((o.facts || {}).notable || '')}</textarea></label>
+      ${state.world.type === 'scifi' && (o.type === 'planet' || o.type === 'moon') ? `<label class="field"><span>${esc(t('biome'))}</span><select id="oBiome"><option value="">${esc(canonObj(o) && canonObj(o).biome ? t('biomeCanon', t('biomes.' + canonObj(o).biome)) : t('biomeUnknown'))}</option>${PL.keys.map(k => `<option value="${k}" ${k === o.biome ? 'selected' : ''}>${esc(t('biomes.' + k))}</option>`).join('')}</select></label>` : ''}
+      <label class="field"><span>${esc(t('temp'))}</span><input id="fTemp" value="${esc((o.facts || {}).temp || '')}" placeholder="${esc(tempText(o) || t('tempPh'))}"></label>
+      ${FACT_KEYS.map(k => `<label class="field"><span>${esc(t(k))}</span><input data-fact="${k}" value="${esc((o.facts || {})[k] || '')}" placeholder="${esc(((canonObj(o) || {}).facts || {})[k] || '')}"></label>`).join('')}
+      <label class="field"><span>${esc(t('notable'))}</span><textarea data-fact="notable" placeholder="${esc(((canonObj(o) || {}).facts || {}).notable || '')}">${esc((o.facts || {}).notable || '')}</textarea></label>
       <div id="factExtra">${((o.facts || {}).extra || []).map(([l, v], i) => `<div class="row extra" data-i="${i}"><input class="exL" placeholder="${esc(t('factLabel'))}" value="${esc(l)}"><input class="exV" placeholder="${esc(t('factValue'))}" value="${esc(v)}"><button class="exDel fixed">✕</button></div>`).join('')}</div>
       <button id="addFact" style="margin:4px 0 8px">${esc(t('addFact'))}</button>
       <p class="hint">${esc(t('factsHint'))}</p>

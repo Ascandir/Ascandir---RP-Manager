@@ -219,3 +219,6 @@ body[data-theme="fantasy"] #toolHint { background: #f7edd6ee; color: #8b1e1e; bo
 #setUpdStatus { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 #setUpdStatus .bar { width: 220px; height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; }
 #setUpdStatus .bar i { display: block; height: 100%; background: var(--accent); }
+.desc, .notable { white-space: pre-line; line-height: 1.45; overflow-wrap: anywhere; }
+.desc { margin: 8px 0; }
+.notable { margin-top: 8px; }

@@ -136,6 +136,9 @@ function snapshot(tl, year, lang) {
 }
 function placeInfo(tl, o, year, lang, snap) {
   const { f, byId, controller, regionName } = snap || snapshot(tl, year, lang);
+  // fehlende Angaben in Star-Wars-Zeitlinien aus dem Kanon ergänzen
+  const c = tl.world === 'starwars' && tl.id !== 'canon' ? SW.canonTimeline(lang).objects.find(x => x.id === o.id) : null;
+  if (c) o = Object.assign({}, o, { desc: o.desc || c.desc, biome: o.biome || c.biome, facts: Object.assign({}, c.facts || {}, o.facts || {}) });
   const fac = controller(o);
   const kids = tl.objects.filter(x => x.parent === o.id && exists(x, year)).map(x => x.name);
   return {
