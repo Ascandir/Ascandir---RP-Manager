@@ -44,6 +44,10 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
   - **Fantasy:** Pergamentkarte mit Hauptstädten, Städten, Dörfern, Festungen und Wahrzeichen
 - Das Design passt sich automatisch an den Welttyp an.
 
+### Eckdaten und Planetenbilder
+
+Ein Klick auf einen Ort zeigt rechts seine Eckdaten: Biom, Temperatur, Bevölkerung, Klima, Gelände, Bewohner, Hauptort und Besonderheiten. Für die bekannten Star-Wars-Welten sind sie vorausgefüllt (angenähert; Kanon und Legends weichen teils ab). Planeten und Monde zeigen ein **automatisch erzeugtes Bild passend zum Biom** (Wüste, Eis, Ozean, Dschungel, Vulkan, Gasriese, Stadtplanet usw.). Das ist eine künstlerische Darstellung, keine offizielle Abbildung. Im Editor kannst du Biom, Temperatur und alle Eckdaten ändern und eigene Zeilen ergänzen, etwa „Herrscher“ oder „Handelsgüter“.
+
 ### Zeitalter und Jahre
 
 Ein Zeitalter gilt ab seinem Startjahr bis zum Beginn des nächsten. Objekte können zusätzlich ein *existiert ab/bis* haben (z. B. der Todesstern von 19 VSY bis 0 NSY) und erscheinen dann nur in diesen Jahren. Im Editor legt *＋ Jahr* ein neues Zeitalter ab dem eingestellten Jahr an; es übernimmt den aktuellen Stand.
@@ -63,7 +67,9 @@ Welten und Zeitlinien sind lesbare JSON-Dateien im Datenordner (*Datei → Daten
   "objects": [
     // x nach rechts, y nach unten. Star Wars: Galaxiezentrum bei 1150/950. Fantasy-Karte: 0..2300 × 0..1700
     { "id": "tatoo1", "name": "Tatoo I", "type": "sun", "x": 1758, "y": 1529, "region": "outerrim", "sector": "Arkanis" },
-    { "id": "tatooine", "name": "Tatooine", "type": "planet", "parent": "tatoo1", "desc": "…" },
+    { "id": "tatooine", "name": "Tatooine", "type": "planet", "parent": "tatoo1", "desc": "…", "biome": "desert",
+      "facts": { "pop": "ca. 200.000", "temp": "bis 60 °C", "species": "Menschen, Jawas", "capital": "Mos Eisley", "notable": "Zwei Sonnen",
+                 "extra": [["Herrscher", "Jabba der Hutte"]] } },
     { "id": "ds", "name": "Todesstern", "type": "station", "x": 1500, "y": 420, "from": -19, "to": 0 }
   ],
   "routes": [ { "id": "r1", "name": "Corellianischer Lauf", "kind": "major", "points": ["coruscant", "corellia", "ryloth"] } ],
@@ -81,6 +87,7 @@ Welten und Zeitlinien sind lesbare JSON-Dateien im Datenordner (*Datei → Daten
 
 - `type`: Sci-Fi `sun`, `planet`, `moon`, `station`; Fantasy `capital`, `city`, `village`, `fortress`, `landmark`
 - Star-Wars-Regionen: `deepcore`, `core`, `colonies`, `innerrim`, `expansion`, `midrim`, `outerrim`, `wildspace`, `unknown`, `huttspace`
+- `biome`: desert, reddesert, ice, tundra, ocean, islands, forest, redforest, jungle, swamp, grassland, mountains, volcanic, city, gas, gasblue, barren, salt, toxic, crystal, storm, machine
 - Zeitlinien aus Version 0.1 (deutsche Regionsnamen) werden automatisch übernommen.
 
 **GeoJSON:** *Datei → Exportieren → GeoJSON* erzeugt eine `FeatureCollection`, die du in geojson.io oder QGIS bearbeiten kannst. Darin sind:

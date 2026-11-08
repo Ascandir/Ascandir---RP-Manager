@@ -628,9 +628,11 @@ lwotil|Sarvchi|C8|ur|Chiss
       if (en) { if (c.nameEn) c.name = c.nameEn; if (c.descEn) c.desc = c.descEn; }
       delete c.nameEn; delete c.descEn; return c;
     };
+    const facts = window.IAM_WORLDS.starwarsFacts ? window.IAM_WORLDS.starwarsFacts(lang) : {};
+    const withFacts = o => { const c = loc(o); const f = facts[c.id]; if (f) { const { biome, ...rest } = f; if (biome) c.biome = biome; if (Object.keys(rest).length) c.facts = rest; } return c; };
     return {
       id: 'canon', world: 'starwars', name: en ? 'Canon (built-in)' : 'Kanon (vorinstalliert)', readonly: true,
-      factions: factions.map(loc), objects: objects.map(loc), routes: ROUTES.map(loc),
+      factions: factions.map(loc), objects: objects.map(withFacts), routes: ROUTES.map(loc),
       eras: ERA_DEFS.map((d, i) => buildEra(d, i, en))
     };
   }

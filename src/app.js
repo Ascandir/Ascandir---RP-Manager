@@ -1062,6 +1062,29 @@
   });
   $('#search').addEventListener('keydown', e => { if (e.key === 'Enter') $('#search').dispatchEvent(new Event('change')); });
 
+  // ------------------------------------------------------------- Eckdaten & Bild
+  const PL = window.IAM_PLANETS;
+  const FACT_KEYS = ['pop', 'climate', 'terrain', 'species', 'capital'];
+  function hasImage(o) { return state.world.type === 'scifi' && (o.type === 'sun' || ((o.type === 'planet' || o.type === 'moon') && o.biome && PL.BIOMES[o.biome])); }
+  function imgHtml(o) {
+    if (!hasImage(o)) return '';
+    return `<figure class="planet-img"><img src="${PL.render(o, o.biome || 'barren')}" alt=""><figcaption>${esc(t('imgNote'))}</figcaption></figure>`;
+  }
+  function tempText(o) {
+    const f = o.facts || {};
+    if (f.temp) return f.temp;
+    const b = o.biome && PL.BIOMES[o.biome];
+    return b && b.temp && o.type !== 'sun' ? t('tempTypical', b.temp[0], b.temp[1]) : '';
+  }
+  function factsRows(o) {
+    const f = o.facts || {}, rows = [];
+    if (o.biome && PL.BIOMES[o.biome]) rows.push([t('biome'), t('biomes.' + o.biome)]);
+    const tt = tempText(o); if (tt) rows.push([t('temp'), tt]);
+    for (const k of FACT_KEYS) if (f[k]) rows.push([t(k), f[k]]);
+    for (const [l, v] of (f.extra || [])) if (l || v) rows.push([l, v]);
+    return rows.map(([k, v]) => `<span class="k">${esc(k)}</span><span>${esc(v)}</span>`).join('');
+  }
+
   // ------------------------------------------------------------- Info-Panel
   function renderInfo() {
     const box = $('#info'); if (!state.tl) return;
@@ -1077,6 +1100,7 @@
       box.innerHTML = `
         <div class="info-title">${esc(o.name)}</div>
         <div class="info-type">${esc(typeLabel(o.type))}${existsNow(o) ? '' : ` · <span class="warn">${esc(t('notExisting'))}</span>`}</div>
+        ${imgHtml(o)}
         <div class="kv">
           ${o.region ? `<span class="k">${esc(t('region'))}</span><span>${esc(regionLabel(o.region))}</span>` : ''}
           ${o.sector ? `<span class="k">${esc(t('sector'))}</span><span>${esc(o.sector)}</span>` : ''}
@@ -1085,7 +1109,9 @@
           ${kids.length ? `<span class="k">${esc(t('contains'))}</span><span>${kids.map(k => `<a href="#" data-go="${esc(k.id)}">${esc(k.name)}</a>`).join(', ')}</span>` : ''}
           ${(o.from != null && o.from !== '') || (o.to != null && o.to !== '') ? `<span class="k">${esc(t('exists'))}</span><span>${fmtYear(o.from)} ${esc(t('to'))} ${fmtYear(o.to)}</span>` : ''}
         </div>
-        <p>${esc(o.desc || '')}</p>`;
+        <p>${esc(o.desc || '')}</p>
+        ${factsRows(o) ? `<h3 class="facts-h">${esc(t('facts'))}</h3><div class="kv facts">${factsRows(o)}</div>` : ''}
+        ${o.facts && o.facts.notable ? `<p class="notable"><b>${esc(t('notable'))}:</b> ${esc(o.facts.notable)}</p>` : ''}`;
       box.querySelectorAll('[data-go]').forEach(a => a.addEventListener('click', ev => { ev.preventDefault(); centerOn(objMap[a.dataset.go]); }));
       return;
     }
@@ -1110,6 +1136,15 @@
         <label class="field"><span>${esc(t('existsTo'))}</span><input id="oTo" type="number" value="${o.to ?? ''}" placeholder="${esc(t('always'))}"></label>
       </div>
       <label class="field"><span>${esc(t('description'))}</span><textarea id="oDesc">${esc(o.desc || '')}</textarea></label>
+      <h3 class="facts-h">${esc(t('facts'))}</h3>
+      ${imgHtml(o)}
+      ${state.world.type === 'scifi' && (o.type === 'planet' || o.type === 'moon') ? `<label class="field"><span>${esc(t('biome'))}</span><select id="oBiome"><option value="">${esc(t('biomeUnknown'))}</option>${PL.keys.map(k => `<option value="${k}" ${k === o.biome ? 'selected' : ''}>${esc(t('biomes.' + k))}</option>`).join('')}</select></label>` : ''}
+      <label class="field"><span>${esc(t('temp'))}</span><input id="fTemp" value="${esc((o.facts || {}).temp || '')}" placeholder="${esc(tempText(Object.assign({}, o, { facts: {} })) || t('tempPh'))}"></label>
+      ${FACT_KEYS.map(k => `<label class="field"><span>${esc(t(k))}</span><input data-fact="${k}" value="${esc((o.facts || {})[k] || '')}"></label>`).join('')}
+      <label class="field"><span>${esc(t('notable'))}</span><textarea data-fact="notable">${esc((o.facts || {}).notable || '')}</textarea></label>
+      <div id="factExtra">${((o.facts || {}).extra || []).map(([l, v], i) => `<div class="row extra" data-i="${i}"><input class="exL" placeholder="${esc(t('factLabel'))}" value="${esc(l)}"><input class="exV" placeholder="${esc(t('factValue'))}" value="${esc(v)}"><button class="exDel fixed">✕</button></div>`).join('')}</div>
+      <button id="addFact" style="margin:4px 0 8px">${esc(t('addFact'))}</button>
+      <p class="hint">${esc(t('factsHint'))}</p>
       <div class="row"><button id="oCenter">${esc(t('center'))}</button><button id="oDelete" class="danger">${esc(t('delete'))}</button></div>`;
     let pushed = false; const mark = () => { if (!pushed) { pushUndo(); pushed = true; } };
     const bind = (id, ev, fn) => $(id).addEventListener(ev, fn);
@@ -1126,6 +1161,17 @@
     bind('#oFrom', 'change', ev => { mark(); o.from = ev.target.value === '' ? null : +ev.target.value; afterEdit(); });
     bind('#oTo', 'change', ev => { mark(); o.to = ev.target.value === '' ? null : +ev.target.value; afterEdit(); });
     bind('#oDesc', 'input', ev => { mark(); o.desc = ev.target.value; saveSoon(); });
+    const facts = () => (o.facts ||= {});
+    const ob = $('#oBiome'); if (ob) ob.addEventListener('change', ev => { mark(); o.biome = ev.target.value || null; renderInfo(); saveSoon(); });
+    bind('#fTemp', 'change', ev => { mark(); facts().temp = ev.target.value.trim() || undefined; saveSoon(); });
+    $$('#info [data-fact]').forEach(el => el.addEventListener('change', ev => { mark(); facts()[el.dataset.fact] = ev.target.value.trim() || undefined; saveSoon(); }));
+    $$('#factExtra .extra').forEach(row => {
+      const i = +row.dataset.i;
+      row.querySelector('.exL').addEventListener('change', ev => { mark(); facts().extra[i][0] = ev.target.value; saveSoon(); });
+      row.querySelector('.exV').addEventListener('change', ev => { mark(); facts().extra[i][1] = ev.target.value; saveSoon(); });
+      row.querySelector('.exDel').addEventListener('click', () => { mark(); facts().extra.splice(i, 1); renderInfo(); saveSoon(); });
+    });
+    bind('#addFact', 'click', () => { mark(); (facts().extra ||= []).push(['', '']); renderInfo(); const rows = $$('#factExtra .exL'); if (rows.length) rows[rows.length - 1].focus(); saveSoon(); });
     bind('#oCenter', 'click', () => centerOn(o));
     bind('#oDelete', 'click', () => deleteObject(o.id));
   }
@@ -1367,7 +1413,7 @@
   function toGeoJSON(tl) {
     const features = [];
     for (const o of tl.objects) features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toGJ(o.x, o.y) },
-      properties: { kind: 'object', id: o.id, name: o.name, type: o.type, region: o.region || null, sector: o.sector || null, parent: o.parent || null, from: o.from ?? null, to: o.to ?? null, desc: o.desc || '' } });
+      properties: { kind: 'object', id: o.id, name: o.name, type: o.type, region: o.region || null, sector: o.sector || null, parent: o.parent || null, from: o.from ?? null, to: o.to ?? null, desc: o.desc || '', biome: o.biome || null, facts: o.facts || null } });
     for (const r of tl.routes || []) {
       const coords = r.points.map(id => tl.objects.find(o => o.id === id)).filter(Boolean).map(o => toGJ(o.x, o.y));
       if (coords.length > 1) features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: { kind: 'route', id: r.id, name: r.name, routeKind: r.kind, points: r.points } });
@@ -1392,7 +1438,7 @@
       const p = ft.properties || {}, geo = ft.geometry || {}, kind = p.kind || (geo.type === 'Point' ? 'object' : geo.type === 'LineString' ? 'route' : 'zone');
       if (kind === 'object' && geo.type === 'Point') {
         const [x, y] = fromGJ(geo.coordinates);
-        tl.objects.push({ id: p.id || uid('o'), name: p.name || '?', type: p.type || 'planet', x, y, region: p.region || null, sector: p.sector || null, parent: p.parent || null, from: p.from ?? null, to: p.to ?? null, desc: p.desc || '' });
+        tl.objects.push({ id: p.id || uid('o'), name: p.name || '?', type: p.type || 'planet', x, y, region: p.region || null, sector: p.sector || null, parent: p.parent || null, from: p.from ?? null, to: p.to ?? null, desc: p.desc || '', biome: p.biome || null, facts: p.facts || undefined });
       } else if (kind === 'route' && geo.type === 'LineString') {
         tl.routes.push({ id: p.id || uid('r'), name: p.name || t('newRoute'), kind: p.routeKind || 'minor', points: Array.isArray(p.points) ? p.points : [] });
       } else if (kind === 'zone') {

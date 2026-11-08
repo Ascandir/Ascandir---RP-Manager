@@ -206,3 +206,13 @@ body[data-theme="fantasy"] #toolHint { background: #f7edd6ee; color: #8b1e1e; bo
 .tb-sep { width: 1px; height: 24px; background: var(--line); margin: 0 6px; }
 #trkIn, #trkOut { width: auto !important; padding: 0 8px !important; font-size: 12px; }
 #trkEra, #trkAll { width: auto !important; padding: 0 10px !important; }
+
+/* Planetenbild & Eckdaten */
+.planet-img { margin: 6px 0 10px; text-align: center; }
+.planet-img img { width: 100%; max-width: 260px; aspect-ratio: 1; border-radius: 12px; border: 1px solid var(--line); display: block; margin: 0 auto; }
+.planet-img figcaption { font-size: 10.5px; color: var(--dim); margin-top: 4px; }
+.facts-h { margin-top: 14px; }
+.kv.facts { grid-template-columns: 100px 1fr; }
+.notable { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+#factExtra .row { margin-bottom: 4px; }
+#info { padding-bottom: 30px; }

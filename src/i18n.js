@@ -66,7 +66,10 @@
       yearSuffixNeg: 'Kürzel für Jahre vor dem Nullpunkt', yearSuffixPos: 'Kürzel für Jahre ab dem Nullpunkt', yearSuffixHint: 'z.B. „v. Z.“ / „n. Z.“ oder „VSY“ / „NSY“. Leer = negative Zahlen.',
       deleteWorld: 'Welt löschen', confirmDeleteWorld: 'Welt „{0}“ mit allen {1} Zeitlinien wirklich löschen? Das kann nicht rückgängig gemacht werden.',
       about: 'Über', aboutText: 'Inoffizielles Fanprojekt ohne Verbindung zu Lucasfilm oder Disney. Positionen und Einflussgebiete sind Annäherungen.',
-      close: 'Schließen', back: 'Zurück zur Karte'
+      close: 'Schließen', back: 'Zurück zur Karte',
+      facts: 'Eckdaten', biome: 'Biom', temp: 'Temperatur', tempTypical: 'ca. {0} bis {1} °C (typisch für das Biom)', pop: 'Bevölkerung', climate: 'Klima', terrain: 'Gelände', species: 'Bewohner', capital: 'Hauptort', notable: 'Besonderheiten',
+      factsHint: 'Leere Felder werden in der Ansicht nicht angezeigt.', addFact: '＋ Eigene Zeile', factLabel: 'Bezeichnung', factValue: 'Wert', biomeUnknown: '— unbekannt —', tempPh: 'z.B. -20 bis 5 °C', imgNote: 'Künstlerische Darstellung, automatisch aus dem Biom erzeugt.',
+      biomes: { desert: 'Wüste', reddesert: 'Rote Wüste', ice: 'Eiswelt', tundra: 'Tundra', ocean: 'Ozeanwelt', islands: 'Inselwelt', forest: 'Wälder', redforest: 'Rote Wälder', jungle: 'Dschungel', swamp: 'Sumpf', grassland: 'Grasland', mountains: 'Gebirge', volcanic: 'Vulkanisch', city: 'Stadtplanet', gas: 'Gasriese', gasblue: 'Gasriese (blau)', barren: 'Ödland / Fels', salt: 'Salzebenen', toxic: 'Giftig', crystal: 'Kristallwelt', storm: 'Sturmwelt', machine: 'Maschinenwelt' }
     },
     en: {
       appName: 'InteractiveMap',
@@ -131,7 +134,10 @@
       yearSuffixNeg: 'Suffix for years before year zero', yearSuffixPos: 'Suffix for years from year zero', yearSuffixHint: 'e.g. “BC” / “AD” or “BBY” / “ABY”. Empty = negative numbers.',
       deleteWorld: 'Delete world', confirmDeleteWorld: 'Really delete world “{0}” with all {1} timelines? This cannot be undone.',
       about: 'About', aboutText: 'Unofficial fan project, not affiliated with Lucasfilm or Disney. Positions and territories are approximations.',
-      close: 'Close', back: 'Back to the map'
+      close: 'Close', back: 'Back to the map',
+      facts: 'Key facts', biome: 'Biome', temp: 'Temperature', tempTypical: 'approx. {0} to {1} °C (typical for the biome)', pop: 'Population', climate: 'Climate', terrain: 'Terrain', species: 'Inhabitants', capital: 'Capital', notable: 'Notable',
+      factsHint: 'Empty fields are hidden in the view.', addFact: '＋ Custom row', factLabel: 'Label', factValue: 'Value', biomeUnknown: '— unknown —', tempPh: 'e.g. -20 to 5 °C', imgNote: 'Artistic impression, generated from the biome.',
+      biomes: { desert: 'Desert', reddesert: 'Red desert', ice: 'Ice world', tundra: 'Tundra', ocean: 'Ocean world', islands: 'Island world', forest: 'Forests', redforest: 'Red forests', jungle: 'Jungle', swamp: 'Swamp', grassland: 'Grassland', mountains: 'Mountains', volcanic: 'Volcanic', city: 'City world', gas: 'Gas giant', gasblue: 'Gas giant (blue)', barren: 'Barren / rock', salt: 'Salt flats', toxic: 'Toxic', crystal: 'Crystal world', storm: 'Storm world', machine: 'Machine world' }
     }
   };
   let lang = 'de';
