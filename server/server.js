@@ -517,6 +517,17 @@ async function handleMcp(req, res, url, writeAllowed) {
   return send(res, 200, r);
 }
 
+// ---------------------------------------------------------------- Neue Version auf GitHub? (alle 30 Min.)
+let latestRelease = null;
+const cmpVer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; };
+async function checkLatest() {
+  try {
+    const r = await fetch('https://api.github.com/repos/Ascandir/Ascandir---SWGM/releases/latest', { headers: { 'User-Agent': 'ascandir-interactivemap', Accept: 'application/vnd.github+json' } });
+    if (r.ok) { const j = await r.json(); latestRelease = String(j.tag_name || '').replace(/^v/, '') || null; }
+  } catch { /* offline – egal */ }
+}
+if (!/^(0|false|no)$/i.test(process.env.IAM_UPDATE_CHECK || 'true')) { checkLatest(); setInterval(checkLatest, 30 * 60 * 1000); }
+
 // ---------------------------------------------------------------- Server
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -543,7 +554,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 401, { error: 'Benutzername oder Passwort falsch.' });
     }
     if (url.pathname === '/api/logout') return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': 'iam_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
-    if (url.pathname === '/api/info') return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, loginRequired: !!PASSWORD, admin: isAdmin(req), publicView: PUBLIC_VIEW, dataDir: isAdmin(req) ? DATA_DIR : null }, 'application/json; charset=utf-8', { 'Access-Control-Allow-Origin': '*' });
+    if (url.pathname === '/api/info') return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, loginRequired: !!PASSWORD, admin: isAdmin(req), publicView: PUBLIC_VIEW, latest: latestRelease, updateAvailable: !!(latestRelease && cmpVer(latestRelease, VERSION) > 0), dataDir: isAdmin(req) ? DATA_DIR : null }, 'application/json; charset=utf-8', { 'Access-Control-Allow-Origin': '*' });
     if (!canRead(req, url)) {
       if (url.pathname.startsWith('/api/')) return send(res, 401, { error: 'unauthorized' }, 'application/json', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
       return send(res, 401, 'Anmeldung erforderlich', 'text/plain; charset=utf-8', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });

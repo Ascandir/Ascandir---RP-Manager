@@ -1781,7 +1781,7 @@
         <div class="seg">${['borders', 'bubbles'].map(k => `<button data-terr="${k}" class="${settings.terrStyle === k ? 'active' : ''}">${esc(t(k === 'borders' ? 'terrBorders' : 'terrBubbles'))}</button>`).join('')}</div></section>
       <section class="card"><h3>${esc(t('updates'))}</h3>
         <div class="kv"><span class="k">${esc(t('currentVersion'))}</span><span><b>${esc(info.version)}</b></span></div>
-        ${FS && FS.server && !FS.desktop ? `<p class="hint">${esc(t('updDocker'))}</p>` : `<label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
+        ${FS && FS.server && !FS.desktop ? (info.updateAvailable ? `<p class="warn"><b>${esc(t('updDockerNew', info.latest))}</b></p>` : '') + `<p class="hint">${esc(t('updDocker'))}</p>` : `<label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
         <div class="row" style="margin-top:8px"><button id="setCheck" class="fixed">${esc(t('checkNow'))}</button><span id="setUpdStatus" class="dim"></span></div>`}
         <p class="hint"><a href="#" id="setReleases">${esc(t('releases'))}</a></p></section>
       <section class="card"><h3>${esc(t('worldSettings'))}: ${esc(worldName(w))}</h3>
@@ -1865,6 +1865,7 @@
     if (!u) text = '';
     else if (u.state === 'dev') text = t('updDev');
     else if (u.state === 'docker') text = t('updDocker');
+    else if (u.state === 'dockerNew') { text = t('updDockerNew', u.version); html = `<b>${esc(text)}</b> <button id="updLater">${esc(t('updLater'))}</button>`; }
     else if (u.state === 'checking') text = t('updChecking');
     else if (u.state === 'none') text = t('updNone');
     else if (u.state === 'error') text = t('updError', u.message || '');
@@ -1926,6 +1927,7 @@
     switchWorld(state.world.id);
     saveSoon();
     if (settings.autoUpdate && FS && (!FS.server || FS.desktop)) setTimeout(() => checkUpdates(false), 2500);
+    if (FS && FS.server && !FS.desktop && state.appInfo.updateAvailable && !isGuest()) setTimeout(() => { state.upd = { state: 'dockerNew', version: state.appInfo.latest }; renderUpdStatus(); }, 1500);
     const off = new URLSearchParams(location.search).get('offline');
     if (off) setTimeout(() => { let b = $('#offBanner'); if (!b) { b = document.createElement('div'); b.id = 'offBanner'; $('#mapWrap').appendChild(b); } b.innerHTML = `<b>☁</b> ${esc(t('srvOffline', off))} <button id="offRetry" class="primary">${esc(t('srvRetry'))}</button> <button id="offClose">${esc(t('close'))}</button>`; b.hidden = false;
       $('#offRetry').onclick = () => window.iamDesktop && window.iamDesktop.getServer().then(u => u && window.iamDesktop.setServer(u)); $('#offClose').onclick = () => { b.hidden = true; }; }, 600);

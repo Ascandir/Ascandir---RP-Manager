@@ -142,7 +142,7 @@ volumes:
 | `IAM_API_TOKEN` | Schlüssel für Story-KI/ChatGPT. Ohne Token ist der Schreibzugriff der API abgeschaltet. |
 | `IAM_READONLY` | `true` = nur lesen |
 
-**Update:** In Portainer beim Stack *Update the stack* mit *Re-pull image* ausführen. Jede neue Version auf GitHub erzeugt automatisch ein neues Image.
+**Update:** In Portainer beim Stack *Update the stack* mit eingeschaltetem **„Re-pull image and redeploy“** ausführen. Jede neue Version auf GitHub erzeugt automatisch ein neues Image (ca. 1–2 Minuten nach dem Release). Ist ein neueres Image verfügbar, zeigt die App das angemeldeten Nutzern an (abschaltbar mit `IAM_UPDATE_CHECK=false`). Alternativ eine feste Version eintragen, z. B. `ghcr.io/ascandir/ascandir---swgm:0.8.1`.
 
 **Gäste und Anmeldung:** Ohne Anmeldung sieht man die Karte nur an. Oben rechts gibt es *🔒 Anmelden*, danach sind Editor, Einstellungen, neue Welten/Zeitlinien, Import und JSON-Bearbeitung freigeschaltet. Die Anmeldung bleibt 30 Tage gespeichert; abmelden geht unter *Einstellungen → Konto*.
 
