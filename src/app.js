@@ -12,6 +12,12 @@
   const uid = p => p + Math.random().toString(36).slice(2, 9);
   const clone = o => JSON.parse(JSON.stringify(o));
   const FS = window.iamFS || null;
+  let dataVersion = 0, interactUntil = 0, interactTimer = null;
+  const bump = () => { dataVersion++; };
+  function interacting() {
+    interactUntil = performance.now() + 220;
+    clearTimeout(interactTimer); interactTimer = setTimeout(() => draw(), 240);
+  }
   const APP_REPO = 'https://github.com/Ascandir/Ascandir---SWGM/releases';
 
   // ------------------------------------------------------------- Welttypen
@@ -160,6 +166,7 @@
 
   let saveTimer = null;
   function saveSoon() {
+    bump();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       settings.hiddenFactions = [...state.hiddenFactions];
@@ -265,13 +272,17 @@
   let W = 0, H = 0, DPR = 1;
   const off = document.createElement('canvas'), offCtx = off.getContext('2d');
   const ero = document.createElement('canvas'), eroCtx = ero.getContext('2d');
+  const inf = document.createElement('canvas'), infCtx = inf.getContext('2d');
   const glow = document.createElement('canvas');
+  const base = document.createElement('canvas'), baseCtx = base.getContext('2d');
+  let baseKey = '';
   const paper = document.createElement('canvas');
 
   function resize() {
     const r = canvas.getBoundingClientRect();
     DPR = window.devicePixelRatio || 1; W = r.width; H = r.height;
-    for (const c of [canvas, off, ero]) { c.width = Math.max(1, Math.round(W * DPR)); c.height = Math.max(1, Math.round(H * DPR)); }
+    for (const c of [canvas, base]) { c.width = Math.max(1, Math.round(W * DPR)); c.height = Math.max(1, Math.round(H * DPR)); }
+    baseKey = '';
     resizeTrack(); draw();
   }
 
@@ -402,17 +413,36 @@
 
   function render() {
     if (!W || !state.tl) return;
-    rebuildTree(); computePositions();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (state.world.type === 'fantasy') drawParchment(); else drawSpace();
-    if (isSW() && settings.opts.regions) drawRegions();
-    if (settings.opts.influence && era()) drawInfluence();
-    if (settings.opts.grid) drawGrid();
-    if (settings.opts.routes) drawRoutes();
-    if (isSW() && settings.opts.sectors) drawSectors();
-    drawObjects();
+    const lowRes = performance.now() < interactUntil;
+    const v = state.view;
+    const key = [v.cx, v.cy, v.z, W, H, DPR, state.year, dataVersion, state.tl.id, state.world.id, state.theme, state.selected, lowRes,
+      JSON.stringify(settings.opts), JSON.stringify(settings.types), [...state.hiddenFactions].join(','), window.I18N.lang].join('|');
+    if (key !== baseKey) {
+      rebuildTree(); computePositions();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (state.world.type === 'fantasy') drawParchment(); else drawSpace();
+      if (isSW() && settings.opts.regions) drawRegions();
+      if (settings.opts.influence && era()) drawInfluence(lowRes);
+      if (settings.opts.grid) drawGrid();
+      if (settings.opts.routes) drawRoutes();
+      if (isSW() && settings.opts.sectors) drawSectors();
+      drawObjects();
+      baseCtx.setTransform(1, 0, 0, 1, 0, 0); baseCtx.clearRect(0, 0, base.width, base.height); baseCtx.drawImage(canvas, 0, 0);
+      baseKey = key;
+    } else {
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(base, 0, 0);
+    }
+    drawHover();
     drawRouteDraft();
     drawBrush();
+  }
+  function drawHover() {
+    if (!state.hover || state.hover === state.selected) return;
+    const o = objMap[state.hover]; if (!o || !visibleObj(o)) return;
+    const p = w2s(posOf(o).x, posOf(o).y), sizeF = Math.max(0.8, Math.min(4, Math.pow(state.view.z, 0.35) * 1.3));
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.strokeStyle = fantasy() ? '#3b271599' : '#ffffff99'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 10 * sizeF, 0, Math.PI * 2); ctx.stroke();
   }
 
   function drawSpace() {
@@ -510,9 +540,16 @@
     p = w2s(h.x, h.y + h.r - 14); ctx.fillText(t('regions.huttspace').toUpperCase(), p.x, p.y);
   }
 
-  function drawInfluence() {
-    const e = era(), objs = state.tl.objects;
-    const shifts = [[2, 0], [-2, 0], [0, 2], [0, -2], [1.5, 1.5], [-1.5, 1.5], [1.5, -1.5], [-1.5, -1.5]].map(a => a.map(v => v * DPR));
+  function drawInfluence(lowRes) {
+    const e = era();
+    // Einflussflächen in CSS-Pixel-Auflösung (bei Interaktion halbe Auflösung) berechnen – deutlich schneller
+    const IR = lowRes ? 0.5 : 1, ow = Math.max(1, Math.round(W * IR)), oh = Math.max(1, Math.round(H * IR));
+    if (off.width !== ow || off.height !== oh) { off.width = ero.width = inf.width = ow; off.height = ero.height = inf.height = oh; }
+    infCtx.setTransform(1, 0, 0, 1, 0, 0); infCtx.globalAlpha = 1; infCtx.clearRect(0, 0, ow, oh);
+    let any = false;
+    const z = state.view.z, offTransform = c => c.setTransform(IR * z, 0, 0, IR * z, IR * (W / 2 - state.view.cx * z), IR * (H / 2 - state.view.cy * z));
+    const sh = Math.max(1, 2 * IR);
+    const shifts = lowRes ? [[sh, 0], [-sh, 0], [0, sh], [0, -sh]] : [[sh, 0], [-sh, 0], [0, sh], [0, -sh], [sh * .75, sh * .75], [-sh * .75, sh * .75], [sh * .75, -sh * .75], [-sh * .75, -sh * .75]];
     for (const f of state.tl.factions) {
       if (state.hiddenFactions.has(f.id)) continue;
       const keys = Object.keys(e.control).filter(k => e.control[k] === f.id);
@@ -521,7 +558,7 @@
       if (!keys.length && !regs.length && !zones.length) continue;
       offCtx.setTransform(1, 0, 0, 1, 0, 0); offCtx.globalCompositeOperation = 'source-over';
       offCtx.clearRect(0, 0, off.width, off.height);
-      worldTransform(offCtx); offCtx.fillStyle = f.color;
+      offTransform(offCtx); offCtx.fillStyle = f.color;
       for (const r of regs) fillRegion(offCtx, r);
       offCtx.beginPath();
       const reach = +f.reach || 120;
@@ -534,16 +571,18 @@
         else { offCtx.moveTo(zn.x + zn.r, zn.y); offCtx.arc(zn.x, zn.y, zn.r, 0, Math.PI * 2); }
       }
       offCtx.fill('nonzero');
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalAlpha = fantasy() ? 0.26 : 0.2; ctx.drawImage(off, 0, 0); ctx.globalAlpha = 1;
+      any = true;
+      infCtx.globalAlpha = fantasy() ? 0.26 : 0.2; infCtx.drawImage(off, 0, 0); infCtx.globalAlpha = 1;
+      if (lowRes) continue; // beim Verschieben/Zoomen nur Flächen, Umrisse danach
       eroCtx.setTransform(1, 0, 0, 1, 0, 0); eroCtx.globalCompositeOperation = 'source-over';
       eroCtx.clearRect(0, 0, ero.width, ero.height); eroCtx.drawImage(off, 0, 0);
       eroCtx.globalCompositeOperation = 'destination-in';
       for (const [dx, dy] of shifts) eroCtx.drawImage(off, dx, dy);
       offCtx.setTransform(1, 0, 0, 1, 0, 0); offCtx.globalCompositeOperation = 'destination-out';
       offCtx.drawImage(ero, 0, 0); offCtx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 0.85; ctx.drawImage(off, 0, 0); ctx.globalAlpha = 1;
+      infCtx.globalAlpha = 0.85; infCtx.drawImage(off, 0, 0); infCtx.globalAlpha = 1;
     }
+    if (any) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.drawImage(inf, 0, 0, canvas.width, canvas.height); }
   }
 
   function drawGrid() {
@@ -658,8 +697,8 @@
       const p = w2s(posOf(o).x, posOf(o).y);
       if (p.x < -20 || p.y < -20 || p.x > W + 20 || p.y > H + 20) continue;
       drawSymbol(o, p, sizeF, controllerOf(o));
-      if (state.selected === o.id || state.hover === o.id) {
-        ctx.strokeStyle = state.selected === o.id ? (fan ? '#8b1e1e' : '#f5b83d') : (fan ? '#3b271599' : '#ffffff99'); ctx.lineWidth = 1.5;
+      if (state.selected === o.id) {
+        ctx.strokeStyle = fan ? '#8b1e1e' : '#f5b83d'; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(p.x, p.y, 10 * sizeF, 0, Math.PI * 2); ctx.stroke();
       }
     }
@@ -773,21 +812,23 @@
       if (drag.kind === 'pan') {
         if (Math.abs(sx - drag.sx) + Math.abs(sy - drag.sy) > 3) drag.moved = true;
         state.view.cx = drag.cx - (sx - drag.sx) / state.view.z; state.view.cy = drag.cy - (sy - drag.sy) / state.view.z;
-      } else if (drag.kind === 'move') { drag.moved = true; drag.obj.x = Math.round(w.x - drag.ox); drag.obj.y = Math.round(w.y - drag.oy); }
-      else if (drag.kind === 'paint') paintAt(w);
-      else if (drag.kind === 'erase') eraseAt(w);
+        if (drag.moved) interacting();
+      } else if (drag.kind === 'move') { drag.moved = true; drag.obj.x = Math.round(w.x - drag.ox); drag.obj.y = Math.round(w.y - drag.oy); bump(); interacting(); }
+      else if (drag.kind === 'paint') { paintAt(w); bump(); }
+      else if (drag.kind === 'erase') { eraseAt(w); bump(); }
       draw(); return;
     }
     const tt = $('#tooltip');
     if (!mouse.in) { tt.hidden = true; if (state.hover) { state.hover = null; draw(); } return; }
+    if (performance.now() < interactUntil) return;
     const hit = hitTest(sx, sy);
     if (hit) {
       const fac = controllerOf(hit);
       tt.innerHTML = `<b>${esc(hit.name)}</b> <span class="dim">· ${esc(typeLabel(hit.type))}</span>${fac ? `<br><span style="color:${esc(fac.color)}">■</span> ${esc(fac.name)}` : ''}`;
       tt.style.left = (sx + 14) + 'px'; tt.style.top = (sy + 12) + 'px'; tt.hidden = false;
     } else tt.hidden = true;
-    state.hover = hit ? hit.id : null;
-    draw();
+    const nh = hit ? hit.id : null, cursorTool = editable() && (state.tool === 'paint' || state.tool === 'erase' || (state.tool === 'route' && state.routeDraft));
+    if (nh !== state.hover || cursorTool) { state.hover = nh; draw(); }
   });
   window.addEventListener('mouseup', e => {
     if (trackDrag) { trackDrag = false; return; }
@@ -810,6 +851,7 @@
     }
     const before = s2w(sx, sy);
     state.view.z = Math.max(0.12, Math.min(120, state.view.z * f));
+    interacting();
     const after = s2w(sx, sy);
     state.view.cx += before.x - after.x; state.view.cy += before.y - after.y;
     if (anchor) { computePositions(); const np = w2s(posOf(anchor.o).x, posOf(anchor.o).y); state.view.cx += (np.x - anchor.sx) / state.view.z; state.view.cy += (np.y - anchor.sy) / state.view.z; }
