@@ -1542,6 +1542,7 @@
     $('#settingsView').hidden = m !== 'settings';
     if (m === 'settings') renderSettings();
     renderAll(true);
+    renderUpdStatus();
   }
   $('#tabView').addEventListener('click', () => setMode('view'));
   $('#tabEdit').addEventListener('click', () => setMode('edit'));
@@ -1628,11 +1629,14 @@
     else if (u.state === 'available') { text = t('updAvailable', u.version); html = `<b>${esc(text)}</b> <button id="updDl" class="primary">${esc(t('updDownload'))}</button> <button id="updLater">${esc(t('updLater'))}</button>`; }
     else if (u.state === 'progress') { text = t('updProgress', Math.round(u.percent || 0)); html = `${esc(text)}<div class="bar"><i style="width:${Math.round(u.percent || 0)}%"></i></div>`; }
     else if (u.state === 'downloaded') { text = t('updReady', u.version); html = `<b>${esc(text)}</b> <button id="updInst" class="primary">${esc(t('updInstall'))}</button>`; }
-    if (el) el.textContent = text;
-    if (html && !state.updDismissed) { banner.innerHTML = html; banner.hidden = false; } else banner.hidden = true;
-    const dl = $('#updDl'); if (dl) dl.onclick = () => FS && FS.updDownload();
-    const later = $('#updLater'); if (later) later.onclick = () => { state.updDismissed = true; renderUpdStatus(); };
-    const inst = $('#updInst'); if (inst) inst.onclick = () => FS && FS.updInstall();
+    // In den Einstellungen dieselben Knöpfe direkt anzeigen
+    if (el) el.innerHTML = html ? html.replace(/ id="upd(Dl|Later|Inst)"/g, ' data-upd="$1"').replace(/<button data-upd="Later"[^>]*>[^<]*<\/button>/, '') : esc(text);
+    if (html && !state.updDismissed && state.mode !== 'settings') { banner.innerHTML = html; banner.hidden = false; } else banner.hidden = true;
+    const act = { Dl: () => FS && FS.updDownload(), Inst: () => FS && FS.updInstall(), Later: () => { state.updDismissed = true; renderUpdStatus(); } };
+    for (const k of Object.keys(act)) {
+      const b1 = $('#upd' + k); if (b1) b1.onclick = act[k];
+      $$(`[data-upd="${k}"]`).forEach(b2 => { b2.onclick = act[k]; });
+    }
   }
   function checkUpdates(manual) {
     if (!FS || !FS.updCheck) { state.upd = { state: 'dev' }; renderUpdStatus(); return; }

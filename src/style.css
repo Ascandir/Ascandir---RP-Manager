@@ -175,7 +175,7 @@ button:disabled { opacity: .45; cursor: default; }
 
 /* Update-Hinweis */
 #updBanner { position: absolute; top: 12px; right: 12px; max-width: 360px; background: var(--panel); border: 1px solid var(--accent); border-radius: 10px;
-  padding: 10px 12px; box-shadow: 0 6px 24px #0008; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  padding: 10px 12px; box-shadow: 0 6px 24px #0008; z-index: 8; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 #updBanner[hidden] { display: none; }
 #updBanner .bar { width: 100%; height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; }
 #updBanner .bar i { display: block; height: 100%; background: var(--accent); }
@@ -216,3 +216,6 @@ body[data-theme="fantasy"] #toolHint { background: #f7edd6ee; color: #8b1e1e; bo
 .notable { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 #factExtra .row { margin-bottom: 4px; }
 #info { padding-bottom: 30px; }
+#setUpdStatus { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#setUpdStatus .bar { width: 220px; height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; }
+#setUpdStatus .bar i { display: block; height: 100%; background: var(--accent); }
