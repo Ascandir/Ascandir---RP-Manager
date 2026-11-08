@@ -163,17 +163,27 @@ Lesende Aufrufe sind bei `IAM_PUBLIC_VIEW=true` ohne Schlüssel möglich, sonst 
 
 Jahre gehen als `3640 VSY`, `3640 BBY`, `-3640` oder `4 NSY`. Ohne `timeline` wird die Kanon-Zeitlinie genutzt. In der App unter *Einstellungen → API für Story-KI* steht die passende Adresse für dein aktuelles Jahr.
 
-### 4. ChatGPT darf die Karte bearbeiten (Schreib-API)
+### 4. ChatGPT oder Claude als Plugin anbinden (MCP)
 
-1. In ChatGPT einen eigenen GPT erstellen: *Konfigurieren → Aktionen → Neue Aktion → Aus URL importieren*: `https://karte.deine-domain.de/api/v1/openapi.json`
-2. *Authentifizierung*: API-Schlüssel → **Bearer** → dein `IAM_API_TOKEN`
-3. Fertig. Der GPT kann jetzt z. B.:
-   - „Kopiere den Kanon als ‚Darians Story‘“ → `POST /api/v1/timeline/copy`
-   - „Lege den Planeten Neu-Taris bei Taris an, Inselwelt, 2 Mio. Einwohner“ → `POST /api/v1/place`
-   - „Gründe die Fraktion Schwarze Sonne“ → `POST /api/v1/faction`
-   - „Ab 3639 VSY beginnt das Zeitalter ‚Darians Aufstieg‘“ → `POST /api/v1/era`
-   - „Neu-Taris gehört 3639 VSY der Schwarzen Sonne“ → `POST /api/v1/control`
-   - „Ersetze die ganze Zeitlinie durch dieses JSON“ → `PUT /api/v1/timeline`
+Der Container enthält einen MCP-Server, wie ihn ChatGPT-Plugins und Claude-Connectors erwarten:
+
+| Adresse | Werkzeuge |
+|---|---|
+| `https://karte.deine-domain.de/mcp` | nur lesen: `get_summary`, `get_state`, `get_place`, `search_places`, `plan_travel`, `list_timelines` |
+| `https://karte.deine-domain.de/mcp/<IAM_API_TOKEN>` | zusätzlich schreiben: `copy_timeline`, `upsert_place`, `delete_place`, `upsert_faction`, `upsert_era`, `set_control` |
+
+**ChatGPT:** *Plugins* öffnen (chatgpt.com/plugins) → **＋** → **Add custom MCP server** → Name „InteractiveMap“ → bei *Connection* die Adresse mit Token eintragen → *Authentication*: **No authentication** → Warnhinweis bestätigen → **Create as a plugin** → das Plugin unter „Meine Plugins“ **installieren**. Im Chat das Plugin auswählen und loslegen. Schreibende Aktionen fragt ChatGPT vorher zur Bestätigung ab. Nach einem Update im Plugin auf *Refresh* klicken, damit neue Werkzeuge erscheinen.
+Der Token steckt geheim in der Adresse – die Adresse also nicht weitergeben. Bei Cloudflare Access braucht `/mcp*` eine Bypass-Regel.
+
+**Claude:** *Einstellungen → Connectors → Add custom connector* → dieselbe Adresse eintragen.
+
+Beispiele im Chat:
+- „Kopiere den Kanon als ‚Darians Story‘“
+- „Lege den Planeten Neu-Taris bei Taris an, Inselwelt, 2 Mio. Einwohner“
+- „Neu-Taris gehört ab 3639 BBY der Schwarzen Sonne“
+- „Wie lange brauche ich von Nar Shaddaa nach Dromund Kaas mit Hyperantrieb Klasse 2?“
+
+Die REST-API (`/api/v1/…`, OpenAPI unter `/api/v1/openapi.json`) bleibt für andere Werkzeuge erhalten (z. B. SillyTavern-Erweiterungen oder eigene Skripte; Schreiben mit `Authorization: Bearer <IAM_API_TOKEN>`).
 
 Die Kanon-Zeitlinie bleibt schreibgeschützt; Änderungen landen immer in einer eigenen Zeitlinie und erscheinen sofort in allen offenen Browserfenstern.
 

@@ -432,12 +432,99 @@ async function apiV1(req, res, url) {
   return send(res, 404, { error: 'unknown endpoint' });
 }
 
+// ---------------------------------------------------------------- MCP-Server (für ChatGPT-Plugins, Claude u. a.)
+// POST /mcp            -> nur lesende Werkzeuge
+// POST /mcp/<API-Token> -> zusätzlich schreibende Werkzeuge
+const { Readable } = require('stream');
+function internalCall(method, pathname, params, body) {
+  return new Promise(resolve => {
+    const u = new URL('http://internal' + pathname);
+    for (const [k, v] of Object.entries(params || {})) {
+      if (v == null || v === '') continue;
+      if (Array.isArray(v)) v.forEach(x => u.searchParams.append(k, String(x))); else u.searchParams.set(k, String(v));
+    }
+    const req = Readable.from(body ? [Buffer.from(JSON.stringify(body))] : []);
+    req.method = method; req.headers = API_TOKEN ? { authorization: 'Bearer ' + API_TOKEN, host: 'internal' } : { host: 'internal' };
+    const res = { code: 200, writeHead(c) { this.code = c; }, end(d) { resolve({ code: this.code, body: d == null ? '' : d.toString() }); }, write() { } };
+    Promise.resolve(apiV1(req, res, u)).catch(e => resolve({ code: 500, body: JSON.stringify({ error: e.message }) }));
+  });
+}
+const S = (props, required = []) => ({ type: 'object', properties: props, required });
+const str = d => ({ type: 'string', description: d });
+const TL = str('Zeitlinie (Name oder ID). Leer = Kanon (schreibgeschützt).'), YR = str('Jahr, z.B. "3640 BBY", "4 ABY" oder "-3640"'), LG = { type: 'string', enum: ['de', 'en'], description: 'Sprache der Antwort' };
+const MCP_TOOLS = [
+  { name: 'list_timelines', title: 'Zeitlinien auflisten', description: 'Alle Welten-Zeitlinien mit ihren Zeitaltern.', ro: true, inputSchema: S({ lang: LG }), run: a => internalCall('GET', '/api/v1/timelines', a) },
+  { name: 'get_summary', title: 'Lage der Galaxis', description: 'Kurzer Text zum Stand in einem Jahr: Zeitalter, Mächte und ihre Gebiete, optional Eckdaten zu Orten. Ideal als Kontext für Geschichten.', ro: true,
+    inputSchema: S({ timeline: TL, year: YR, places: { type: 'array', items: { type: 'string' }, description: 'Orte, zu denen Eckdaten geliefert werden' }, lang: LG }),
+    run: a => internalCall('GET', '/api/v1/summary', { timeline: a.timeline, year: a.year, place: a.places || [], lang: a.lang }) },
+  { name: 'get_state', title: 'Mächte und Gebiete (JSON)', description: 'Zeitalter und Fraktionen mit kontrollierten Orten in einem Jahr.', ro: true, inputSchema: S({ timeline: TL, year: YR, lang: LG }), run: a => internalCall('GET', '/api/v1/state', a) },
+  { name: 'get_place', title: 'Ort abfragen', description: 'Eckdaten (Bevölkerung, Klima, Bewohner …), Beschreibung und Kontrolle eines Ortes in einem Jahr.', ro: true, inputSchema: S({ name: str('Name des Ortes'), timeline: TL, year: YR, lang: LG }, ['name']), run: a => internalCall('GET', '/api/v1/place', a) },
+  { name: 'search_places', title: 'Orte suchen', description: 'Orte nach Namensteil suchen.', ro: true, inputSchema: S({ query: str('Suchtext'), timeline: TL }, ['query']), run: a => internalCall('GET', '/api/v1/search', { q: a.query, timeline: a.timeline }) },
+  { name: 'plan_travel', title: 'Reise planen', description: 'Route und Reisezeit zwischen Orten (bevorzugt Hyperraumrouten). Hyperantrieb-Klasse 0.5 = sehr schnell, 1 = schnell, 2 = übliche Frachter.', ro: true,
+    inputSchema: S({ from: str('Start'), to: str('Ziel'), via: { type: 'array', items: { type: 'string' }, description: 'Zwischenstopps' }, hyperdrive_class: { type: 'number', description: 'Klasse, Standard 1' }, stay_hours: { type: 'number', description: 'Aufenthalt pro Zwischenstopp in Stunden' }, timeline: TL, year: YR, lang: LG }, ['from', 'to']),
+    run: a => internalCall('GET', '/api/v1/travel', { from: a.from, to: a.to, via: a.via || [], class: a.hyperdrive_class, stay: a.stay_hours, timeline: a.timeline, year: a.year, lang: a.lang, format: 'text' }) },
+  // schreibend
+  { name: 'copy_timeline', title: 'Zeitlinie kopieren', description: 'Kopiert eine Zeitlinie (leer = Kanon) als neue, bearbeitbare Zeitlinie.', inputSchema: S({ from: str('Quelle'), name: str('Name der neuen Zeitlinie') }, ['name']), run: a => internalCall('POST', '/api/v1/timeline/copy', {}, a) },
+  { name: 'upsert_place', title: 'Ort anlegen/ändern', description: 'Legt einen Ort an oder ändert ihn (nur eigene Zeitlinien). Position über near (bei Ort X), orbits (umkreist X) oder grid (z.B. R16).',
+    inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), type: { type: 'string', enum: ['sun', 'planet', 'moon', 'station', 'capital', 'city', 'village', 'fortress', 'landmark'] }, near: str('In der Nähe dieses Ortes'), orbits: str('Umkreist diesen Ort'), grid: str('Rasterfeld'), region: str('Region-Schlüssel, z.B. outerrim'), sector: str('Sektor'),
+      biome: str('desert, ice, ocean, forest, jungle, swamp, grassland, mountains, volcanic, city, neon, gas, barren, toxic, crystal, storm …'), description: str('Beschreibung (Zeilenumbrüche, **fett** erlaubt)'), existsFrom: YR, existsTo: YR,
+      facts: { type: 'object', description: 'Eckdaten: pop, temp, climate, terrain, species, capital, notable, extra=[["Bezeichnung","Wert"]]; null löscht ein Feld' } }, ['timeline', 'name']),
+    run: a => internalCall('POST', '/api/v1/place', {}, a) },
+  { name: 'delete_place', title: 'Ort löschen', description: 'Löscht einen Ort aus einer eigenen Zeitlinie.', destructive: true, inputSchema: S({ timeline: TL, name: str('Name') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/place', {}, a) },
+  { name: 'upsert_faction', title: 'Fraktion anlegen/ändern', description: 'Legt eine Fraktion an oder ändert Name, Farbe (#rrggbb) oder Reichweite.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), color: str('Farbe #rrggbb'), reach: { type: 'number' } }, ['timeline', 'name']), run: a => internalCall('POST', '/api/v1/faction', {}, a) },
+  { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
+  { name: 'set_control', title: 'Kontrolle setzen', description: 'Legt fest, welche Fraktion einen Ort ab dem Zeitalter des angegebenen Jahres kontrolliert (faction leer = neutral).', inputSchema: S({ timeline: TL, place: str('Ort'), faction: str('Fraktion'), year: YR, era: str('oder Name des Zeitalters') }, ['timeline', 'place']), run: a => internalCall('POST', '/api/v1/control', {}, a) }
+];
+const MCP_INSTRUCTIONS = 'Ascandir InteractiveMap: interaktive Karte (Star Wars u. eigene Welten) mit Zeitlinien, Zeitaltern, Fraktionen und Orten. ' +
+  'Der Kanon ist schreibgeschützt – Änderungen nur in eigenen Zeitlinien (vorher list_timelines oder copy_timeline). Jahre als "3640 BBY"/"4 ABY". ' +
+  'Vor Änderungen den Stand mit get_place/get_state lesen. Beschreibungen kurz und ohne Präfixe.';
+async function handleMcp(req, res, url, writeAllowed) {
+  if (req.method === 'GET') return send(res, 405, { error: 'Use POST (Streamable HTTP)' }, 'application/json', { Allow: 'POST' });
+  if (req.method === 'DELETE') return send(res, 200, { ok: true });
+  if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+  let msg; try { msg = JSON.parse(await readBody(req, 2e6)); } catch { return send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
+  const tools = MCP_TOOLS.filter(t => t.ro || (writeAllowed && !READONLY));
+  async function one(m) {
+    const id = m.id, isNote = id === undefined;
+    const ok = result => ({ jsonrpc: '2.0', id, result }), err = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
+    try {
+      switch (m.method) {
+        case 'initialize': return ok({ protocolVersion: (m.params && m.params.protocolVersion) || '2025-06-18', capabilities: { tools: { listChanged: false } },
+          serverInfo: { name: 'ascandir-interactivemap', title: 'Ascandir InteractiveMap', version: VERSION }, instructions: MCP_INSTRUCTIONS });
+        case 'ping': return ok({});
+        case 'tools/list': return ok({ tools: tools.map(t => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema,
+          annotations: { title: t.title, readOnlyHint: !!t.ro, destructiveHint: !!t.destructive, idempotentHint: !!t.ro, openWorldHint: false } })) });
+        case 'tools/call': {
+          const t = tools.find(x => x.name === (m.params || {}).name);
+          if (!t) return err(-32602, 'Unknown tool' + (writeAllowed ? '' : ' (schreibende Werkzeuge nur über /mcp/<token>)'));
+          const r = await t.run((m.params || {}).arguments || {});
+          return ok({ content: [{ type: 'text', text: r.body }], isError: r.code >= 400 });
+        }
+        case 'resources/list': return ok({ resources: [] });
+        case 'prompts/list': return ok({ prompts: [] });
+        default: return isNote ? null : err(-32601, 'Method not found');
+      }
+    } catch (e) { return err(-32603, e.message); }
+  }
+  if (Array.isArray(msg)) { const out = (await Promise.all(msg.map(one))).filter(Boolean); return out.length ? send(res, 200, out) : (res.writeHead(202), res.end()); }
+  const r = await one(msg);
+  if (!r) { res.writeHead(202); return res.end(); }
+  return send(res, 200, r);
+}
+
 // ---------------------------------------------------------------- Server
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
     if (url.pathname === '/health') return send(res, 200, { ok: true });
     if (url.pathname === '/api/v1/openapi.json') return send(res, 200, openApi(req));
+    const mm = url.pathname.match(/^\/mcp(?:\/([^/]+))?\/?$/);
+    if (mm) {
+      const tokenGiven = mm[1] ? decodeURIComponent(mm[1]) : null;
+      if (tokenGiven && !(API_TOKEN && tsEqual(tokenGiven, API_TOKEN))) return send(res, 401, { error: 'invalid token' });
+      if (!tokenGiven && !PUBLIC_VIEW && !tokenOk(req, url)) return send(res, 401, { error: 'unauthorized' });
+      return await handleMcp(req, res, url, !!tokenGiven || tokenOk(req, url));
+    }
     if (url.pathname === '/api/login' && req.method === 'POST') {
       const ip = (req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '?');
       const a = loginAttempts.get(ip) || { n: 0, t: 0 };

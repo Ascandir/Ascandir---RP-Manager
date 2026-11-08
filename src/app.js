@@ -1786,7 +1786,10 @@
       </section>
       ${FS && FS.server ? `<section class="card"><h3>${esc(t('apiTitle'))}</h3><p class="hint">${esc(t('apiHint'))}</p>
         <code class="path">${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'api/v1/summary?year=' + state.year + (state.tl.readonly ? '' : '&timeline=' + encodeURIComponent(state.tl.name)) + '&lang=' + settings.lang)}</code>
-        <a href="api/v1" target="_blank">api/v1</a></section>` : ''}
+        <a href="api/v1" target="_blank">api/v1</a>
+        <h4>${esc(t('mcpTitle'))}</h4><p class="hint">${esc(t('mcpHint'))}</p>
+        <code class="path">${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'mcp/<IAM_API_TOKEN>')}</code>
+        <p class="hint">${esc(t('mcpRead'))}: <code>${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'mcp')}</code></p></section>` : ''}
       <section class="card"><h3>${esc(t('dataFolder'))}</h3>
         <p class="hint">${esc(t('dataHint'))}</p>
         ${info.dataDir ? `<code class="path">${esc(info.dataDir)}</code>` : ''}
