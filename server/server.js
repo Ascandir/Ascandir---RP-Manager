@@ -479,7 +479,12 @@ const MCP_INSTRUCTIONS = 'Ascandir InteractiveMap: interaktive Karte (Star Wars 
   'Der Kanon ist schreibgeschützt – Änderungen nur in eigenen Zeitlinien (vorher list_timelines oder copy_timeline). Jahre als "3640 BBY"/"4 ABY". ' +
   'Vor Änderungen den Stand mit get_place/get_state lesen. Beschreibungen kurz und ohne Präfixe.';
 async function handleMcp(req, res, url, writeAllowed) {
-  if (req.method === 'GET') return send(res, 405, { error: 'Use POST (Streamable HTTP)' }, 'application/json', { Allow: 'POST' });
+  if (req.method === 'GET') {
+    if ((req.headers.accept || '').includes('text/event-stream')) return send(res, 405, { error: 'Use POST (Streamable HTTP)' }, 'application/json', { Allow: 'POST' });
+    // Statusanzeige für den Browser (zur Fehlersuche)
+    return send(res, 200, { status: 'ok', server: 'Ascandir InteractiveMap MCP', version: VERSION, transport: 'streamable-http (POST)',
+      access: writeAllowed ? 'lesen + schreiben (Token korrekt)' : 'nur lesen', tools: MCP_TOOLS.filter(t => t.ro || (writeAllowed && !READONLY)).map(t => t.name) });
+  }
   if (req.method === 'DELETE') return send(res, 200, { ok: true });
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
   let msg; try { msg = JSON.parse(await readBody(req, 2e6)); } catch { return send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
