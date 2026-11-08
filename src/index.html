@@ -2,6 +2,10 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b111c">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self';">
   <title>Ascandir – InteractiveMap</title>
   <link rel="icon" href="data:,">
@@ -74,6 +78,11 @@
 
   <main id="mapWrap">
     <canvas id="map"></canvas>
+    <div id="mobBar">
+      <button id="mobFilter" title="Filter">☰</button>
+      <button id="mobPlanner" title="Reise">🧭</button>
+      <button id="mobPanel" title="Info">ℹ</button>
+    </div>
     <div id="tooltip" hidden></div>
     <div id="toolHint" hidden></div>
     <div id="updBanner" hidden></div>
@@ -85,7 +94,9 @@
     <div id="settingsView" hidden></div>
   </main>
 
+  <div id="backdrop" hidden></div>
   <aside id="right">
+    <div class="sheet-handle"><span></span><button id="sheetClose">✕</button></div>
     <div id="planner" hidden></div>
     <div id="editor" hidden></div>
     <div id="info"></div>

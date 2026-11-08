@@ -148,6 +148,8 @@ volumes:
 
 **Benutzer & Rechte:** Unter *Einstellungen → 👥 Benutzer* (nur für Admins) legst du weitere Benutzer an – als **Admin** (darf alles) oder **Benutzer**. Über *Rechte* bekommt jeder Benutzer pro Welt und pro Zeitlinie *kein Zugriff*, *ansehen* oder *bearbeiten*; Zeitlinien erben die Einstellung ihrer Welt, Welten die Einstellung „Alle Welten“. „Bearbeiten“ einer Welt erlaubt auch neue Zeitlinien darin. Ebenso lassen sich die Rechte der **Gäste** (nicht angemeldet) einschränken, z. B. private Zeitlinien verstecken. Der Server prüft die Rechte bei jedem Zugriff (auch API und MCP ohne Token = Gast-Rechte). Updates, Datenordner, API-Adressen und Benutzerverwaltung sehen nur Admins. Der Benutzer aus `IAM_USER`/`IAM_PASSWORD` ist immer Haupt-Admin. Die Benutzer liegen (mit verschlüsselten Passwörtern) in `/data/users.json`.
 
+**Handy & Tablet:** Die Browser-Version passt sich an kleine Bildschirme an: ein Finger verschiebt, zwei Finger zoomen, Tippen wählt einen Ort. Filter liegen in der Schublade ☰, Infos/Reiseplaner/Editor öffnen sich als Panel von unten (ℹ, 🧭). JSON lässt sich über *Datei → Importieren* (Dateiauswahl des Handys) oder *Datei → Als JSON bearbeiten* (Text einfügen) einspielen. Tipp: Im Handy-Browser „Zum Startbildschirm hinzufügen“ – dann startet die Karte wie eine App.
+
 ### 2. Cloudflare-Tunnel
 
 In Cloudflare Zero Trust beim Tunnel einen *Public Hostname* anlegen, z. B. `karte.deine-domain.de` → Service `http://<IP-des-Servers>:8085`. Läuft `cloudflared` als Container im selben Docker-Netzwerk, geht auch `http://interactivemap:8080`.

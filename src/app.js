@@ -524,7 +524,7 @@
       <div id="plResult">${planResultHtml(r)}</div>`;
     $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); draw(); };
     $$('.pl-in').forEach(inp => inp.addEventListener('change', () => { P.stops[+inp.dataset.i] = inp.value; saveSoon(); renderPlanner(); draw(); }));
-    $$('.pl-pick').forEach(b => b.addEventListener('click', () => { state.pick = state.pick === +b.dataset.i ? null : +b.dataset.i; renderPlanner(); if (state.pick != null) toast(t('plPickHint')); }));
+    $$('.pl-pick').forEach(b => b.addEventListener('click', () => { state.pick = state.pick === +b.dataset.i ? null : +b.dataset.i; renderPlanner(); if (state.pick != null) { toast(t('plPickHint')); if (isMobile()) setSheet(false); } }));
     $$('.pl-del').forEach(b => b.addEventListener('click', () => { P.stops.splice(+b.dataset.i, 1); saveSoon(); renderPlanner(); draw(); }));
     $('#plAdd').onclick = () => { P.stops.splice(P.stops.length - 1, 0, ''); saveSoon(); renderPlanner(); };
     $('#plSwap').onclick = () => { P.stops.reverse(); saveSoon(); renderPlanner(); draw(); };
@@ -532,7 +532,7 @@
     bindNum('#plCls', 'cls', Number); bindNum('#plStay', 'stay', v => Math.max(0, +v || 0)); bindNum('#plKm', 'km', v => Math.max(0.01, +v || 1));
     const pm = $('#plMode'); if (pm) pm.addEventListener('change', () => { P.mode = pm.value; saveSoon(); renderPlanner(); draw(); });
     const cp = $('#plCopy'); if (cp) cp.onclick = () => { navigator.clipboard.writeText(planText()).then(() => toast(t('plCopied'))).catch(() => alert(planText())); };
-    const fit = $('#plFit'); if (fit) fit.onclick = fitPlan;
+    const fit = $('#plFit'); if (fit) fit.onclick = () => { fitPlan(); if (isMobile()) setSheet(false); };
   }
   function classHint(c) {
     const k = c <= 0.5 ? 'cls05' : c <= 1 ? 'cls1' : c <= 2 ? 'cls2' : c <= 4 ? 'cls4' : 'cls10';
@@ -933,7 +933,23 @@
 
   let drag = null;
   canvas.addEventListener('contextmenu', e => e.preventDefault());
-  canvas.addEventListener('mousedown', e => {
+  // Touch: zwei Finger = Pinch-Zoom/Verschieben
+  const pointers = new Map(); let pinch = null;
+  canvas.style.touchAction = 'none';
+  canvas.addEventListener('pointerdown', e => {
+    try { canvas.setPointerCapture(e.pointerId); } catch { }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+    if (pointers.size === 2) {
+      if (drag && drag.kind === 'move' && !drag.moved) state.undo.pop();
+      drag = null; canvas.classList.remove('dragging');
+      const [a, b] = [...pointers.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+      return;
+    }
+    if (pointers.size > 2) return;
+    onDown(e);
+  });
+  function onDown(e) {
     const r = canvas.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, w = s2w(sx, sy);
     if (e.button === 1 || e.button === 2 || !editable() || state.tool === 'select') {
       const hit = e.button === 0 ? hitTest(sx, sy) : null;
@@ -964,15 +980,24 @@
       if (state.routeDraft[state.routeDraft.length - 1] !== hit.id) state.routeDraft.push(hit.id);
       renderEditor(); draw();
     }
-  });
-  window.addEventListener('mousemove', e => {
+  }
+  window.addEventListener('pointermove', e => {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+    if (pinch && pointers.size >= 2) {
+      const [a, b] = [...pointers.values()], d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      const r = canvas.getBoundingClientRect();
+      state.view.cx -= (mx - pinch.mx) / state.view.z; state.view.cy -= (my - pinch.my) / state.view.z;
+      if (pinch.d > 0 && d > 0) zoomAt(mx - r.left, my - r.top, d / pinch.d);
+      pinch = { d, mx, my }; interacting(); draw(); return;
+    }
+    if (e.pointerType === 'touch' && !drag) return;
     const r = canvas.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
     mouse = { x: sx, y: sy, in: sx >= 0 && sy >= 0 && sx <= W && sy <= H && state.mode !== 'settings' };
     if (trackDrag) return;
     if (drag) {
       const w = s2w(sx, sy);
       if (drag.kind === 'pan') {
-        if (Math.abs(sx - drag.sx) + Math.abs(sy - drag.sy) > 3) drag.moved = true;
+        if (Math.abs(sx - drag.sx) + Math.abs(sy - drag.sy) > (e.pointerType === 'touch' ? 10 : 3)) drag.moved = true;
         state.view.cx = drag.cx - (sx - drag.sx) / state.view.z; state.view.cy = drag.cy - (sy - drag.sy) / state.view.z;
         if (drag.moved) interacting();
       } else if (drag.kind === 'move') { drag.moved = true; drag.obj.x = Math.round(w.x - drag.ox); drag.obj.y = Math.round(w.y - drag.oy); bump(); interacting(); }
@@ -984,7 +1009,7 @@
     if (!mouse.in) { tt.hidden = true; if (state.hover) { state.hover = null; draw(); } return; }
     if (performance.now() < interactUntil) return;
     const hit = hitTest(sx, sy);
-    if (hit) {
+    if (hit && e.pointerType !== 'touch') {
       const fac = controllerOf(hit);
       tt.innerHTML = `<b>${esc(hit.name)}</b> <span class="dim">· ${esc(typeLabel(hit.type))}</span>${fac ? `<br><span style="color:${esc(fac.color)}">■</span> ${esc(fac.name)}` : ''}`;
       tt.style.left = (sx + 14) + 'px'; tt.style.top = (sy + 12) + 'px'; tt.hidden = false;
@@ -992,18 +1017,22 @@
     const nh = hit ? hit.id : null, cursorTool = editable() && (state.tool === 'paint' || state.tool === 'erase' || (state.tool === 'route' && state.routeDraft));
     if (nh !== state.hover || cursorTool) { state.hover = nh; draw(); }
   });
-  window.addEventListener('mouseup', e => {
+  const pointerEnd = e => {
+    pointers.delete(e.pointerId);
+    if (pinch) { if (pointers.size < 2) pinch = null; return; }
     if (trackDrag) { trackDrag = false; return; }
     if (!drag) return;
     const d = drag; drag = null; canvas.classList.remove('dragging');
     if (d.kind === 'pan' && !d.moved && e.button === 0 && state.pick != null && d.hit) {
-      settings.planner.stops[state.pick] = d.hit.name; state.pick = null; saveSoon(); renderPlanner(); draw();
-    } else if (d.kind === 'pan' && !d.moved && e.button === 0) { state.selected = d.hit ? d.hit.id : null; renderInfo(); draw(); }
+      settings.planner.stops[state.pick] = d.hit.name; state.pick = null; saveSoon(); renderPlanner(); draw(); if (isMobile()) setSheet(true);
+    } else if (d.kind === 'pan' && !d.moved && e.button === 0) { state.selected = d.hit ? d.hit.id : null; renderInfo(); draw(); if (isMobile()) setSheet(!!d.hit || state.plannerOpen || state.mode === 'edit'); }
     else if (d.kind === 'move') {
       if (!d.moved) { state.undo.pop(); state.selected = d.hit.id; renderInfo(); draw(); }
       else { if (isSW()) d.obj.region = regionAt(d.obj.x, d.obj.y) || d.obj.region; state.selected = d.hit.id; afterEdit(); }
     } else if (d.kind === 'paint' || d.kind === 'erase') afterEdit();
-  });
+  };
+  window.addEventListener('pointerup', pointerEnd);
+  window.addEventListener('pointercancel', pointerEnd);
   canvas.addEventListener('wheel', e => { e.preventDefault(); const r = canvas.getBoundingClientRect(); zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
   function zoomAt(sx, sy, f) {
     rebuildTree(); computePositions();
@@ -1176,13 +1205,14 @@
       tctx.beginPath(); tctx.moveTo(mx - 6, 0); tctx.lineTo(mx + 6, 0); tctx.lineTo(mx, 7); tctx.closePath(); tctx.fill();
     }
   }
-  track.addEventListener('mousedown', e => {
+  track.style.touchAction = 'none';
+  track.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
-    trackDrag = true;
+    trackDrag = true; try { track.setPointerCapture(e.pointerId); } catch { }
     const r = track.getBoundingClientRect(); setYear(Math.round(tyear(e.clientX - r.left)), true);
     const move = ev => { if (!trackDrag) return; const rr = track.getBoundingClientRect(); setYear(Math.round(tyear(Math.max(0, Math.min(TW, ev.clientX - rr.left)))), true); };
-    const up = () => { trackDrag = false; window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+    const up = () => { trackDrag = false; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
   });
   track.addEventListener('dblclick', () => fitTrack(true));
   function zoomTrack(f) { const m = state.year, span = state.track.b - state.track.a, ns = Math.max(4, Math.min(1e6, span * f)), r = (m - state.track.a) / span; state.track = { a: m - r * ns, b: m - r * ns + ns }; drawTrack(); }
@@ -1272,7 +1302,7 @@
     const q = $('#search').value.trim().toLowerCase(); if (!q) return;
     const cands = state.tl.objects.filter(o => o.name.toLowerCase() === q);
     const o = cands.sort((a, b) => typeOrder(a) === 1 ? -1 : typeOrder(b) === 1 ? 1 : 0)[0] || state.tl.objects.find(o => o.name.toLowerCase().includes(q));
-    if (o) { if (settings.types[o.type] === false) { settings.types[o.type] = true; renderLeft(); } if (!existsNow(o) && o.from != null) setYear(+o.from); centerOn(o, 1.4); }
+    if (o) { if (settings.types[o.type] === false) { settings.types[o.type] = true; renderLeft(); } if (!existsNow(o) && o.from != null) setYear(+o.from); centerOn(o, 1.4); if (isMobile()) { setDrawer(false); setSheet(true); $('#search').blur(); } }
   });
   $('#search').addEventListener('keydown', e => { if (e.key === 'Enter') $('#search').dispatchEvent(new Event('change')); });
 
@@ -1778,6 +1808,7 @@
   function setMode(m) {
     if (m !== 'view' && isGuest()) { loginDialog(); return; }
     state.mode = m;
+    if (isMobile()) setSheet(m === 'edit');
     $('#settingsView').hidden = m !== 'settings';
     if (m === 'settings') renderSettings();
     renderAll(true);
@@ -1968,6 +1999,17 @@
     $('#modalOk').onclick = () => { let r; try { r = onOk(); } catch (e) { alert(e.message); } if (r !== false) close(); };
     $('#modalBody').onkeydown = e => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') $('#modalOk').click(); };
   }
+
+  // ------------------------------------------------------------- Mobilansicht
+  const isMobile = () => window.matchMedia('(max-width: 900px)').matches;
+  function setSheet(open) { document.body.classList.toggle('sheet-open', !!open); }
+  function setDrawer(open) { document.body.classList.toggle('drawer-open', !!open); $('#backdrop').hidden = !open; }
+  $('#mobFilter').addEventListener('click', () => setDrawer(!document.body.classList.contains('drawer-open')));
+  $('#backdrop').addEventListener('click', () => setDrawer(false));
+  $('#mobPanel').addEventListener('click', () => setSheet(!document.body.classList.contains('sheet-open')));
+  $('#mobPlanner').addEventListener('click', () => { state.plannerOpen = true; state.pick = null; renderPlanner(); setSheet(true); draw(); });
+  $('#sheetClose').addEventListener('click', () => setSheet(false));
+  window.matchMedia('(max-width: 900px)').addEventListener('change', () => { setSheet(false); setDrawer(false); setTimeout(resize, 50); });
 
   $('#zoomIn').addEventListener('click', () => zoomAt(W / 2, H / 2, 1.4));
   $('#zoomOut').addEventListener('click', () => zoomAt(W / 2, H / 2, 1 / 1.4));
