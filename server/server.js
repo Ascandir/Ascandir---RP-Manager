@@ -20,9 +20,32 @@ const USER = process.env.IAM_USER || 'admin';
 const PASSWORD = process.env.IAM_PASSWORD || '';
 const API_TOKEN = process.env.IAM_API_TOKEN || '';
 const READONLY = /^(1|true|yes)$/i.test(process.env.IAM_READONLY || '');
+const PUBLIC_VIEW = !/^(0|false|no)$/i.test(process.env.IAM_PUBLIC_VIEW || 'true'); // Gäste dürfen ansehen
 const VERSION = (() => { try { return require(path.join(__dirname, '..', 'package.json')).version; } catch { return 'docker'; } })();
 const DIRS = ['worlds', 'timelines'];
 for (const d of DIRS) fs.mkdirSync(path.join(DATA_DIR, d), { recursive: true });
+
+// ---------------------------------------------------------------- Sitzungen (signiertes Cookie, übersteht Neustarts)
+const SECRET = (() => {
+  const f = path.join(DATA_DIR, '.session-secret');
+  try { return fs.readFileSync(f, 'utf8').trim(); } catch { const s = crypto.randomBytes(32).toString('hex'); try { fs.writeFileSync(f, s, { mode: 0o600 }); } catch { } return s; }
+})();
+const sign = v => crypto.createHmac('sha256', SECRET + '|' + PASSWORD).update(v).digest('hex');
+function makeSession() { const exp = Date.now() + 30 * 864e5; const v = `${exp}`; return `${v}.${sign(v)}`; }
+function cookieOf(req, name) { const m = (req.headers.cookie || '').split(/;\s*/).find(c => c.startsWith(name + '=')); return m ? decodeURIComponent(m.slice(name.length + 1)) : null; }
+function hasSession(req) {
+  const c = cookieOf(req, 'iam_session'); if (!c) return false;
+  const [v, sig] = c.split('.'); if (!v || !sig || +v < Date.now()) return false;
+  return tsEqual(sig, sign(v));
+}
+function basicOk(req) {
+  const h = req.headers.authorization || ''; if (!PASSWORD || !h.startsWith('Basic ')) return false;
+  const [u, ...p] = Buffer.from(h.slice(6), 'base64').toString('utf8').split(':');
+  return tsEqual(u, USER) && tsEqual(p.join(':'), PASSWORD);
+}
+const isAdmin = req => !PASSWORD || hasSession(req) || basicOk(req);
+const secureReq = req => (req.headers['x-forwarded-proto'] || '').startsWith('https');
+const loginAttempts = new Map();
 
 // ---------------------------------------------------------------- Kanon-Daten aus den Browser-Skripten laden
 const sandbox = { window: {}, navigator: { language: 'de' }, console };
@@ -56,18 +79,16 @@ function readBody(req, limit = 20 * 1024 * 1024) {
   });
 }
 const tsEqual = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
-function authorized(req, url) {
-  if (!PASSWORD && !API_TOKEN) return true;
+function tokenOk(req, url) {
+  if (!API_TOKEN) return false;
   const h = req.headers.authorization || '';
-  if (API_TOKEN) {
-    if (h.startsWith('Bearer ') && tsEqual(h.slice(7).trim(), API_TOKEN)) return true;
-    if (url.searchParams.get('token') && tsEqual(url.searchParams.get('token'), API_TOKEN)) return true;
-  }
-  if (PASSWORD && h.startsWith('Basic ')) {
-    const [u, ...p] = Buffer.from(h.slice(6), 'base64').toString('utf8').split(':');
-    if (tsEqual(u, USER) && tsEqual(p.join(':'), PASSWORD)) return true;
-  }
-  return !PASSWORD && !url.pathname.startsWith('/api/v1'); // nur Token gesetzt: Oberfläche offen, KI-API geschützt
+  if (h.startsWith('Bearer ') && tsEqual(h.slice(7).trim(), API_TOKEN)) return true;
+  return !!(url.searchParams.get('token') && tsEqual(url.searchParams.get('token'), API_TOKEN));
+}
+// Lesen: öffentlich (wenn IAM_PUBLIC_VIEW) – Schreiben: nur mit Anmeldung bzw. API-Token
+function canRead(req, url) {
+  if (url.pathname.startsWith('/api/v1')) return PUBLIC_VIEW || !PASSWORD && !API_TOKEN || isAdmin(req) && !!PASSWORD || tokenOk(req, url);
+  return PUBLIC_VIEW || isAdmin(req) || tokenOk(req, url);
 }
 
 // ---------------------------------------------------------------- Live-Updates (SSE)
@@ -401,9 +422,24 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === '/health') return send(res, 200, { ok: true });
     if (url.pathname === '/api/v1/openapi.json') return send(res, 200, openApi(req));
-    if (!authorized(req, url)) return send(res, 401, { error: 'unauthorized' }, 'application/json', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
-
-    if (url.pathname === '/api/info') return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, dataDir: DATA_DIR });
+    if (url.pathname === '/api/login' && req.method === 'POST') {
+      const ip = (req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '?');
+      const a = loginAttempts.get(ip) || { n: 0, t: 0 };
+      if (a.n >= 5 && Date.now() - a.t < 60000) return send(res, 429, { error: 'Zu viele Versuche – bitte 1 Minute warten.' });
+      const b = JSON.parse((await readBody(req, 10000)) || '{}');
+      if (!PASSWORD || (tsEqual(b.user || '', USER) && tsEqual(b.password || '', PASSWORD))) {
+        loginAttempts.delete(ip);
+        return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': `iam_session=${makeSession()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}${secureReq(req) ? '; Secure' : ''}` });
+      }
+      loginAttempts.set(ip, { n: a.n + 1, t: Date.now() });
+      return send(res, 401, { error: 'Benutzername oder Passwort falsch.' });
+    }
+    if (url.pathname === '/api/logout') return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': 'iam_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
+    if (url.pathname === '/api/info') return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, loginRequired: !!PASSWORD, admin: isAdmin(req), publicView: PUBLIC_VIEW, dataDir: isAdmin(req) ? DATA_DIR : null });
+    if (!canRead(req, url)) {
+      if (url.pathname.startsWith('/api/')) return send(res, 401, { error: 'unauthorized' }, 'application/json', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
+      return send(res, 401, 'Anmeldung erforderlich', 'text/plain; charset=utf-8', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
+    }
     if (url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.write(': connected\n\n'); clients.add(res); req.on('close', () => clients.delete(res)); return;
@@ -420,6 +456,7 @@ const server = http.createServer(async (req, res) => {
       const p = safeFile(dir, file);
       if (req.method === 'GET') return fs.existsSync(p) ? send(res, 200, fs.readFileSync(p, 'utf8')) : send(res, 404, { error: 'not found' });
       if (READONLY) return send(res, 403, { error: 'read-only' });
+      if (!isAdmin(req)) return send(res, 401, { error: 'login required' });
       if (req.method === 'PUT') { const body = await readBody(req); JSON.parse(body); const tmp = p + '.tmp'; fs.writeFileSync(tmp, body, 'utf8'); fs.renameSync(tmp, p); return send(res, 200, { ok: true }); }
       if (req.method === 'DELETE') { if (fs.existsSync(p)) fs.unlinkSync(p); return send(res, 200, { ok: true }); }
       return send(res, 405, { error: 'method not allowed' });

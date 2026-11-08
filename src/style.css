@@ -222,3 +222,5 @@ body[data-theme="fantasy"] #toolHint { background: #f7edd6ee; color: #8b1e1e; bo
 .desc, .notable { white-space: pre-line; line-height: 1.45; overflow-wrap: anywhere; }
 .desc { margin: 8px 0; }
 .notable { margin-top: 8px; }
+#btnLogin { background: var(--accent); color: #1a1205; border-color: var(--accent); font-weight: 600; }
+[hidden] { display: none !important; }

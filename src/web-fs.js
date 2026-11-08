@@ -26,6 +26,14 @@
       };
       connect();
     },
+    info: () => info,
+    login: async (user, password) => {
+      const r = await fetch('api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user, password }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      return true;
+    },
+    logout: () => fetch('api/logout', { method: 'POST' }).then(() => true),
     updCheck: async () => ({ state: 'docker' }),
     updDownload: async () => true, updInstall: async () => true, onUpdate: () => { }
   };

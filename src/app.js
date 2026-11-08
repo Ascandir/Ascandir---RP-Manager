@@ -53,9 +53,11 @@
     undo: [], appInfo: { version: 'dev', packaged: false }, upd: null
   };
   const wtype = () => WORLD_TYPES[state.world.type] || WORLD_TYPES.scifi;
+  // Gast = Server-Version mit Passwort, aber nicht angemeldet -> nur ansehen
+  const isGuest = () => !!(FS && FS.server && FS.info && FS.info() && FS.info().loginRequired && !FS.info().admin);
   const isSW = () => state.world.geometry === 'galaxy-sw';
   const worldName = w => w.builtin ? (w.name[window.I18N.lang] || w.name.de) : w.name;
-  const editable = () => state.mode === 'edit' && !state.tl.readonly;
+  const editable = () => state.mode === 'edit' && !state.tl.readonly && !isGuest();
   const facById = id => state.tl.factions.find(f => f.id === id);
   const typeOrder = o => wtype().order[o.type] ?? 9;
   const typeLabel = ty => t('types.' + ty);
@@ -182,6 +184,7 @@
         } catch (e) { console.error(e); }
         return;
       }
+      if (isGuest()) return;
       const customWorlds = state.worlds.filter(w => !w.builtin);
       for (const w of customWorlds) await writeFile('worlds', fileFor(w, customWorlds), serialize(w));
       const tls = state.timelines.filter(x => !x.readonly);
@@ -916,7 +919,7 @@
   window.addEventListener('keydown', e => {
     const tag = (e.target.tagName || '').toLowerCase();
     const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { if (!typing) { e.preventDefault(); undo(); } return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { if (!typing && !isGuest()) { e.preventDefault(); undo(); } return; }
     if (typing || !$('#modal').hidden || state.mode === 'settings') return;
     const step = e.shiftKey ? 10 : 1;
     if (e.key === 'ArrowLeft') { e.preventDefault(); setYear(state.year - step); }
@@ -1154,7 +1157,8 @@
     const o = objMap[state.selected] || state.tl.objects.find(x => x.id === state.selected);
     if (!o) {
       box.innerHTML = `<p class="hint">${esc(t('infoEmpty'))}<br><br><b>${esc(t('controls'))}:</b> ${esc(t('controlsText'))}${state.mode === 'edit' ? esc(t('controlsEdit')) : ''}</p>
-        ${state.tl.readonly ? `<p class="hint">${esc(t('approxNote'))}</p>` : ''}`;
+        ${state.tl.readonly ? `<p class="hint">${esc(t('approxNote'))}</p>` : ''}
+        ${isGuest() ? `<p class="hint">🔒 ${esc(t('guestHint'))}</p>` : ''}`;
       return;
     }
     rebuildTree();
@@ -1407,7 +1411,26 @@
     $('#tabView').classList.toggle('active', state.mode === 'view');
     $('#tabEdit').classList.toggle('active', state.mode === 'edit');
     $('#tabSettings').classList.toggle('active', state.mode === 'settings');
+    const guest = isGuest();
+    for (const id of ['#tabEdit', '#tabSettings', '#btnNewWorld', '#btnNewTl', '#btnDupTl', '#btnDelTl', '#btnImport', '#btnJson', '#btnFolder']) $(id).hidden = guest;
+    $('#btnLogin').hidden = !guest;
+    $('#btnLogin').textContent = '🔒 ' + t('login');
   }
+  function loginDialog() {
+    modal(t('loginTitle'), `
+      <p class="hint" style="margin-top:0">${esc(t('loginHint'))}</p>
+      <label class="field"><span>${esc(t('user'))}</span><input id="mUser" autocomplete="username"></label>
+      <label class="field"><span>${esc(t('password'))}</span><input id="mPass" type="password" autocomplete="current-password"></label>
+      <div id="mLoginErr" class="hint warn"></div>`,
+      () => {
+        FS.login($('#mUser').value.trim(), $('#mPass').value)
+          .then(() => location.reload())
+          .catch(e => { $('#modal').hidden = false; $('#mLoginErr').textContent = e.message || t('loginFailed'); });
+        return false;
+      }, { ok: t('login') });
+    setTimeout(() => $('#mUser').focus(), 0);
+  }
+  $('#btnLogin').addEventListener('click', loginDialog);
   $('#worldSelect').addEventListener('change', e => switchWorld(e.target.value));
   $('#tlSelect').addEventListener('change', e => selectTimeline(e.target.value));
   $('#btnNewWorld').addEventListener('click', () => {
@@ -1559,6 +1582,7 @@
 
   // ------------------------------------------------------------- Modus & Einstellungen
   function setMode(m) {
+    if (m !== 'view' && isGuest()) { loginDialog(); return; }
     state.mode = m;
     $('#settingsView').hidden = m !== 'settings';
     if (m === 'settings') renderSettings();
@@ -1599,9 +1623,11 @@
         <p class="hint">${esc(t('dataHint'))}</p>
         ${info.dataDir ? `<code class="path">${esc(info.dataDir)}</code>` : ''}
         <button id="setFolder">${esc(t('openFolder'))}</button></section>
+      ${FS && FS.server && FS.info().loginRequired ? `<section class="card"><h3>${esc(t('account'))}</h3><button id="setLogout">${esc(t('logout'))}</button></section>` : ''}
       <section class="card"><h3>${esc(t('about'))}</h3><p class="hint">Ascandir InteractiveMap ${esc(info.version)} – ${esc(t('aboutText'))}</p></section>
     </div>`;
     $('#setBack').addEventListener('click', () => setMode('view'));
+    const lo = $('#setLogout'); if (lo) lo.addEventListener('click', () => FS.logout().then(() => location.reload()));
     $$('[data-lang]').forEach(b => b.addEventListener('click', () => setLang(b.dataset.lang)));
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
     if ($('#setAuto')) { $('#setAuto').addEventListener('change', e => { settings.autoUpdate = e.target.checked; saveSoon(); }); $('#setCheck').addEventListener('click', () => checkUpdates(true)); }

@@ -125,11 +125,14 @@ volumes:
 
 | Variable | Bedeutung |
 |---|---|
-| `IAM_USER` / `IAM_PASSWORD` | Anmeldung für die Oberfläche im Browser (leer = ohne Passwort, nicht empfohlen bei Tunnel) |
+| `IAM_USER` / `IAM_PASSWORD` | Anmeldung zum **Bearbeiten** und für die **Einstellungen** (leer = alles offen, nicht empfohlen bei Tunnel) |
+| `IAM_PUBLIC_VIEW` | `true` (Standard): Gäste können die Karte ohne Anmeldung ansehen, Welt/Zeitlinie/Jahr wählen und exportieren. `false`: auch zum Ansehen ist eine Anmeldung nötig. |
 | `IAM_API_TOKEN` | Schlüssel für Story-KI/ChatGPT. Ohne Token ist der Schreibzugriff der API abgeschaltet. |
 | `IAM_READONLY` | `true` = nur lesen |
 
 **Update:** In Portainer beim Stack *Update the stack* mit *Re-pull image* ausführen. Jede neue Version auf GitHub erzeugt automatisch ein neues Image.
+
+**Gäste und Anmeldung:** Ohne Anmeldung sieht man die Karte nur an. Oben rechts gibt es *🔒 Anmelden*, danach sind Editor, Einstellungen, neue Welten/Zeitlinien, Import und JSON-Bearbeitung freigeschaltet. Die Anmeldung bleibt 30 Tage gespeichert; abmelden geht unter *Einstellungen → Konto*.
 
 ### 2. Cloudflare-Tunnel
 
@@ -138,7 +141,7 @@ Nutzt du *Cloudflare Access*, setze für den Pfad `/api/v1/*` eine Bypass-Regel,
 
 ### 3. Story-KI anbinden (Lese-API)
 
-Alle Aufrufe brauchen `Authorization: Bearer <IAM_API_TOKEN>` oder `?token=<IAM_API_TOKEN>`.
+Lesende Aufrufe sind bei `IAM_PUBLIC_VIEW=true` ohne Schlüssel möglich, sonst mit `Authorization: Bearer <IAM_API_TOKEN>` oder `?token=<IAM_API_TOKEN>`. Schreibende Aufrufe brauchen immer den Token.
 
 | Aufruf | Liefert |
 |---|---|
