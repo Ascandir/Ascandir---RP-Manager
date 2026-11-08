@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;">
+  <title>Ascandir – Galaxiekarte</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand"><span class="logo"></span>Ascandir <span class="dim">· Galaxiekarte</span></div>
+    <div class="tl-controls">
+      <label class="dim" for="tlSelect">Zeitlinie</label>
+      <select id="tlSelect"></select>
+      <button id="btnNewTl" title="Neue Zeitlinie anlegen">＋ Neu</button>
+      <button id="btnDupTl" title="Aktuelle Zeitlinie kopieren">⧉ Kopieren</button>
+      <button id="btnDelTl" title="Zeitlinie löschen">🗑</button>
+      <span class="sep"></span>
+      <button id="btnExport" title="Zeitlinie als Datei speichern">⭳ Export</button>
+      <button id="btnImport" title="Zeitlinie aus Datei laden">⭱ Import</button>
+      <input type="file" id="fileImport" accept=".json,.geojson,application/json,application/geo+json" hidden>
+      <span class="sep"></span>
+      <button id="btnJson" title="Aktuelle Zeitlinie als JSON bearbeiten">{ } JSON</button>
+      <button id="btnFolder" title="Ordner mit den Zeitlinien-Dateien öffnen">📂 Ordner</button>
+    </div>
+    <div class="mode-tabs">
+      <button id="tabView" class="active">Ansicht</button>
+      <button id="tabEdit">Editor</button>
+    </div>
+  </header>
+
+  <aside id="left">
+    <section>
+      <h3>Suche</h3>
+      <input id="search" list="searchList" placeholder="Planet, Mond, Station…">
+      <datalist id="searchList"></datalist>
+    </section>
+    <section>
+      <h3>Objekte</h3>
+      <label class="chk"><input type="checkbox" data-type="sun" checked><span class="ico sun"></span>Sonnen</label>
+      <label class="chk"><input type="checkbox" data-type="planet" checked><span class="ico planet"></span>Planeten</label>
+      <label class="chk"><input type="checkbox" data-type="moon" checked><span class="ico moon"></span>Monde</label>
+      <label class="chk"><input type="checkbox" data-type="station" checked><span class="ico station"></span>Stationen</label>
+    </section>
+    <section>
+      <h3>Anzeige</h3>
+      <label class="chk"><input type="checkbox" id="optInfluence" checked>Einflussbereiche</label>
+      <label class="chk"><input type="checkbox" id="optRegions" checked>Regionen</label>
+      <label class="chk"><input type="checkbox" id="optGrid">Raster</label>
+      <label class="chk"><input type="checkbox" id="optNames" checked>Namen</label>
+    </section>
+    <section class="grow">
+      <h3>Fraktionen <span class="mini-actions"><a href="#" id="facAll">alle</a> · <a href="#" id="facNone">keine</a></span></h3>
+      <div id="factionFilter"></div>
+      <p class="hint">Grau = in diesem Zeitalter ohne Gebiet.</p>
+    </section>
+  </aside>
+
+  <main id="mapWrap">
+    <canvas id="map"></canvas>
+    <div id="tooltip" hidden></div>
+    <div id="toolHint" hidden></div>
+    <div class="zoom-ctrl">
+      <button id="zoomIn" title="Hineinzoomen">＋</button>
+      <button id="zoomOut" title="Herauszoomen">－</button>
+      <button id="zoomFit" title="Ganze Galaxis">⌂</button>
+    </div>
+  </main>
+
+  <aside id="right">
+    <div id="editor" hidden></div>
+    <div id="info"></div>
+  </aside>
+
+  <footer id="timebar">
+    <button id="eraPrev" title="Vorheriges Zeitalter (←)">◀</button>
+    <div class="slider-wrap">
+      <input type="range" id="eraSlider" min="0" max="0" step="1" value="0">
+      <div id="eraTicks"></div>
+    </div>
+    <button id="eraNext" title="Nächstes Zeitalter (→)">▶</button>
+    <div class="era-info">
+      <div><span id="eraName"></span> <span id="eraYear" class="year"></span></div>
+      <div id="eraDesc"></div>
+    </div>
+  </footer>
+
+  <div id="modal" hidden>
+    <div class="modal-box">
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+      <div class="modal-actions">
+        <button id="modalCancel">Abbrechen</button>
+        <button id="modalOk" class="primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+{
+  "name": "ascandir-swgm",
+  "productName": "Ascandir Galaxiekarte",
+  "version": "1.0.0",
+  "description": "Interaktive Star-Wars-Galaxiekarte mit Zeitaltern, Fraktionen und eigenen Zeitlinien",
+  "main": "main.js",
+  "author": "Ascandir",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "de.ascandir.swgm",
+    "productName": "Ascandir Galaxiekarte",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png",
+      "artifactName": "Ascandir-Galaxiekarte-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Ascandir Galaxiekarte",
+      "deleteAppDataOnUninstall": false,
+      "language": "1031",
+      "include": "build/installer.nsh"
+    }
+  }
+}
