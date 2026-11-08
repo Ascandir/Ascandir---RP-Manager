@@ -34,7 +34,8 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
 **Reiter oben rechts:**
 - **Ansicht:** Filter für Objekte (Sonnen, Planeten, Monde, Stationen bzw. Hauptstädte, Städte, Dörfer, Festungen, Wahrzeichen), Einflussbereiche, Hyperraumrouten bzw. Routen, Regionen, Sektoren, Raster, Namen und einzelne Fraktionen
 - **Editor:** Zeitalter, Fraktionen, Routen und Werkzeuge (Zuweisen, Region, Einfluss malen, Radieren, Objekt anlegen, Route zeichnen)
-- **Einstellungen:** Sprache (Deutsch/English), Design (automatisch, Sci-Fi oder Fantasy), Updates, Einstellungen der aktuellen Welt (Name, Jahres-Kürzel wie „v. Z.“/„n. Z.“, Löschen), Datenordner
+- **Sprache:** Umschalter DE / EN oben rechts, gilt pro Betrachter (im Browser gespeichert)
+- **Einstellungen:** Design (automatisch, Sci-Fi oder Fantasy), Updates, Einstellungen der aktuellen Welt (Name, Jahres-Kürzel wie „v. Z.“/„n. Z.“, Löschen), Datenordner
 
 ### Welten
 

@@ -1577,6 +1577,7 @@
     $('#tabView').classList.toggle('active', state.mode === 'view');
     $('#tabEdit').classList.toggle('active', state.mode === 'edit');
     $('#tabSettings').classList.toggle('active', state.mode === 'settings');
+    $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
     const guest = isGuest();
     for (const id of ['#tabEdit', '#tabSettings', '#btnNewWorld', '#btnNewTl', '#btnDupTl', '#btnDelTl', '#btnImport', '#btnJson', '#btnFolder']) $(id).hidden = guest;
     $('#btnLogin').hidden = !guest;
@@ -1597,6 +1598,7 @@
     setTimeout(() => $('#mUser').focus(), 0);
   }
   $('#btnLogin').addEventListener('click', loginDialog);
+  $$('#langSwitch button').forEach(b => b.addEventListener('click', () => { if (b.dataset.l !== settings.lang) setLang(b.dataset.l); }));
   $('#worldSelect').addEventListener('change', e => switchWorld(e.target.value));
   $('#tlSelect').addEventListener('change', e => selectTimeline(e.target.value));
   $('#btnNewWorld').addEventListener('click', () => {
@@ -1764,8 +1766,6 @@
     const tlCount = timelinesOfWorld(w).filter(x => !x.readonly).length;
     v.innerHTML = `<div class="settings-inner">
       <div class="settings-head"><h2>${esc(t('settings'))}</h2><button id="setBack">${esc(t('back'))}</button></div>
-      <section class="card"><h3>${esc(t('language'))}</h3>
-        <div class="seg">${Object.entries(window.I18N.langs).map(([k, n]) => `<button data-lang="${k}" class="${settings.lang === k ? 'active' : ''}">${esc(n)}</button>`).join('')}</div></section>
       <section class="card"><h3>${esc(t('theme'))}</h3>
         <div class="seg">${['auto', 'scifi', 'fantasy'].map(k => `<button data-theme="${k}" class="${settings.theme === k ? 'active' : ''}">${esc(t(k === 'auto' ? 'themeAuto' : k === 'scifi' ? 'themeScifi' : 'themeFantasy'))}</button>`).join('')}</div></section>
       <section class="card"><h3>${esc(t('terrStyle'))}</h3>
@@ -1796,7 +1796,6 @@
     </div>`;
     $('#setBack').addEventListener('click', () => setMode('view'));
     const lo = $('#setLogout'); if (lo) lo.addEventListener('click', () => FS.logout().then(() => location.reload()));
-    $$('[data-lang]').forEach(b => b.addEventListener('click', () => setLang(b.dataset.lang)));
     $$('.seg [data-terr]').forEach(b => b.addEventListener('click', () => { settings.terrStyle = b.dataset.terr; saveSoon(); renderSettings(); draw(); }));
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
     if ($('#setAuto')) { $('#setAuto').addEventListener('change', e => { settings.autoUpdate = e.target.checked; saveSoon(); }); $('#setCheck').addEventListener('click', () => checkUpdates(true)); }
