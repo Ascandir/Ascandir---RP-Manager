@@ -1,12 +1,16 @@
-// Brücke zwischen Oberfläche und Dateisystem (nur Zeitlinien-Ordner)
+// Brücke zwischen Oberfläche und Dateisystem / Updater
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('swgmFS', {
-  list: () => ipcRenderer.invoke('tl:list'),
-  read: file => ipcRenderer.invoke('tl:read', file),
-  save: (file, content) => ipcRenderer.invoke('tl:save', file, content),
-  remove: file => ipcRenderer.invoke('tl:delete', file),
-  openFolder: file => ipcRenderer.invoke('tl:open', file),
-  dir: () => ipcRenderer.invoke('tl:dir'),
-  onChange: cb => ipcRenderer.on('tl:changed', (_e, file) => cb(file))
+contextBridge.exposeInMainWorld('iamFS', {
+  appInfo: () => ipcRenderer.invoke('app:info'),
+  list: dir => ipcRenderer.invoke('fs:list', dir),
+  read: (dir, file) => ipcRenderer.invoke('fs:read', dir, file),
+  save: (dir, file, content) => ipcRenderer.invoke('fs:save', dir, file, content),
+  remove: (dir, file) => ipcRenderer.invoke('fs:delete', dir, file),
+  openFolder: (dir, file) => ipcRenderer.invoke('fs:open', dir, file),
+  onChange: cb => ipcRenderer.on('fs:changed', (_e, dir, file) => cb(dir, file)),
+  updCheck: () => ipcRenderer.invoke('upd:check'),
+  updDownload: () => ipcRenderer.invoke('upd:download'),
+  updInstall: () => ipcRenderer.invoke('upd:install'),
+  onUpdate: cb => ipcRenderer.on('upd:status', (_e, s) => cb(s))
 });

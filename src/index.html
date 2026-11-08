@@ -3,56 +3,64 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;">
-  <title>Ascandir – Galaxiekarte</title>
+  <title>Ascandir – InteractiveMap</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-theme="scifi">
   <header id="topbar">
-    <div class="brand"><span class="logo"></span>Ascandir <span class="dim">· Galaxiekarte</span></div>
+    <div class="brand"><span class="logo"></span>Ascandir <span class="dim">· InteractiveMap</span></div>
     <div class="tl-controls">
-      <label class="dim" for="tlSelect">Zeitlinie</label>
+      <label class="dim" for="worldSelect" data-i18n="world"></label>
+      <select id="worldSelect"></select>
+      <button id="btnNewWorld" data-i18n="newWorld"></button>
+      <span class="sep"></span>
+      <label class="dim" for="tlSelect" data-i18n="timeline"></label>
       <select id="tlSelect"></select>
-      <button id="btnNewTl" title="Neue Zeitlinie anlegen">＋ Neu</button>
-      <button id="btnDupTl" title="Aktuelle Zeitlinie kopieren">⧉ Kopieren</button>
-      <button id="btnDelTl" title="Zeitlinie löschen">🗑</button>
+      <button id="btnNewTl" data-i18n="btnNew" data-i18n-title="tipNew"></button>
+      <button id="btnDupTl" data-i18n="btnCopy" data-i18n-title="tipCopy"></button>
+      <button id="btnDelTl" data-i18n-title="tipDelete">🗑</button>
       <span class="sep"></span>
-      <button id="btnExport" title="Zeitlinie als Datei speichern">⭳ Export</button>
-      <button id="btnImport" title="Zeitlinie aus Datei laden">⭱ Import</button>
+      <div class="menu">
+        <button id="btnFile"><span data-i18n="file"></span> ▾</button>
+        <div class="menu-list" id="fileMenu" hidden>
+          <button id="btnExport" data-i18n="btnExport" data-i18n-title="tipExport"></button>
+          <button id="btnImport" data-i18n="btnImport" data-i18n-title="tipImport"></button>
+          <button id="btnJson" data-i18n="btnJson" data-i18n-title="tipJson"></button>
+          <button id="btnFolder" data-i18n="btnFolder" data-i18n-title="tipFolder"></button>
+        </div>
+      </div>
       <input type="file" id="fileImport" accept=".json,.geojson,application/json,application/geo+json" hidden>
-      <span class="sep"></span>
-      <button id="btnJson" title="Aktuelle Zeitlinie als JSON bearbeiten">{ } JSON</button>
-      <button id="btnFolder" title="Ordner mit den Zeitlinien-Dateien öffnen">📂 Ordner</button>
     </div>
     <div class="mode-tabs">
-      <button id="tabView" class="active">Ansicht</button>
-      <button id="tabEdit">Editor</button>
+      <button id="tabView" data-i18n="tabView"></button>
+      <button id="tabEdit" data-i18n="tabEdit"></button>
+      <button id="tabSettings" data-i18n="tabSettings"></button>
     </div>
   </header>
 
   <aside id="left">
     <section>
-      <h3>Suche</h3>
-      <input id="search" list="searchList" placeholder="Planet, Mond, Station…">
+      <h3 data-i18n="search"></h3>
+      <input id="search" list="searchList" data-i18n-ph="searchPh">
       <datalist id="searchList"></datalist>
     </section>
     <section>
-      <h3>Objekte</h3>
-      <label class="chk"><input type="checkbox" data-type="sun" checked><span class="ico sun"></span>Sonnen</label>
-      <label class="chk"><input type="checkbox" data-type="planet" checked><span class="ico planet"></span>Planeten</label>
-      <label class="chk"><input type="checkbox" data-type="moon" checked><span class="ico moon"></span>Monde</label>
-      <label class="chk"><input type="checkbox" data-type="station" checked><span class="ico station"></span>Stationen</label>
+      <h3 data-i18n="objects"></h3>
+      <div id="typeFilter"></div>
     </section>
     <section>
-      <h3>Anzeige</h3>
-      <label class="chk"><input type="checkbox" id="optInfluence" checked>Einflussbereiche</label>
-      <label class="chk"><input type="checkbox" id="optRegions" checked>Regionen</label>
-      <label class="chk"><input type="checkbox" id="optGrid">Raster</label>
-      <label class="chk"><input type="checkbox" id="optNames" checked>Namen</label>
+      <h3 data-i18n="display"></h3>
+      <label class="chk"><input type="checkbox" data-opt="influence"><span data-i18n="optInfluence"></span></label>
+      <label class="chk"><input type="checkbox" data-opt="routes"><span id="lblRoutes"></span></label>
+      <label class="chk sw-only"><input type="checkbox" data-opt="regions"><span data-i18n="optRegions"></span></label>
+      <label class="chk sw-only"><input type="checkbox" data-opt="sectors"><span data-i18n="optSectors"></span></label>
+      <label class="chk"><input type="checkbox" data-opt="grid"><span data-i18n="optGrid"></span></label>
+      <label class="chk"><input type="checkbox" data-opt="names"><span data-i18n="optNames"></span></label>
     </section>
     <section class="grow">
-      <h3>Fraktionen <span class="mini-actions"><a href="#" id="facAll">alle</a> · <a href="#" id="facNone">keine</a></span></h3>
+      <h3><span data-i18n="factions"></span> <span class="mini-actions"><a href="#" id="facAll" data-i18n="all"></a> · <a href="#" id="facNone" data-i18n="none"></a></span></h3>
       <div id="factionFilter"></div>
-      <p class="hint">Grau = in diesem Zeitalter ohne Gebiet.</p>
+      <p class="hint" data-i18n="factionsHint"></p>
     </section>
   </aside>
 
@@ -60,11 +68,13 @@
     <canvas id="map"></canvas>
     <div id="tooltip" hidden></div>
     <div id="toolHint" hidden></div>
+    <div id="updBanner" hidden></div>
     <div class="zoom-ctrl">
-      <button id="zoomIn" title="Hineinzoomen">＋</button>
-      <button id="zoomOut" title="Herauszoomen">－</button>
-      <button id="zoomFit" title="Ganze Galaxis">⌂</button>
+      <button id="zoomIn" data-i18n-title="zoomIn">＋</button>
+      <button id="zoomOut" data-i18n-title="zoomOut">－</button>
+      <button id="zoomFit" data-i18n-title="zoomFit">⌂</button>
     </div>
+    <div id="settingsView" hidden></div>
   </main>
 
   <aside id="right">
@@ -73,12 +83,14 @@
   </aside>
 
   <footer id="timebar">
-    <button id="eraPrev" title="Vorheriges Zeitalter (←)">◀</button>
-    <div class="slider-wrap">
-      <input type="range" id="eraSlider" min="0" max="0" step="1" value="0">
-      <div id="eraTicks"></div>
+    <div class="tb-left">
+      <button id="eraPrev" data-i18n-title="prevEra">⏮</button>
+      <button id="yearPrev" data-i18n-title="prevYear">◀</button>
+      <input id="yearInput" data-i18n-ph="yearPh">
+      <button id="yearNext" data-i18n-title="nextYear">▶</button>
+      <button id="eraNext" data-i18n-title="nextEra">⏭</button>
     </div>
-    <button id="eraNext" title="Nächstes Zeitalter (→)">▶</button>
+    <div id="trackWrap" data-i18n-title="trackHint"><canvas id="track"></canvas></div>
     <div class="era-info">
       <div><span id="eraName"></span> <span id="eraYear" class="year"></span></div>
       <div id="eraDesc"></div>
@@ -90,13 +102,14 @@
       <h3 id="modalTitle"></h3>
       <div id="modalBody"></div>
       <div class="modal-actions">
-        <button id="modalCancel">Abbrechen</button>
-        <button id="modalOk" class="primary">OK</button>
+        <button id="modalCancel"></button>
+        <button id="modalOk" class="primary"></button>
       </div>
     </div>
   </div>
 
-  <script src="data.js"></script>
+  <script src="i18n.js"></script>
+  <script src="worlds/starwars.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

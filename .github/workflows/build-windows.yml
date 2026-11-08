@@ -30,12 +30,17 @@ jobs:
 
       - run: npm ci
       - run: npx electron-builder --win nsis --x64 --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Installer als Build-Artefakt hochladen
         uses: actions/upload-artifact@v4
         with:
-          name: Ascandir-Galaxiekarte-Setup-${{ steps.ver.outputs.version }}
-          path: dist/*.exe
+          name: Ascandir-InteractiveMap-Setup-${{ steps.ver.outputs.version }}
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
 
       # Neue Versionsnummer in package.json => Tag vX.Y.Z + Release mit Installer automatisch anlegen
       - name: Tag und Release anlegen
@@ -44,8 +49,12 @@ jobs:
         with:
           tag_name: v${{ steps.ver.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: Ascandir Galaxiekarte v${{ steps.ver.outputs.version }}
+          name: Ascandir InteractiveMap v${{ steps.ver.outputs.version }}
           body: |
-            Windows-Installer: `Ascandir-Galaxiekarte-Setup-${{ steps.ver.outputs.version }}.exe` herunterladen und ausführen.
-            Gespeicherte Zeitlinien im Ordner `data` bleiben bei einem Update erhalten.
-          files: dist/*.exe
+            Windows-Installer: `Ascandir-InteractiveMap-Setup-${{ steps.ver.outputs.version }}.exe` herunterladen und ausführen.
+            Bereits installierte Versionen ab 0.2.0 melden das Update automatisch.
+            Gespeicherte Welten und Zeitlinien im Ordner `data` bleiben bei einem Update erhalten.
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml

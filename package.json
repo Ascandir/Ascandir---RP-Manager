@@ -1,8 +1,8 @@
 {
-  "name": "ascandir-swgm",
-  "productName": "Ascandir Galaxiekarte",
-  "version": "0.1.0",
-  "description": "Interaktive Star-Wars-Galaxiekarte mit Zeitaltern, Fraktionen und eigenen Zeitlinien",
+  "name": "ascandir-interactivemap",
+  "productName": "Ascandir InteractiveMap",
+  "version": "0.2.0",
+  "description": "Interaktive Karte für Star Wars und eigene Welten – mit Zeitaltern, Fraktionen und eigenen Zeitlinien",
   "main": "main.js",
   "author": "Ascandir",
   "license": "UNLICENSED",
@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "de.ascandir.swgm",
-    "productName": "Ascandir Galaxiekarte",
+    "productName": "Ascandir InteractiveMap",
     "files": [
       "main.js",
       "preload.js",
@@ -30,7 +30,7 @@
     "win": {
       "target": "nsis",
       "icon": "build/icon.png",
-      "artifactName": "Ascandir-Galaxiekarte-Setup-${version}.exe"
+      "artifactName": "Ascandir-InteractiveMap-Setup-${version}.exe"
     },
     "nsis": {
       "oneClick": false,
@@ -38,10 +38,21 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Ascandir Galaxiekarte",
+      "shortcutName": "Ascandir InteractiveMap",
       "deleteAppDataOnUninstall": false,
       "language": "1031",
       "include": "build/installer.nsh"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Ascandir",
+        "repo": "Ascandir---SWGM",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

@@ -1,11 +1,10 @@
-// Ascandir – Star Wars Galaxy Map · Electron-Start
+// Ascandir InteractiveMap · Electron-Start
 const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-// Alle Nutzerdaten (Zeitlinien, Einstellungen) liegen im Unterordner "data"
-// des Installationsverzeichnisses. Ist der Ordner nicht beschreibbar
-// (z.B. unter C:\Programme), wird auf den Standard-AppData-Ordner ausgewichen.
+// Alle Nutzerdaten liegen im Unterordner "data" des Installationsverzeichnisses.
+// Ist der Ordner nicht beschreibbar (z.B. C:\Programme), wird auf AppData ausgewichen.
 if (app.isPackaged) {
   const dataDir = path.join(path.dirname(process.execPath), 'data');
   try {
@@ -17,23 +16,19 @@ if (app.isPackaged) {
   }
 }
 
+let win = null;
+function send(ch, ...args) { if (win && !win.isDestroyed()) win.webContents.send(ch, ...args); }
+
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 1600,
-    height: 950,
-    minWidth: 1280,
-    minHeight: 650,
-    backgroundColor: '#070a12',
-    title: 'Ascandir – Galaxiekarte',
-    icon: path.join(__dirname, 'build', 'icon.png'),
-    autoHideMenuBar: true,
+  win = new BrowserWindow({
+    width: 1600, height: 950, minWidth: 1280, minHeight: 680,
+    backgroundColor: '#070a12', title: 'Ascandir – InteractiveMap',
+    icon: path.join(__dirname, 'build', 'icon.png'), autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.js') }
   });
   Menu.setApplicationMenu(null);
   win.loadFile(path.join(__dirname, 'src', 'index.html'));
-  // Externe Links im Standardbrowser öffnen
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
-  // F11 Vollbild, F12 Entwicklerwerkzeuge
+  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return;
     if (input.key === 'F11') win.setFullScreen(!win.isFullScreen());
@@ -41,35 +36,70 @@ function createWindow() {
   });
 }
 
-// ---------------------------------------------------------------- Zeitlinien-Dateien
-// Jede eigene Zeitlinie liegt als lesbare JSON-Datei in data/timelines/
-let tlDir = null;
-const safe = f => {
+// ---------------------------------------------------------------- Dateien
+// data/worlds/*.json  = eigene Welten, data/timelines/*.json = Zeitlinien
+const DIRS = ['worlds', 'timelines'];
+let base = null;
+function dirPath(dir) {
+  if (!DIRS.includes(dir)) throw new Error('Unbekannter Ordner: ' + dir);
+  return path.join(base, dir);
+}
+function filePath(dir, f) {
   const b = path.basename(String(f || ''));
   if (!/^[^<>:"/\\|?*]+\.json$/i.test(b)) throw new Error('Ungültiger Dateiname: ' + b);
-  return path.join(tlDir, b);
-};
-function setupTimelineFiles() {
-  tlDir = path.join(app.getPath('userData'), 'timelines');
-  fs.mkdirSync(tlDir, { recursive: true });
-  ipcMain.handle('tl:dir', () => tlDir);
-  ipcMain.handle('tl:list', () => fs.readdirSync(tlDir).filter(f => f.toLowerCase().endsWith('.json')).map(f => {
-    try { return { file: f, content: fs.readFileSync(path.join(tlDir, f), 'utf8') }; } catch (e) { return { file: f, error: e.message }; }
+  return path.join(dirPath(dir), b);
+}
+function setupFiles() {
+  base = app.getPath('userData');
+  for (const d of DIRS) fs.mkdirSync(path.join(base, d), { recursive: true });
+  ipcMain.handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged, dataDir: base }));
+  ipcMain.handle('fs:list', (_e, dir) => fs.readdirSync(dirPath(dir)).filter(f => f.toLowerCase().endsWith('.json')).map(f => {
+    try { return { file: f, content: fs.readFileSync(path.join(dirPath(dir), f), 'utf8') }; } catch (err) { return { file: f, error: err.message }; }
   }));
-  ipcMain.handle('tl:read', (_e, f) => { const p = safe(f); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null; });
-  ipcMain.handle('tl:save', (_e, f, content) => { const p = safe(f); const tmp = p + '.tmp'; fs.writeFileSync(tmp, content, 'utf8'); fs.renameSync(tmp, p); return true; });
-  ipcMain.handle('tl:delete', (_e, f) => { const p = safe(f); if (fs.existsSync(p)) fs.unlinkSync(p); return true; });
-  ipcMain.handle('tl:open', (_e, f) => { if (f) shell.showItemInFolder(safe(f)); else shell.openPath(tlDir); return true; });
-  // Änderungen von außen (Texteditor) melden
+  ipcMain.handle('fs:read', (_e, dir, f) => { const p = filePath(dir, f); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null; });
+  ipcMain.handle('fs:save', (_e, dir, f, content) => { const p = filePath(dir, f); const tmp = p + '.tmp'; fs.writeFileSync(tmp, content, 'utf8'); fs.renameSync(tmp, p); return true; });
+  ipcMain.handle('fs:delete', (_e, dir, f) => { const p = filePath(dir, f); if (fs.existsSync(p)) fs.unlinkSync(p); return true; });
+  ipcMain.handle('fs:open', (_e, dir, f) => {
+    if (!dir) { shell.openPath(base); return true; }
+    if (f) shell.showItemInFolder(filePath(dir, f)); else shell.openPath(dirPath(dir));
+    return true;
+  });
   const timers = {};
-  try {
-    fs.watch(tlDir, (_ev, f) => {
-      if (!f || !f.toLowerCase().endsWith('.json')) return;
-      clearTimeout(timers[f]);
-      timers[f] = setTimeout(() => BrowserWindow.getAllWindows().forEach(w => w.webContents.send('tl:changed', f)), 350);
-    });
-  } catch (e) { console.warn('Ordnerüberwachung nicht möglich:', e.message); }
+  for (const d of DIRS) {
+    try {
+      fs.watch(dirPath(d), (_ev, f) => {
+        if (!f || !f.toLowerCase().endsWith('.json')) return;
+        const key = d + '/' + f; clearTimeout(timers[key]);
+        timers[key] = setTimeout(() => send('fs:changed', d, f), 350);
+      });
+    } catch (err) { console.warn('Ordnerüberwachung nicht möglich:', err.message); }
+  }
 }
 
-app.whenReady().then(() => { setupTimelineFiles(); createWindow(); });
+// ---------------------------------------------------------------- Updater (GitHub Releases)
+function setupUpdater() {
+  let autoUpdater = null;
+  if (app.isPackaged) {
+    try {
+      autoUpdater = require('electron-updater').autoUpdater;
+      autoUpdater.autoDownload = false;
+      autoUpdater.autoInstallOnAppQuit = true;
+      autoUpdater.on('checking-for-update', () => send('upd:status', { state: 'checking' }));
+      autoUpdater.on('update-available', i => send('upd:status', { state: 'available', version: i.version }));
+      autoUpdater.on('update-not-available', () => send('upd:status', { state: 'none' }));
+      autoUpdater.on('download-progress', p => send('upd:status', { state: 'progress', percent: p.percent }));
+      autoUpdater.on('update-downloaded', i => send('upd:status', { state: 'downloaded', version: i.version }));
+      autoUpdater.on('error', err => send('upd:status', { state: 'error', message: String(err && err.message || err).split('\n')[0] }));
+    } catch (err) { console.warn('Updater nicht verfügbar:', err.message); autoUpdater = null; }
+  }
+  ipcMain.handle('upd:check', async () => {
+    if (!autoUpdater) return { state: 'dev' };
+    try { await autoUpdater.checkForUpdates(); } catch (err) { send('upd:status', { state: 'error', message: String(err.message || err).split('\n')[0] }); }
+    return { state: 'started' };
+  });
+  ipcMain.handle('upd:download', async () => { if (autoUpdater) { send('upd:status', { state: 'progress', percent: 0 }); try { await autoUpdater.downloadUpdate(); } catch (err) { send('upd:status', { state: 'error', message: String(err.message || err).split('\n')[0] }); } } return true; });
+  ipcMain.handle('upd:install', () => { if (autoUpdater) setImmediate(() => autoUpdater.quitAndInstall(false, true)); return true; });
+}
+
+app.whenReady().then(() => { setupFiles(); setupUpdater(); createWindow(); });
 app.on('window-all-closed', () => app.quit());
