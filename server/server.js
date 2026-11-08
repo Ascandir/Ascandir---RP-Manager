@@ -25,25 +25,62 @@ const VERSION = (() => { try { return require(path.join(__dirname, '..', 'packag
 const DIRS = ['worlds', 'timelines'];
 for (const d of DIRS) fs.mkdirSync(path.join(DATA_DIR, d), { recursive: true });
 
+// ---------------------------------------------------------------- Benutzer & Rechte
+// data/users.json: { users: [{id,name,pass,role:'admin'|'user',perms:{worlds:{},timelines:{}}}], guest: {worlds:{},timelines:{}} }
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const LEVEL = { none: 0, view: 1, edit: 2 };
+function loadUsers() {
+  let d = {}; try { d = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); } catch { }
+  d.users = Array.isArray(d.users) ? d.users : [];
+  d.guest = d.guest || { worlds: { '*': PUBLIC_VIEW ? 'view' : 'none' }, timelines: {} };
+  return d;
+}
+function saveUsers(d) { const tmp = USERS_FILE + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(d, null, 2), { mode: 0o600 }); fs.renameSync(tmp, USERS_FILE); }
+function hashPw(pw) { const salt = crypto.randomBytes(16).toString('hex'); return `scrypt$${salt}$${crypto.scryptSync(String(pw), salt, 32).toString('hex')}`; }
+function checkPw(pw, stored) { const [, salt, h] = String(stored || '').split('$'); if (!salt || !h) return false; return tsEqual(crypto.scryptSync(String(pw), salt, 32).toString('hex'), h); }
+
 // ---------------------------------------------------------------- Sitzungen (signiertes Cookie, übersteht Neustarts)
 const SECRET = (() => {
   const f = path.join(DATA_DIR, '.session-secret');
   try { return fs.readFileSync(f, 'utf8').trim(); } catch { const s = crypto.randomBytes(32).toString('hex'); try { fs.writeFileSync(f, s, { mode: 0o600 }); } catch { } return s; }
 })();
-const sign = v => crypto.createHmac('sha256', SECRET + '|' + PASSWORD).update(v).digest('hex');
-function makeSession() { const exp = Date.now() + 30 * 864e5; const v = `${exp}`; return `${v}.${sign(v)}`; }
+// Signatur hängt am Passwort-Hash -> Passwortänderung oder Löschen beendet alte Sitzungen
+const userKey = uid => uid === 'env' ? 'env|' + PASSWORD : ((loadUsers().users.find(u => u.id === uid) || {}).pass || null);
+const sign = (v, uid) => { const k = userKey(uid); return k ? crypto.createHmac('sha256', SECRET + '|' + k).update(v).digest('hex') : null; };
+function makeSession(uid) { const v = `${uid}|${Date.now() + 30 * 864e5}`; return `${v}.${sign(v, uid)}`; }
 function cookieOf(req, name) { const m = (req.headers.cookie || '').split(/;\s*/).find(c => c.startsWith(name + '=')); return m ? decodeURIComponent(m.slice(name.length + 1)) : null; }
-function hasSession(req) {
-  const c = cookieOf(req, 'iam_session'); if (!c) return false;
-  const [v, sig] = c.split('.'); if (!v || !sig || +v < Date.now()) return false;
-  return tsEqual(sig, sign(v));
+function sessionUser(req) {
+  const c = cookieOf(req, 'iam_session'); if (!c) return null;
+  const i = c.lastIndexOf('.'), v = c.slice(0, i), sig = c.slice(i + 1); const [uid, exp] = v.split('|');
+  if (!uid || !exp || +exp < Date.now()) return null;
+  const good = sign(v, uid); if (!good || !tsEqual(sig, good)) return null;
+  return uid;
 }
 function basicOk(req) {
   const h = req.headers.authorization || ''; if (!PASSWORD || !h.startsWith('Basic ')) return false;
   const [u, ...p] = Buffer.from(h.slice(6), 'base64').toString('utf8').split(':');
   return tsEqual(u, USER) && tsEqual(p.join(':'), PASSWORD);
 }
-const isAdmin = req => !PASSWORD || hasSession(req) || basicOk(req);
+// Wer fragt an? -> { id, name, admin, perms }
+function whoIs(req, url) {
+  if (!PASSWORD) return { id: 'open', name: 'admin', admin: true };
+  if (url && tokenOk(req, url)) return { id: 'token', name: 'api', admin: true };
+  if (basicOk(req)) return { id: 'env', name: USER, admin: true };
+  const uid = sessionUser(req);
+  if (uid === 'env') return { id: 'env', name: USER, admin: true };
+  if (uid) { const u = loadUsers().users.find(x => x.id === uid); if (u) return { id: u.id, name: u.name, admin: u.role === 'admin', perms: u.perms || { worlds: {}, timelines: {} } }; }
+  return { id: 'guest', name: null, guest: true, admin: false, perms: loadUsers().guest };
+}
+function level(who, worldId, tlId, readonly) {
+  if (who.admin) return readonly ? 'view' : 'edit';
+  const p = who.perms || { worlds: {}, timelines: {} };
+  let l = tlId && p.timelines && p.timelines[tlId] != null ? p.timelines[tlId] : (p.worlds && (p.worlds[worldId] ?? p.worlds['*'])) || 'none';
+  if (readonly && l === 'edit') l = 'view';
+  return LEVEL[l] != null ? l : 'none';
+}
+const canView = (who, w, t, ro) => LEVEL[level(who, w, t, ro)] >= 1;
+const canEdit = (who, w, t) => LEVEL[level(who, w, t, false)] >= 2;
+const isAdmin = req => whoIs(req).admin;
 const secureReq = req => (req.headers['x-forwarded-proto'] || '').startsWith('https');
 const loginAttempts = new Map();
 
@@ -88,8 +125,12 @@ function tokenOk(req, url) {
 }
 // Lesen: öffentlich (wenn IAM_PUBLIC_VIEW) – Schreiben: nur mit Anmeldung bzw. API-Token
 function canRead(req, url) {
-  if (url.pathname.startsWith('/api/v1')) return PUBLIC_VIEW || !PASSWORD && !API_TOKEN || isAdmin(req) && !!PASSWORD || tokenOk(req, url);
-  return PUBLIC_VIEW || isAdmin(req) || tokenOk(req, url);
+  if (!PASSWORD || tokenOk(req, url)) return true;
+  const who = whoIs(req, url);
+  if (!who.guest) return true;
+  // Gast: nur wenn Gäste überhaupt etwas sehen dürfen (oder Anmeldeseite / statische Dateien)
+  const g = who.perms, any = Object.values(g.worlds || {}).concat(Object.values(g.timelines || {})).some(l => LEVEL[l] >= 1);
+  return any || !url.pathname.startsWith('/api/');
 }
 
 // ---------------------------------------------------------------- Live-Updates (SSE)
@@ -110,13 +151,17 @@ function listJson(dir) {
     try { return Object.assign(JSON.parse(fs.readFileSync(path.join(DATA_DIR, dir, f), 'utf8')), { _file: f }); } catch { return null; }
   }).filter(Boolean);
 }
-function allWorlds(lang) {
+let VIEWER = { admin: true };   // wird pro API-Aufruf gesetzt (synchron)
+function allWorlds(lang, viewer = VIEWER) {
+  const tls = allTimelines(lang, viewer);
   return [{ id: 'starwars', name: SW.name[lang] || SW.name.de, type: 'scifi', builtin: true }]
-    .concat(listJson('worlds').map(w => ({ id: w.id, name: w.name, type: w.type, builtin: false, yearFmt: w.yearFmt })));
+    .concat(listJson('worlds').map(w => ({ id: w.id, name: w.name, type: w.type, builtin: false, yearFmt: w.yearFmt })))
+    .filter(w => viewer.admin || canView(viewer, w.id, null) || tls.some(t => t.world === w.id));
 }
-function allTimelines(lang) {
+function allTimelines(lang, viewer = VIEWER) {
   const canon = SW.canonTimeline(lang);
-  return [canon].concat(listJson('timelines').map(t => { t.world ||= 'starwars'; t.routes ||= []; return t; }));
+  return [canon].concat(listJson('timelines').map(t => { t.world ||= 'starwars'; t.routes ||= []; return t; }))
+    .filter(t => canView(viewer, t.world, t.id, !!t.readonly));
 }
 function findTimeline(q, lang) {
   const tls = allTimelines(lang);
@@ -124,9 +169,9 @@ function findTimeline(q, lang) {
   const ql = String(q).toLowerCase();
   return tls.find(t => t.id === q) || tls.find(t => (t.name || '').toLowerCase() === ql) || tls.find(t => (t._file || '').toLowerCase() === ql || (t._file || '').toLowerCase() === ql + '.json');
 }
-function worldOf(tl, lang) { return allWorlds(lang).find(w => w.id === tl.world) || allWorlds(lang)[0]; }
+function worldOf(tl, lang) { const ws = allWorlds(lang, { admin: true }); return ws.find(w => w.id === tl.world) || ws[0]; }
 function yearFmt(tl, lang) {
-  if (tl.world === 'starwars') return SW.yearFmt[lang] || SW.yearFmt.de;
+  if (tl.world === 'starwars' || !tl.world) return SW.yearFmt[lang] || SW.yearFmt.de;
   const w = listJson('worlds').find(x => x.id === tl.world); return (w && w.yearFmt) || { neg: '', pos: '' };
 }
 function fmtYear(y, f) { if (y == null || y === '') return null; y = Math.round(+y); if (y < 0 && f.neg) return `${-y} ${f.neg}`; if (y >= 0 && f.pos) return `${y} ${f.pos}`; return String(y); }
@@ -367,6 +412,7 @@ function openApi(req) {
 
 // ---------------------------------------------------------------- API v1 (für Story-KIs)
 async function apiV1(req, res, url) {
+  VIEWER = req.iamViewer || whoIs(req, url);
   const q = url.searchParams, lang = q.get('lang') === 'en' ? 'en' : 'de', parts = url.pathname.split('/').filter(Boolean).slice(2);
   const tl = () => { const t = findTimeline(q.get('timeline'), lang); if (!t) throw Object.assign(new Error('timeline not found'), { code: 404 }); return t; };
   const year = t => { const y = parseYear(q.get('year'), yearFmt(t, lang)); if (y != null) return y; const s = t.eras.slice().sort((a, b) => a.year - b.year); return s.length ? s[s.length - 1].year : 0; };
@@ -414,7 +460,7 @@ async function apiV1(req, res, url) {
   }
   if (ep === 'travel') {
     const t = tl(), y = year(t), stops = [q.get('from')].concat(q.getAll('via'), [q.get('to')]).filter(Boolean);
-    const wtype = (allWorlds(lang).find(w => w.id === t.world) || {}).type || 'scifi';
+    const wtype = (allWorlds(lang, { admin: true }).find(w => w.id === t.world) || {}).type || 'scifi';
     const r = TRAVEL.plan(t, { stops, year: y, worldType: wtype, hyperClass: +q.get('class') || 1, stayHours: +q.get('stay') || 0, mode: q.get('mode') || 'horse', kmPerUnit: +q.get('km') || 1 });
     if (!r.ok) return send(res, r.error === 'notFound' ? 404 : 400, r);
     const de = lang !== 'en', d = h => TRAVEL.fmtDuration(h, lang);
@@ -436,7 +482,7 @@ async function apiV1(req, res, url) {
 // POST /mcp            -> nur lesende Werkzeuge
 // POST /mcp/<API-Token> -> zusätzlich schreibende Werkzeuge
 const { Readable } = require('stream');
-function internalCall(method, pathname, params, body) {
+function internalCall(method, pathname, params, body, viewer) {
   return new Promise(resolve => {
     const u = new URL('http://internal' + pathname);
     for (const [k, v] of Object.entries(params || {})) {
@@ -445,6 +491,7 @@ function internalCall(method, pathname, params, body) {
     }
     const req = Readable.from(body ? [Buffer.from(JSON.stringify(body))] : []);
     req.method = method; req.headers = API_TOKEN ? { authorization: 'Bearer ' + API_TOKEN, host: 'internal' } : { host: 'internal' };
+    req.iamViewer = viewer || { admin: true };
     const res = { code: 200, writeHead(c) { this.code = c; }, end(d) { resolve({ code: this.code, body: d == null ? '' : d.toString() }); }, write() { } };
     Promise.resolve(apiV1(req, res, u)).catch(e => resolve({ code: 500, body: JSON.stringify({ error: e.message }) }));
   });
@@ -453,16 +500,16 @@ const S = (props, required = []) => ({ type: 'object', properties: props, requir
 const str = d => ({ type: 'string', description: d });
 const TL = str('Zeitlinie (Name oder ID). Leer = Kanon (schreibgeschützt).'), YR = str('Jahr, z.B. "3640 BBY", "4 ABY" oder "-3640"'), LG = { type: 'string', enum: ['de', 'en'], description: 'Sprache der Antwort' };
 const MCP_TOOLS = [
-  { name: 'list_timelines', title: 'Zeitlinien auflisten', description: 'Alle Welten-Zeitlinien mit ihren Zeitaltern.', ro: true, inputSchema: S({ lang: LG }), run: a => internalCall('GET', '/api/v1/timelines', a) },
+  { name: 'list_timelines', title: 'Zeitlinien auflisten', description: 'Alle Welten-Zeitlinien mit ihren Zeitaltern.', ro: true, inputSchema: S({ lang: LG }), run: (a, v) => internalCall('GET', '/api/v1/timelines', a, null, v) },
   { name: 'get_summary', title: 'Lage der Galaxis', description: 'Kurzer Text zum Stand in einem Jahr: Zeitalter, Mächte und ihre Gebiete, optional Eckdaten zu Orten. Ideal als Kontext für Geschichten.', ro: true,
     inputSchema: S({ timeline: TL, year: YR, places: { type: 'array', items: { type: 'string' }, description: 'Orte, zu denen Eckdaten geliefert werden' }, lang: LG }),
-    run: a => internalCall('GET', '/api/v1/summary', { timeline: a.timeline, year: a.year, place: a.places || [], lang: a.lang }) },
-  { name: 'get_state', title: 'Mächte und Gebiete (JSON)', description: 'Zeitalter und Fraktionen mit kontrollierten Orten in einem Jahr.', ro: true, inputSchema: S({ timeline: TL, year: YR, lang: LG }), run: a => internalCall('GET', '/api/v1/state', a) },
-  { name: 'get_place', title: 'Ort abfragen', description: 'Eckdaten (Bevölkerung, Klima, Bewohner …), Beschreibung und Kontrolle eines Ortes in einem Jahr.', ro: true, inputSchema: S({ name: str('Name des Ortes'), timeline: TL, year: YR, lang: LG }, ['name']), run: a => internalCall('GET', '/api/v1/place', a) },
-  { name: 'search_places', title: 'Orte suchen', description: 'Orte nach Namensteil suchen.', ro: true, inputSchema: S({ query: str('Suchtext'), timeline: TL }, ['query']), run: a => internalCall('GET', '/api/v1/search', { q: a.query, timeline: a.timeline }) },
+    run: (a, v) => internalCall('GET', '/api/v1/summary', { timeline: a.timeline, year: a.year, place: a.places || [], lang: a.lang }, null, v) },
+  { name: 'get_state', title: 'Mächte und Gebiete (JSON)', description: 'Zeitalter und Fraktionen mit kontrollierten Orten in einem Jahr.', ro: true, inputSchema: S({ timeline: TL, year: YR, lang: LG }), run: (a, v) => internalCall('GET', '/api/v1/state', a, null, v) },
+  { name: 'get_place', title: 'Ort abfragen', description: 'Eckdaten (Bevölkerung, Klima, Bewohner …), Beschreibung und Kontrolle eines Ortes in einem Jahr.', ro: true, inputSchema: S({ name: str('Name des Ortes'), timeline: TL, year: YR, lang: LG }, ['name']), run: (a, v) => internalCall('GET', '/api/v1/place', a, null, v) },
+  { name: 'search_places', title: 'Orte suchen', description: 'Orte nach Namensteil suchen.', ro: true, inputSchema: S({ query: str('Suchtext'), timeline: TL }, ['query']), run: (a, v) => internalCall('GET', '/api/v1/search', { q: a.query, timeline: a.timeline }, null, v) },
   { name: 'plan_travel', title: 'Reise planen', description: 'Route und Reisezeit zwischen Orten (bevorzugt Hyperraumrouten). Hyperantrieb-Klasse 0.5 = sehr schnell, 1 = schnell, 2 = übliche Frachter.', ro: true,
     inputSchema: S({ from: str('Start'), to: str('Ziel'), via: { type: 'array', items: { type: 'string' }, description: 'Zwischenstopps' }, hyperdrive_class: { type: 'number', description: 'Klasse, Standard 1' }, stay_hours: { type: 'number', description: 'Aufenthalt pro Zwischenstopp in Stunden' }, timeline: TL, year: YR, lang: LG }, ['from', 'to']),
-    run: a => internalCall('GET', '/api/v1/travel', { from: a.from, to: a.to, via: a.via || [], class: a.hyperdrive_class, stay: a.stay_hours, timeline: a.timeline, year: a.year, lang: a.lang, format: 'text' }) },
+    run: (a, v) => internalCall('GET', '/api/v1/travel', { from: a.from, to: a.to, via: a.via || [], class: a.hyperdrive_class, stay: a.stay_hours, timeline: a.timeline, year: a.year, lang: a.lang, format: 'text' }, null, v) },
   // schreibend
   { name: 'copy_timeline', title: 'Zeitlinie kopieren', description: 'Kopiert eine Zeitlinie (leer = Kanon) als neue, bearbeitbare Zeitlinie.', inputSchema: S({ from: str('Quelle'), name: str('Name der neuen Zeitlinie') }, ['name']), run: a => internalCall('POST', '/api/v1/timeline/copy', {}, a) },
   { name: 'upsert_place', title: 'Ort anlegen/ändern', description: 'Legt einen Ort an oder ändert ihn (nur eigene Zeitlinien). Position über near (bei Ort X), orbits (umkreist X) oder grid (z.B. R16).',
@@ -502,7 +549,8 @@ async function handleMcp(req, res, url, writeAllowed) {
         case 'tools/call': {
           const t = tools.find(x => x.name === (m.params || {}).name);
           if (!t) return err(-32602, 'Unknown tool' + (writeAllowed ? '' : ' (schreibende Werkzeuge nur über /mcp/<token>)'));
-          const r = await t.run((m.params || {}).arguments || {});
+          const viewer = writeAllowed ? { admin: true } : whoIs({ headers: {} }, null);
+          const r = await t.run((m.params || {}).arguments || {}, viewer);
           return ok({ content: [{ type: 'text', text: r.body }], isError: r.code >= 400 });
         }
         case 'resources/list': return ok({ resources: [] });
@@ -546,15 +594,20 @@ const server = http.createServer(async (req, res) => {
       const a = loginAttempts.get(ip) || { n: 0, t: 0 };
       if (a.n >= 5 && Date.now() - a.t < 60000) return send(res, 429, { error: 'Zu viele Versuche – bitte 1 Minute warten.' });
       const b = JSON.parse((await readBody(req, 10000)) || '{}');
-      if (!PASSWORD || (tsEqual(b.user || '', USER) && tsEqual(b.password || '', PASSWORD))) {
+      let uid = null;
+      if (!PASSWORD || (tsEqual(b.user || '', USER) && tsEqual(b.password || '', PASSWORD))) uid = 'env';
+      else { const u = loadUsers().users.find(x => x.name.toLowerCase() === String(b.user || '').toLowerCase()); if (u && checkPw(b.password || '', u.pass)) uid = u.id; }
+      if (uid) {
         loginAttempts.delete(ip);
-        return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': `iam_session=${makeSession()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}${secureReq(req) ? '; Secure' : ''}` });
+        return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': `iam_session=${makeSession(uid)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}${secureReq(req) ? '; Secure' : ''}` });
       }
       loginAttempts.set(ip, { n: a.n + 1, t: Date.now() });
       return send(res, 401, { error: 'Benutzername oder Passwort falsch.' });
     }
     if (url.pathname === '/api/logout') return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': 'iam_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
-    if (url.pathname === '/api/info') return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, loginRequired: !!PASSWORD, admin: isAdmin(req), publicView: PUBLIC_VIEW, latest: latestRelease, updateAvailable: !!(latestRelease && cmpVer(latestRelease, VERSION) > 0), dataDir: isAdmin(req) ? DATA_DIR : null }, 'application/json; charset=utf-8', { 'Access-Control-Allow-Origin': '*' });
+    if (url.pathname === '/api/info') { const who = whoIs(req, url); const ws = allWorlds('de', { admin: true }).map(w => w.id);
+      return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, loginRequired: !!PASSWORD, admin: who.admin, user: who.guest ? null : { name: who.name, admin: who.admin },
+      worldAccess: Object.fromEntries(ws.map(w => [w, level(who, w, null)])), publicView: PUBLIC_VIEW, latest: who.admin ? latestRelease : null, updateAvailable: who.admin && !!(latestRelease && cmpVer(latestRelease, VERSION) > 0), latestShown: who.admin ? latestRelease : null, dataDir: who.admin ? DATA_DIR : null }, 'application/json; charset=utf-8', { 'Access-Control-Allow-Origin': '*' }); }
     if (!canRead(req, url)) {
       if (url.pathname.startsWith('/api/')) return send(res, 401, { error: 'unauthorized' }, 'application/json', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
       return send(res, 401, 'Anmeldung erforderlich', 'text/plain; charset=utf-8', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
@@ -565,19 +618,64 @@ const server = http.createServer(async (req, res) => {
     }
     const m = url.pathname.match(/^\/api\/files\/([a-z]+)(?:\/([^/]+))?$/);
     if (m) {
-      const dir = m[1], file = m[2] ? decodeURIComponent(m[2]) : null;
+      const dir = m[1], file = m[2] ? decodeURIComponent(m[2]) : null, who = whoIs(req, url);
       if (!DIRS.includes(dir)) return send(res, 404, { error: 'unknown dir' });
+      const meta = content => { try { const j = JSON.parse(content); return dir === 'worlds' ? { world: j.id, tl: null } : { world: j.world || 'starwars', tl: j.id }; } catch { return null; } };
+      const viewOk = mt => mt && (dir === 'worlds' ? (who.admin || canView(who, mt.world, null) || listJson('timelines').some(t => (t.world || 'starwars') === mt.world && canView(who, t.world || 'starwars', t.id))) : canView(who, mt.world, mt.tl));
+      const editOk = mt => mt && (dir === 'worlds' ? who.admin || canEdit(who, mt.world, null) : canEdit(who, mt.world, mt.tl));
       if (!file && req.method === 'GET') {
-        return send(res, 200, fs.readdirSync(path.join(DATA_DIR, dir)).filter(f => f.toLowerCase().endsWith('.json')).map(f => {
-          try { return { file: f, content: fs.readFileSync(path.join(DATA_DIR, dir, f), 'utf8') }; } catch (err) { return { file: f, error: err.message }; }
-        }));
+        const out = [];
+        for (const f of fs.readdirSync(path.join(DATA_DIR, dir)).filter(f => f.toLowerCase().endsWith('.json'))) {
+          let content; try { content = fs.readFileSync(path.join(DATA_DIR, dir, f), 'utf8'); } catch (err) { if (who.admin) out.push({ file: f, error: err.message }); continue; }
+          const mt = meta(content);
+          if (!mt) { if (who.admin) out.push({ file: f, content }); continue; }
+          if (viewOk(mt)) out.push({ file: f, content, editable: editOk(mt) });
+        }
+        return send(res, 200, out);
       }
       const p = safeFile(dir, file);
-      if (req.method === 'GET') return fs.existsSync(p) ? send(res, 200, fs.readFileSync(p, 'utf8')) : send(res, 404, { error: 'not found' });
+      const existing = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+      if (req.method === 'GET') return existing != null && viewOk(meta(existing)) ? send(res, 200, existing) : send(res, 404, { error: 'not found' });
       if (READONLY) return send(res, 403, { error: 'read-only' });
-      if (!isAdmin(req)) return send(res, 401, { error: 'login required' });
-      if (req.method === 'PUT') { const body = await readBody(req); JSON.parse(body); const tmp = p + '.tmp'; fs.writeFileSync(tmp, body, 'utf8'); fs.renameSync(tmp, p); return send(res, 200, { ok: true }); }
-      if (req.method === 'DELETE') { if (fs.existsSync(p)) fs.unlinkSync(p); return send(res, 200, { ok: true }); }
+      if (who.guest) return send(res, 401, { error: 'login required' });
+      if (req.method === 'PUT') {
+        const body = await readBody(req); const mt = meta(body); if (!mt) return send(res, 400, { error: 'invalid JSON' });
+        if (existing != null) { if (!editOk(meta(existing)) || !editOk(mt)) return send(res, 403, { error: 'Keine Bearbeitungsrechte / no edit permission' }); }
+        else if (dir === 'worlds' ? !who.admin : !canEdit(who, mt.world, null) && !canEdit(who, mt.world, mt.tl)) return send(res, 403, { error: 'Keine Rechte zum Anlegen / no permission to create' });
+        const tmp = p + '.tmp'; fs.writeFileSync(tmp, body, 'utf8'); fs.renameSync(tmp, p); return send(res, 200, { ok: true });
+      }
+      if (req.method === 'DELETE') {
+        if (existing != null && !(dir === 'worlds' ? who.admin : editOk(meta(existing)))) return send(res, 403, { error: 'no permission' });
+        if (existing != null) fs.unlinkSync(p); return send(res, 200, { ok: true });
+      }
+      return send(res, 405, { error: 'method not allowed' });
+    }
+    // Benutzerverwaltung (nur Admins)
+    if (url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') || url.pathname === '/api/guest') {
+      const who = whoIs(req, url);
+      if (!who.admin || who.id === 'token') return send(res, 403, { error: 'admin only' });
+      const d = loadUsers(), pub = u => ({ id: u.id, name: u.name, role: u.role, perms: u.perms || { worlds: {}, timelines: {} } });
+      const clean = p => { const o = { worlds: {}, timelines: {} }; for (const k of ['worlds', 'timelines']) for (const [id, l] of Object.entries((p || {})[k] || {})) if (LEVEL[l] != null) o[k][String(id)] = l; return o; };
+      if (url.pathname === '/api/users' && req.method === 'GET') return send(res, 200, { env: USER, users: d.users.map(pub), guest: d.guest });
+      if (url.pathname === '/api/guest' && req.method === 'PUT') { d.guest = clean(JSON.parse(await readBody(req, 1e6))); saveUsers(d); return send(res, 200, { ok: true }); }
+      if (url.pathname === '/api/users' && req.method === 'POST') {
+        const b = JSON.parse(await readBody(req, 1e6)), name = String(b.name || '').trim();
+        if (!/^[\w.\-@ ]{2,40}$/.test(name)) return send(res, 400, { error: 'Ungültiger Benutzername (2–40 Zeichen)' });
+        if (!b.password || String(b.password).length < 6) return send(res, 400, { error: 'Passwort mindestens 6 Zeichen' });
+        if (name.toLowerCase() === USER.toLowerCase() || d.users.some(u => u.name.toLowerCase() === name.toLowerCase())) return send(res, 409, { error: 'Benutzername existiert bereits' });
+        const u = { id: 'u' + crypto.randomBytes(5).toString('hex'), name, pass: hashPw(b.password), role: b.role === 'admin' ? 'admin' : 'user', perms: clean(b.perms) };
+        d.users.push(u); saveUsers(d); return send(res, 201, pub(u));
+      }
+      const um = url.pathname.match(/^\/api\/users\/([\w]+)$/); const u = um && d.users.find(x => x.id === um[1]);
+      if (um && !u) return send(res, 404, { error: 'not found' });
+      if (u && req.method === 'PUT') {
+        const b = JSON.parse(await readBody(req, 1e6));
+        if (b.password) { if (String(b.password).length < 6) return send(res, 400, { error: 'Passwort mindestens 6 Zeichen' }); u.pass = hashPw(b.password); }
+        if (b.role) u.role = b.role === 'admin' ? 'admin' : 'user';
+        if (b.perms) u.perms = clean(b.perms);
+        saveUsers(d); return send(res, 200, pub(u));
+      }
+      if (u && req.method === 'DELETE') { d.users = d.users.filter(x => x !== u); saveUsers(d); return send(res, 200, { ok: true }); }
       return send(res, 405, { error: 'method not allowed' });
     }
     if (url.pathname.startsWith('/api/v1')) return await apiV1(req, res, url);

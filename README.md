@@ -146,6 +146,8 @@ volumes:
 
 **Gäste und Anmeldung:** Ohne Anmeldung sieht man die Karte nur an. Oben rechts gibt es *🔒 Anmelden*, danach sind Editor, Einstellungen, neue Welten/Zeitlinien, Import und JSON-Bearbeitung freigeschaltet. Die Anmeldung bleibt 30 Tage gespeichert; abmelden geht unter *Einstellungen → Konto*.
 
+**Benutzer & Rechte:** Unter *Einstellungen → 👥 Benutzer* (nur für Admins) legst du weitere Benutzer an – als **Admin** (darf alles) oder **Benutzer**. Über *Rechte* bekommt jeder Benutzer pro Welt und pro Zeitlinie *kein Zugriff*, *ansehen* oder *bearbeiten*; Zeitlinien erben die Einstellung ihrer Welt, Welten die Einstellung „Alle Welten“. „Bearbeiten“ einer Welt erlaubt auch neue Zeitlinien darin. Ebenso lassen sich die Rechte der **Gäste** (nicht angemeldet) einschränken, z. B. private Zeitlinien verstecken. Der Server prüft die Rechte bei jedem Zugriff (auch API und MCP ohne Token = Gast-Rechte). Updates, Datenordner, API-Adressen und Benutzerverwaltung sehen nur Admins. Der Benutzer aus `IAM_USER`/`IAM_PASSWORD` ist immer Haupt-Admin. Die Benutzer liegen (mit verschlüsselten Passwörtern) in `/data/users.json`.
+
 ### 2. Cloudflare-Tunnel
 
 In Cloudflare Zero Trust beim Tunnel einen *Public Hostname* anlegen, z. B. `karte.deine-domain.de` → Service `http://<IP-des-Servers>:8085`. Läuft `cloudflared` als Container im selben Docker-Netzwerk, geht auch `http://interactivemap:8080`.

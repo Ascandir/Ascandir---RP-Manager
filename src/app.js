@@ -56,10 +56,14 @@
   };
   const wtype = () => WORLD_TYPES[state.world.type] || WORLD_TYPES.scifi;
   // Gast = Server-Version mit Passwort, aber nicht angemeldet -> nur ansehen
-  const isGuest = () => !!(FS && FS.server && FS.info && FS.info() && FS.info().loginRequired && !FS.info().admin);
+  const srvInfo = () => (FS && FS.server && FS.info) ? FS.info() : null;
+  const isGuest = () => { const i = srvInfo(); return !!(i && i.loginRequired && !i.user); };
+  const isAdminUser = () => { const i = srvInfo(); return !i || !i.loginRequired || !!i.admin; };
+  const canCreate = (w = state.world) => { const i = srvInfo(); return !isGuest() && (isAdminUser() || ((i.worldAccess || {})[w.id] === 'edit')); };
+  const canEditTl = (tl = state.tl) => !!tl && !tl.readonly && tl._editable !== false && !isGuest();
   const isSW = () => state.world.geometry === 'galaxy-sw';
   const worldName = w => w.builtin ? (w.name[window.I18N.lang] || w.name.de) : w.name;
-  const editable = () => state.mode === 'edit' && !state.tl.readonly && !isGuest();
+  const editable = () => state.mode === 'edit' && canEditTl();
   const facById = id => state.tl.factions.find(f => f.id === id);
   const typeOrder = o => wtype().order[o.type] ?? 9;
   const typeLabel = ty => t('types.' + ty);
@@ -151,10 +155,11 @@
         try { if (error) throw new Error(error); const w = normalizeWorld(JSON.parse(content)); w._file = file; lastWritten['worlds/' + file] = content; state.worlds.push(w); }
         catch (e) { bad.push(`worlds/${file}: ${e.message}`); }
       }
-      for (const { file, content, error } of await FS.list('timelines')) {
+      for (const { file, content, error, editable } of await FS.list('timelines')) {
         try {
           if (error) throw new Error(error);
           const tl = parseTimeline(content); tl._file = file; lastWritten['timelines/' + file] = content;
+          if (editable === false) tl._editable = false;
           if (state.timelines.some(x => x.id === tl.id)) tl.id = uid('tl');
           state.timelines.push(tl);
         } catch (e) { bad.push(`timelines/${file}: ${e.message}`); }
@@ -166,6 +171,12 @@
     }
     // Zeitlinien ohne bekannte Welt -> Star Wars
     for (const tl of state.timelines) if (!state.worlds.some(w => w.id === tl.world)) tl.world = 'starwars';
+    // Server mit Rechten: Star Wars (Kanon) ausblenden, wenn kein Zugriff
+    const si = srvInfo();
+    if (si && si.loginRequired && !si.admin && (si.worldAccess || {}).starwars === 'none') {
+      state.timelines = state.timelines.filter(x => x.id !== 'canon');
+      if (!state.timelines.some(x => x.world === 'starwars')) state.worlds = state.worlds.filter(w => w.id !== 'starwars');
+    }
     if (bad.length) setTimeout(() => alert(t('badFiles', bad.join('\n'))), 400);
   }
 
@@ -188,9 +199,9 @@
       }
       if (isGuest()) return;
       const customWorlds = state.worlds.filter(w => !w.builtin);
-      for (const w of customWorlds) await writeFile('worlds', fileFor(w, customWorlds), serialize(w));
+      if (isAdminUser()) for (const w of customWorlds) await writeFile('worlds', fileFor(w, customWorlds), serialize(w));
       const tls = state.timelines.filter(x => !x.readonly);
-      for (const x of tls) await writeFile('timelines', fileFor(x, tls), serialize(x));
+      for (const x of tls) { const f = fileFor(x, tls); if (x._editable === false) { lastWritten['timelines/' + f] ??= serialize(x); continue; } await writeFile('timelines', f, serialize(x)); }
     }, 300);
   }
   async function writeFile(dir, file, content) {
@@ -220,7 +231,7 @@
     try {
       const tl = parseTimeline(content); tl._file = file; lastWritten[key] = content;
       if (!state.worlds.some(w => w.id === tl.world)) tl.world = 'starwars';
-      if (i >= 0) { tl.id = state.timelines[i].id; const act = state.timelines[i] === state.tl; state.timelines[i] = tl; if (act) state.tl = tl; }
+      if (i >= 0) { tl.id = state.timelines[i].id; if (state.timelines[i]._editable === false) tl._editable = false; const act = state.timelines[i] === state.tl; state.timelines[i] = tl; if (act) state.tl = tl; }
       else { if (state.timelines.some(x => x.id === tl.id)) tl.id = uid('tl'); state.timelines.push(tl); }
       renderAll(); toast(t('reloaded', tl.name));
     } catch (e) { toast(t('fileError', file, e.message)); }
@@ -238,7 +249,7 @@
   // ------------------------------------------------------------- Welt & Zeitlinie wechseln
   const timelinesOfWorld = (w = state.world) => state.timelines.filter(x => x.world === w.id);
   function switchWorld(id) {
-    state.world = state.worlds.find(w => w.id === id) || SW;
+    state.world = state.worlds.find(w => w.id === id) || state.worlds[0] || SW;
     let tls = timelinesOfWorld();
     if (!tls.length) { const tl = emptyTimeline(t('mainTimeline')); state.timelines.push(tl); tls = [tl]; }
     const tlId = settings.activeTl[state.world.id];
@@ -1426,12 +1437,12 @@
     const ed = $('#editor');
     if (state.mode !== 'edit') { ed.hidden = true; return; }
     ed.hidden = false;
-    if (state.tl.readonly) {
-      ed.innerHTML = `<div class="readonly-note"><b>${esc(t('readonlyTitle'))}</b><br>${esc(t('readonlyText'))}</div>
-        <button id="edCopy" class="primary wide">${esc(t('makeCopy'))}</button>
-        <button id="edNew" class="wide" style="margin-top:6px">${esc(t('makeEmpty'))}</button>`;
-      $('#edCopy').addEventListener('click', duplicateTimeline);
-      $('#edNew').addEventListener('click', newTimelineDialog);
+    if (!canEditTl()) {
+      const cc = canCreate();
+      ed.innerHTML = `<div class="readonly-note"><b>${esc(t(state.tl.readonly ? 'readonlyTitle' : 'noEditRights'))}</b><br>${esc(t(cc ? 'readonlyText' : 'askAdmin'))}</div>
+        ${cc ? `<button id="edCopy" class="primary wide">${esc(t('makeCopy'))}</button>
+        <button id="edNew" class="wide" style="margin-top:6px">${esc(t('makeEmpty'))}</button>` : ''}`;
+      if (cc) { $('#edCopy').addEventListener('click', duplicateTimeline); $('#edNew').addEventListener('click', newTimelineDialog); }
       return;
     }
     const tl = state.tl, cur = era(), eras = sortedEras();
@@ -1578,9 +1589,15 @@
     $('#tabEdit').classList.toggle('active', state.mode === 'edit');
     $('#tabSettings').classList.toggle('active', state.mode === 'settings');
     $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
-    const guest = isGuest();
-    for (const id of ['#tabEdit', '#tabSettings', '#btnNewWorld', '#btnNewTl', '#btnDupTl', '#btnDelTl', '#btnImport', '#btnJson', '#btnFolder']) $(id).hidden = guest;
+    const guest = isGuest(), si = srvInfo();
+    for (const id of ['#tabEdit', '#tabSettings']) $(id).hidden = guest;
+    $('#btnNewWorld').hidden = !isAdminUser() || guest;
+    for (const id of ['#btnNewTl', '#btnDupTl', '#btnImport']) $(id).hidden = !canCreate();
+    $('#btnDelTl').hidden = guest; $('#btnDelTl').disabled = !canEditTl();
+    $('#btnJson').hidden = !canEditTl();
+    $('#btnFolder').hidden = guest || !isAdminUser();
     $('#btnLogin').hidden = !guest;
+    const bu = $('#btnUser'); bu.hidden = !(si && si.loginRequired && si.user); if (!bu.hidden) bu.textContent = '👤 ' + si.user.name;
     const sb = $('#btnServer'); if (sb) { sb.hidden = !(FS && FS.server && FS.desktop); sb.textContent = '☁ ' + location.host; sb.title = t('srvTitle'); }
     $('#btnLogin').textContent = '🔒 ' + t('login');
   }
@@ -1599,6 +1616,10 @@
     setTimeout(() => $('#mUser').focus(), 0);
   }
   $('#btnLogin').addEventListener('click', loginDialog);
+  $('#btnUser').addEventListener('click', () => {
+    const si = srvInfo();
+    modal(t('account'), `<p>${esc(t('loggedInAs', si.user.name))}${si.user.admin ? ' · Admin' : ''}</p>`, () => { FS.logout().then(() => location.reload()); }, { ok: t('logout') });
+  });
   $('#btnServer').addEventListener('click', () => {
     modal(t('srvTitle'), `<p>${esc(t('srvConnected', location.origin))}</p><p class="hint">${esc(t('srvDisconnectHint'))}</p>`,
       () => { window.iamDesktop.setServer(null); }, { ok: t('srvDisconnect') });
@@ -1779,13 +1800,14 @@
       </section>` : ''}
       <section class="card"><h3>${esc(t('terrStyle'))}</h3>
         <div class="seg">${['borders', 'bubbles'].map(k => `<button data-terr="${k}" class="${settings.terrStyle === k ? 'active' : ''}">${esc(t(k === 'borders' ? 'terrBorders' : 'terrBubbles'))}</button>`).join('')}</div></section>
-      <section class="card"><h3>${esc(t('updates'))}</h3>
+      ${isAdminUser() ? `<section class="card"><h3>${esc(t('updates'))}</h3>
         <div class="kv"><span class="k">${esc(t('currentVersion'))}</span><span><b>${esc(info.version)}</b></span></div>
         ${FS && FS.server && !FS.desktop ? (info.updateAvailable ? `<p class="warn"><b>${esc(t('updDockerNew', info.latest))}</b></p>` : '') + `<p class="hint">${esc(t('updDocker'))}</p>` : `<label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
         <div class="row" style="margin-top:8px"><button id="setCheck" class="fixed">${esc(t('checkNow'))}</button><span id="setUpdStatus" class="dim"></span></div>`}
-        <p class="hint"><a href="#" id="setReleases">${esc(t('releases'))}</a></p></section>
+        <p class="hint"><a href="#" id="setReleases">${esc(t('releases'))}</a></p></section>` : ''}
+      ${FS && FS.server && srvInfo().loginRequired && isAdminUser() ? `<section class="card" id="usersCard"><h3>👥 ${esc(t('users'))}</h3><div id="usersBox" class="hint">…</div></section>` : ''}
       <section class="card"><h3>${esc(t('worldSettings'))}: ${esc(worldName(w))}</h3>
-        ${w.builtin ? `<p class="hint">${esc(t('builtinWorld'))}</p>` : `
+        ${w.builtin ? `<p class="hint">${esc(t('builtinWorld'))}</p>` : !isAdminUser() ? `<p class="hint">${esc(t('adminOnly'))}</p>` : `
         <label class="field"><span>${esc(t('worldName'))}</span><input id="setWName" value="${esc(w.name)}"></label>
         <div class="row">
           <label class="field"><span>${esc(t('yearSuffixNeg'))}</span><input id="setNeg" value="${esc(w.yearFmt.neg)}"></label>
@@ -1793,16 +1815,16 @@
         </div><p class="hint">${esc(t('yearSuffixHint'))}</p>
         <button id="setDelWorld" class="danger">${esc(t('deleteWorld'))}</button>`}
       </section>
-      ${FS && FS.server ? `<section class="card"><h3>${esc(t('apiTitle'))}</h3><p class="hint">${esc(t('apiHint'))}</p>
+      ${FS && FS.server && isAdminUser() ? `<section class="card"><h3>${esc(t('apiTitle'))}</h3><p class="hint">${esc(t('apiHint'))}</p>
         <code class="path">${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'api/v1/summary?year=' + state.year + (state.tl.readonly ? '' : '&timeline=' + encodeURIComponent(state.tl.name)) + '&lang=' + settings.lang)}</code>
         <a href="api/v1" target="_blank">api/v1</a>
         <h4>${esc(t('mcpTitle'))}</h4><p class="hint">${esc(t('mcpHint'))}</p>
         <code class="path">${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'mcp/<IAM_API_TOKEN>')}</code>
         <p class="hint">${esc(t('mcpRead'))}: <code>${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'mcp')}</code></p></section>` : ''}
-      <section class="card"><h3>${esc(t('dataFolder'))}</h3>
+      ${isAdminUser() ? `<section class="card"><h3>${esc(t('dataFolder'))}</h3>
         <p class="hint">${esc(t('dataHint'))}</p>
         ${info.dataDir ? `<code class="path">${esc(info.dataDir)}</code>` : ''}
-        <button id="setFolder">${esc(t('openFolder'))}</button></section>
+        <button id="setFolder">${esc(t('openFolder'))}</button></section>` : ''}
       ${FS && FS.server && FS.info().loginRequired ? `<section class="card"><h3>${esc(t('account'))}</h3><button id="setLogout">${esc(t('logout'))}</button></section>` : ''}
       <section class="card"><h3>${esc(t('about'))}</h3><p class="hint">Ascandir InteractiveMap ${esc(info.version)} – ${esc(t('aboutText'))}</p></section>
     </div>`;
@@ -1825,10 +1847,11 @@
     });
     $$('.seg [data-terr]').forEach(b => b.addEventListener('click', () => { settings.terrStyle = b.dataset.terr; saveSoon(); renderSettings(); draw(); }));
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
+    if ($('#usersBox')) renderUsers();
     if ($('#setAuto')) { $('#setAuto').addEventListener('change', e => { settings.autoUpdate = e.target.checked; saveSoon(); }); $('#setCheck').addEventListener('click', () => checkUpdates(true)); }
-    $('#setReleases').addEventListener('click', e => { e.preventDefault(); window.open(APP_REPO, '_blank'); });
-    $('#setFolder').addEventListener('click', () => FS ? FS.openFolder('', null) : alert(t('folderOnlyApp')));
-    if (!w.builtin) {
+    const rl = $('#setReleases'); if (rl) rl.addEventListener('click', e => { e.preventDefault(); window.open(APP_REPO, '_blank'); });
+    const fo = $('#setFolder'); if (fo) fo.addEventListener('click', () => FS ? FS.openFolder('', null) : alert(t('folderOnlyApp')));
+    if (!w.builtin && $('#setWName')) {
       $('#setWName').addEventListener('change', e => { w.name = e.target.value.trim() || t('myWorld'); renderTopbar(); saveSoon(); });
       $('#setNeg').addEventListener('change', e => { w.yearFmt.neg = e.target.value.trim(); renderAll(true); saveSoon(); });
       $('#setPos').addEventListener('change', e => { w.yearFmt.pos = e.target.value.trim(); renderAll(true); saveSoon(); });
@@ -1843,6 +1866,54 @@
     }
     renderUpdStatus();
   }
+  // ------------------------------------------------------------- Benutzerverwaltung (Server, nur Admins)
+  const api = (path, method = 'GET', body) => fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })
+    .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; });
+  async function renderUsers() {
+    const box = $('#usersBox'); if (!box) return;
+    let d; try { d = await api('api/users'); } catch (e) { box.textContent = e.message; return; }
+    box.classList.remove('hint');
+    box.innerHTML = `
+      <div class="user-row"><b>${esc(d.env)}</b><span class="badge">Admin</span><span class="dim">${esc(t('envAdmin'))}</span></div>
+      ${d.users.map(u => `<div class="user-row" data-id="${esc(u.id)}"><b>${esc(u.name)}</b><span class="badge">${u.role === 'admin' ? 'Admin' : esc(t('roleUser'))}</span>
+        <span class="grow"></span>${u.role !== 'admin' ? `<button class="uPerm">${esc(t('perms'))}</button>` : ''}<button class="uRole">${esc(t(u.role === 'admin' ? 'makeUser' : 'makeAdmin'))}</button><button class="uPw">${esc(t('changePw'))}</button><button class="uDel danger">✕</button></div>`).join('')}
+      <div class="user-row"><b>${esc(t('guests'))}</b><span class="dim">${esc(t('guestsDesc'))}</span><span class="grow"></span><button id="guestPerm">${esc(t('perms'))}</button></div>
+      <h4>${esc(t('addUser'))}</h4>
+      <div class="row"><input id="nuName" placeholder="${esc(t('user'))}"><input id="nuPw" type="password" placeholder="${esc(t('password'))}">
+        <select id="nuRole" class="fixed"><option value="user">${esc(t('roleUser'))}</option><option value="admin">Admin</option></select><button id="nuAdd" class="fixed primary">＋</button></div>
+      <p class="hint">${esc(t('usersHint'))}</p>`;
+    const byId = id => d.users.find(u => u.id === id);
+    box.querySelectorAll('.user-row[data-id]').forEach(row => {
+      const u = byId(row.dataset.id);
+      const pb = row.querySelector('.uPerm'); if (pb) pb.onclick = () => permsDialog(u.name, u.perms, perms => api('api/users/' + u.id, 'PUT', { perms }).then(renderUsers));
+      row.querySelector('.uRole').onclick = () => api('api/users/' + u.id, 'PUT', { role: u.role === 'admin' ? 'user' : 'admin' }).then(renderUsers).catch(e => alert(e.message));
+      row.querySelector('.uPw').onclick = () => modal(t('changePw') + ': ' + u.name, `<label class="field"><span>${esc(t('newPw'))}</span><input id="mNewPw" type="password"></label><div id="mPwErr" class="hint warn"></div>`,
+        () => { api('api/users/' + u.id, 'PUT', { password: $('#mNewPw').value }).then(() => { $('#modal').hidden = true; toast(t('saved')); }).catch(e => { $('#mPwErr').textContent = e.message; }); return false; });
+      row.querySelector('.uDel').onclick = () => { if (confirm(t('deleteUserQ', u.name))) api('api/users/' + u.id, 'DELETE').then(renderUsers); };
+    });
+    $('#guestPerm').onclick = () => permsDialog(t('guests'), d.guest, perms => api('api/guest', 'PUT', perms).then(renderUsers));
+    $('#nuAdd').onclick = () => api('api/users', 'POST', { name: $('#nuName').value, password: $('#nuPw').value, role: $('#nuRole').value, perms: { worlds: { '*': 'view' }, timelines: {} } })
+      .then(u => { toast(t('saved')); renderUsers().then(() => { if (u.role !== 'admin') permsDialog(u.name, u.perms, perms => api('api/users/' + u.id, 'PUT', { perms }).then(renderUsers)); }); }).catch(e => alert(e.message));
+  }
+  function permsDialog(name, perms, onSave) {
+    perms = JSON.parse(JSON.stringify(perms || { worlds: {}, timelines: {} })); perms.worlds ||= {}; perms.timelines ||= {};
+    const opt = (val, cur, label) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${esc(label)}</option>`;
+    const sel = (kind, id, cur, allowEdit, inheritLabel) => `<select data-k="${kind}" data-id="${esc(id)}">
+      ${inheritLabel ? opt('', cur ?? '', inheritLabel) : ''}${opt('none', cur, t('noAccess'))}${opt('view', cur, t('viewAccess'))}${allowEdit ? opt('edit', cur, t('editAccess')) : ''}</select>`;
+    const rows = state.worlds.map(w => {
+      const tls = state.timelines.filter(x => x.world === w.id);
+      return `<tr class="pw"><td>🌐 <b>${esc(worldName(w))}</b></td><td>${sel('worlds', w.id, perms.worlds[w.id], true, t('inheritAll'))}</td></tr>` +
+        tls.map(x => `<tr><td class="ind">${esc(x.name)}${x.readonly ? ' 🔒' : ''}</td><td>${sel('timelines', x.id, perms.timelines[x.id], !x.readonly, t('inheritWorld'))}</td></tr>`).join('');
+    }).join('');
+    modal(t('permsTitle', name), `<p class="hint" style="margin-top:0">${esc(t('permsHint'))}</p>
+      <table class="perm-table"><tr class="pw"><td><b>${esc(t('allWorlds'))}</b></td><td>${sel('worlds', '*', perms.worlds['*'] || 'none', true, null)}</td></tr>${rows}</table>`,
+      () => {
+        const out = { worlds: {}, timelines: {} };
+        $$('.perm-table select').forEach(s2 => { if (s2.value) out[s2.dataset.k][s2.dataset.id] = s2.value; });
+        onSave(out).then(() => toast(t('saved'))).catch(e => alert(e.message));
+      }, { wide: true, ok: t('apply') });
+  }
+
   function setLang(l) {
     settings.lang = l; window.I18N.setLang(l); document.documentElement.lang = l;
     // Kanon-Zeitlinie in neuer Sprache erzeugen
@@ -1917,12 +1988,13 @@
     document.documentElement.lang = settings.lang;
     applyStaticI18n();
     if (FS && FS.appInfo) try { state.appInfo = await FS.appInfo(); } catch { }
-    await loadData();
+    try { await loadData(); } catch (e) { console.error(e); state.worlds = [SW]; state.timelines = [SW.canonTimeline(settings.lang)]; if (isGuest()) setTimeout(loginDialog, 300); }
     if (FS) {
       FS.onChange(onExternalChange);
       if (FS.onUpdate) FS.onUpdate(u => { state.upd = u; if (u.state === 'available' || u.state === 'downloaded') state.updDismissed = false; renderUpdStatus(); });
     }
-    state.world = state.worlds.find(w => w.id === settings.activeWorld) || SW;
+    if (!state.worlds.length) { state.worlds = [SW]; state.timelines = [SW.canonTimeline(settings.lang)]; if (isGuest()) setTimeout(loginDialog, 300); }
+    state.world = state.worlds.find(w => w.id === settings.activeWorld) || state.worlds[0];
     resize();
     switchWorld(state.world.id);
     saveSoon();

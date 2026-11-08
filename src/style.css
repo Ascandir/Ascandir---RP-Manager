@@ -248,3 +248,17 @@ body[data-theme="fantasy"] #topbar .lang-switch button.active { background: #f4e
 #btnServer { white-space: nowrap; font-size: 12px; }
 #offBanner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: 560px; background: var(--panel); border: 1px solid var(--danger);
   border-radius: 10px; padding: 10px 12px; box-shadow: 0 6px 24px #0008; z-index: 9; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* Benutzerverwaltung */
+.user-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.user-row .grow { flex: 1; }
+.user-row button { padding: 3px 8px; font-size: 12px; }
+.badge { font-size: 10.5px; padding: 1px 7px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); color: var(--dim); }
+.perm-table { width: 100%; border-collapse: collapse; }
+.perm-table td { padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.perm-table td:last-child { width: 220px; }
+.perm-table select { width: 100%; }
+.perm-table tr.pw td { background: var(--panel2); }
+.perm-table td.ind { padding-left: 26px; }
+#modal .modal-box.wide { max-height: 86vh; overflow-y: auto; }
+#btnUser { white-space: nowrap; }
