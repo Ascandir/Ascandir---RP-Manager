@@ -97,6 +97,72 @@ Welten und Zeitlinien sind lesbare JSON-Dateien im Datenordner (*Datei → Daten
 
 Ein neues Polygon mit den Properties `kind: "zone"`, `eraName` und `factionName` wird beim Import als Einflussgebiet übernommen.
 
+## Server-Version (Docker / Portainer / Cloudflare-Tunnel)
+
+Die Karte läuft auch als Webserver im Browser, z. B. auf einem Heimserver mit Portainer und über einen Cloudflare-Tunnel von überall erreichbar. Alle Daten liegen im Docker-Volume `/data`; mehrere offene Browserfenster aktualisieren sich live.
+
+### 1. Stack in Portainer anlegen
+
+*Stacks → Add stack → Web editor* und Folgendes einfügen (Passwort und Token anpassen):
+
+```yaml
+services:
+  interactivemap:
+    image: ghcr.io/ascandir/ascandir---swgm:latest
+    container_name: interactivemap
+    restart: unless-stopped
+    ports:
+      - "8085:8080"
+    environment:
+      IAM_USER: "admin"
+      IAM_PASSWORD: "dein-passwort"
+      IAM_API_TOKEN: "langer-zufaelliger-schluessel"
+    volumes:
+      - interactivemap-data:/data
+volumes:
+  interactivemap-data:
+```
+
+| Variable | Bedeutung |
+|---|---|
+| `IAM_USER` / `IAM_PASSWORD` | Anmeldung für die Oberfläche im Browser (leer = ohne Passwort, nicht empfohlen bei Tunnel) |
+| `IAM_API_TOKEN` | Schlüssel für Story-KI/ChatGPT. Ohne Token ist der Schreibzugriff der API abgeschaltet. |
+| `IAM_READONLY` | `true` = nur lesen |
+
+**Update:** In Portainer beim Stack *Update the stack* mit *Re-pull image* ausführen. Jede neue Version auf GitHub erzeugt automatisch ein neues Image.
+
+### 2. Cloudflare-Tunnel
+
+In Cloudflare Zero Trust beim Tunnel einen *Public Hostname* anlegen, z. B. `karte.deine-domain.de` → Service `http://<IP-des-Servers>:8085`. Läuft `cloudflared` als Container im selben Docker-Netzwerk, geht auch `http://interactivemap:8080`.
+Nutzt du *Cloudflare Access*, setze für den Pfad `/api/v1/*` eine Bypass-Regel, damit KI-Dienste mit ihrem Token durchkommen.
+
+### 3. Story-KI anbinden (Lese-API)
+
+Alle Aufrufe brauchen `Authorization: Bearer <IAM_API_TOKEN>` oder `?token=<IAM_API_TOKEN>`.
+
+| Aufruf | Liefert |
+|---|---|
+| `GET /api/v1/summary?year=3640 BBY&timeline=Meine Zeitlinie&place=Tatooine&lang=de` | **Fertigen Text** für den KI-Kontext: Jahr, Zeitalter, Mächte mit Gebieten, Eckdaten zu den genannten Orten |
+| `GET /api/v1/state?year=…` | dasselbe als JSON |
+| `GET /api/v1/place?name=Dromund Kaas&year=…` | Eckdaten und Kontrolle eines Ortes |
+| `GET /api/v1/search?q=…` · `/timelines` · `/worlds` · `/timeline` | Suche, Listen, komplette Zeitlinie |
+
+Jahre gehen als `3640 VSY`, `3640 BBY`, `-3640` oder `4 NSY`. Ohne `timeline` wird die Kanon-Zeitlinie genutzt. In der App unter *Einstellungen → API für Story-KI* steht die passende Adresse für dein aktuelles Jahr.
+
+### 4. ChatGPT darf die Karte bearbeiten (Schreib-API)
+
+1. In ChatGPT einen eigenen GPT erstellen: *Konfigurieren → Aktionen → Neue Aktion → Aus URL importieren*: `https://karte.deine-domain.de/api/v1/openapi.json`
+2. *Authentifizierung*: API-Schlüssel → **Bearer** → dein `IAM_API_TOKEN`
+3. Fertig. Der GPT kann jetzt z. B.:
+   - „Kopiere den Kanon als ‚Darians Story‘“ → `POST /api/v1/timeline/copy`
+   - „Lege den Planeten Neu-Taris bei Taris an, Inselwelt, 2 Mio. Einwohner“ → `POST /api/v1/place`
+   - „Gründe die Fraktion Schwarze Sonne“ → `POST /api/v1/faction`
+   - „Ab 3639 VSY beginnt das Zeitalter ‚Darians Aufstieg‘“ → `POST /api/v1/era`
+   - „Neu-Taris gehört 3639 VSY der Schwarzen Sonne“ → `POST /api/v1/control`
+   - „Ersetze die ganze Zeitlinie durch dieses JSON“ → `PUT /api/v1/timeline`
+
+Die Kanon-Zeitlinie bleibt schreibgeschützt; Änderungen landen immer in einer eigenen Zeitlinie und erscheinen sofort in allen offenen Browserfenstern.
+
 ## Hinweise
 
 - Positionen und Einflussgebiete der Star-Wars-Welt sind **Annäherungen** an das bekannte Galaxie-Raster.
@@ -108,6 +174,7 @@ Ein neues Polygon mit den Properties `kind: "zone"`, `eraName` und `factionName`
 npm install
 npm start          # App starten
 npm run dist       # Windows-Installer nach dist/ bauen
+node server/server.js   # Server-Version lokal starten (Port 8080, Daten in ./data)
 ```
 
-**Neue Version veröffentlichen:** `version` in `package.json` erhöhen und auf `main` pushen. GitHub Actions baut den Installer und legt automatisch den Tag `vX.Y.Z` und ein Release an, inklusive `latest.yml` für den Updater.
+**Neue Version veröffentlichen:** `version` in `package.json` erhöhen und auf `main` pushen. GitHub Actions baut den Installer und legt automatisch den Tag `vX.Y.Z` und ein Release an, inklusive `latest.yml` für den Updater. Parallel entsteht das Docker-Image `ghcr.io/ascandir/ascandir---swgm` (`latest` und Versionsnummer).

@@ -2,8 +2,9 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self';">
   <title>Ascandir – InteractiveMap</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
 </head>
 <body data-theme="scifi">
@@ -113,6 +114,7 @@
     </div>
   </div>
 
+  <script src="web-fs.js"></script>
   <script src="i18n.js"></script>
   <script src="planets.js"></script>
   <script src="worlds/starwars.js"></script>

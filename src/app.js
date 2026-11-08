@@ -1516,8 +1516,8 @@
         <div class="seg">${['auto', 'scifi', 'fantasy'].map(k => `<button data-theme="${k}" class="${settings.theme === k ? 'active' : ''}">${esc(t(k === 'auto' ? 'themeAuto' : k === 'scifi' ? 'themeScifi' : 'themeFantasy'))}</button>`).join('')}</div></section>
       <section class="card"><h3>${esc(t('updates'))}</h3>
         <div class="kv"><span class="k">${esc(t('currentVersion'))}</span><span><b>${esc(info.version)}</b></span></div>
-        <label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
-        <div class="row" style="margin-top:8px"><button id="setCheck" class="fixed">${esc(t('checkNow'))}</button><span id="setUpdStatus" class="dim"></span></div>
+        ${FS && FS.server ? `<p class="hint">${esc(t('updDocker'))}</p>` : `<label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
+        <div class="row" style="margin-top:8px"><button id="setCheck" class="fixed">${esc(t('checkNow'))}</button><span id="setUpdStatus" class="dim"></span></div>`}
         <p class="hint"><a href="#" id="setReleases">${esc(t('releases'))}</a></p></section>
       <section class="card"><h3>${esc(t('worldSettings'))}: ${esc(worldName(w))}</h3>
         ${w.builtin ? `<p class="hint">${esc(t('builtinWorld'))}</p>` : `
@@ -1528,6 +1528,9 @@
         </div><p class="hint">${esc(t('yearSuffixHint'))}</p>
         <button id="setDelWorld" class="danger">${esc(t('deleteWorld'))}</button>`}
       </section>
+      ${FS && FS.server ? `<section class="card"><h3>${esc(t('apiTitle'))}</h3><p class="hint">${esc(t('apiHint'))}</p>
+        <code class="path">${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'api/v1/summary?year=' + state.year + (state.tl.readonly ? '' : '&timeline=' + encodeURIComponent(state.tl.name)) + '&lang=' + settings.lang)}</code>
+        <a href="api/v1" target="_blank">api/v1</a></section>` : ''}
       <section class="card"><h3>${esc(t('dataFolder'))}</h3>
         <p class="hint">${esc(t('dataHint'))}</p>
         ${info.dataDir ? `<code class="path">${esc(info.dataDir)}</code>` : ''}
@@ -1537,8 +1540,7 @@
     $('#setBack').addEventListener('click', () => setMode('view'));
     $$('[data-lang]').forEach(b => b.addEventListener('click', () => setLang(b.dataset.lang)));
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
-    $('#setAuto').addEventListener('change', e => { settings.autoUpdate = e.target.checked; saveSoon(); });
-    $('#setCheck').addEventListener('click', () => checkUpdates(true));
+    if ($('#setAuto')) { $('#setAuto').addEventListener('change', e => { settings.autoUpdate = e.target.checked; saveSoon(); }); $('#setCheck').addEventListener('click', () => checkUpdates(true)); }
     $('#setReleases').addEventListener('click', e => { e.preventDefault(); window.open(APP_REPO, '_blank'); });
     $('#setFolder').addEventListener('click', () => FS ? FS.openFolder('', null) : alert(t('folderOnlyApp')));
     if (!w.builtin) {
@@ -1577,6 +1579,7 @@
     let text = '', html = '';
     if (!u) text = '';
     else if (u.state === 'dev') text = t('updDev');
+    else if (u.state === 'docker') text = t('updDocker');
     else if (u.state === 'checking') text = t('updChecking');
     else if (u.state === 'none') text = t('updNone');
     else if (u.state === 'error') text = t('updError', u.message || '');
@@ -1633,7 +1636,7 @@
     resize();
     switchWorld(state.world.id);
     saveSoon();
-    if (settings.autoUpdate && FS) setTimeout(() => checkUpdates(false), 2500);
+    if (settings.autoUpdate && FS && !FS.server) setTimeout(() => checkUpdates(false), 2500);
   })();
   window.__iam = { state, setYear, regionAt, settings, setLang, switchWorld, fmtYear, parseYear };
 })();

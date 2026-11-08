@@ -1,0 +1,19 @@
+# Ascandir InteractiveMap – Stack für Portainer
+# In Portainer: Stacks → Add stack → diesen Inhalt einfügen → Passwort/Token anpassen → Deploy
+services:
+  interactivemap:
+    image: ghcr.io/ascandir/ascandir---swgm:latest
+    container_name: interactivemap
+    restart: unless-stopped
+    ports:
+      - "8085:8080"                 # links: Port auf dem Server (frei wählbar)
+    environment:
+      IAM_USER: "admin"             # Benutzername für die Oberfläche
+      IAM_PASSWORD: "BITTE-AENDERN"  # Passwort für die Oberfläche (leer = ohne Passwort)
+      IAM_API_TOKEN: "BITTE-LANGEN-ZUFALLS-TOKEN-EINTRAGEN"  # Schlüssel für Story-KI / ChatGPT (Lesen & Schreiben)
+      # IAM_READONLY: "true"        # nur lesen, keine Änderungen erlauben
+    volumes:
+      - interactivemap-data:/data   # Welten & Zeitlinien
+
+volumes:
+  interactivemap-data:
