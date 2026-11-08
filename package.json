@@ -1,7 +1,7 @@
 {
   "name": "ascandir-swgm",
   "productName": "Ascandir Galaxiekarte",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Interaktive Star-Wars-Galaxiekarte mit Zeitaltern, Fraktionen und eigenen Zeitlinien",
   "main": "main.js",
   "author": "Ascandir",

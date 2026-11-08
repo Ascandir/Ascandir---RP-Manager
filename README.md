@@ -5,7 +5,7 @@ Interaktive Desktop-Karte der Star-Wars-Galaxis für Windows. Sie zeigt Fraktion
 ## Installation
 
 1. Unter **Releases** (rechts auf der GitHub-Seite) die Datei `Ascandir-Galaxiekarte-Setup-x.y.z.exe` herunterladen.
-   Alternativ: **Actions → letzter Lauf → Artefakt „Ascandir-Galaxiekarte-Setup“**.
+   Alternativ: **Actions → letzter Lauf → Artefakt „Ascandir-Galaxiekarte-Setup-x.y.z“**.
 2. Ausführen und den Installationsordner wählen. Windows SmartScreen meldet eventuell „unbekannter Herausgeber“ → *Weitere Informationen → Trotzdem ausführen* (die App ist nicht signiert).
 3. Alles, was die App braucht, wird in den gewählten Ordner installiert. Es muss nichts zusätzlich installiert werden.
 
@@ -104,4 +104,5 @@ npm start          # App starten
 npm run dist       # Windows-Installer nach dist/ bauen
 ```
 
-GitHub Actions baut bei jedem Push auf `main` einen Installer (als Artefakt). Bei einem Tag `v*` wird zusätzlich ein Release angelegt.
+GitHub Actions baut bei jedem Push auf `main` einen Installer (als Artefakt).
+**Neue Version veröffentlichen:** `version` in `package.json` erhöhen (z. B. `0.1.0` → `0.2.0`) und pushen. Der Build legt dann automatisch den Tag `v0.2.0` und ein Release mit dem Installer an.
