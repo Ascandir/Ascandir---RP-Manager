@@ -75,6 +75,16 @@ Ein Klick auf einen Ort zeigt rechts seine Eckdaten: Biom, Temperatur, Bevölker
 
 Ein Zeitalter gilt ab seinem Startjahr bis zum Beginn des nächsten. Objekte können zusätzlich ein *existiert ab/bis* haben (z. B. der Todesstern von 19 VSY bis 0 NSY) und erscheinen dann nur in diesen Jahren. Im Editor legt *＋ Jahr* ein neues Zeitalter ab dem eingestellten Jahr an; es übernimmt den aktuellen Stand.
 
+### Story-Abschnitte
+
+Im Reiter *Story* gibt es pro Zeitalter beliebig viele **Abschnitte** (Titel, Jahr, beteiligte Orte, Text mit **fett**/*kursiv*). Du kannst sie selbst anlegen (＋ Abschnitt hinzufügen) oder von der KI schreiben lassen:
+
+- **MCP (ChatGPT/Claude):** `list_story` liest (z. B. `last: 5` für die letzten fünf), `add_story_entry` legt einen neuen Abschnitt an, `update_story_entry` ändert oder ergänzt (`append: true`), `delete_story_entry` löscht.
+- **REST:** `GET /api/v1/story?timeline=…&format=text`, `POST/PATCH/DELETE /api/v1/story` (mit Token).
+- `get_summary` nennt automatisch die letzten Abschnitte, damit die KI weiß, wo die Geschichte steht.
+
+Die Abschnitte werden in der Zeitlinien-Datei unter `"story"` gespeichert.
+
 ## Daten per JSON / GeoJSON bearbeiten
 
 Welten und Zeitlinien sind lesbare JSON-Dateien im Datenordner (*Datei → Datenordner öffnen*). Wenn du sie im Texteditor änderst, lädt die App die Änderungen automatisch neu. *Datei → Als JSON bearbeiten* öffnet einen Editor direkt in der App.

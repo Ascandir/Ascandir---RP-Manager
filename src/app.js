@@ -2271,7 +2271,9 @@
 
   // ------------------------------------------------------------- Gesamt-Render
   function afterEdit(full) { editVersion++; rebuildTree(); if (full) renderAll(true); else { renderFactionFilter(); renderInfo(); renderYear(); updateToolHint(); draw(); } saveSoon(); }
-  let storyEditing = false;
+  let storyEditing = false, secEdit = null;
+  const storyOf = (from, to) => (state.tl.story || []).filter(x => (from == null || x.year >= from) && (to == null || x.year <= to))
+    .sort((a, b) => a.year - b.year || String(a.created || '').localeCompare(String(b.created || '')));
   function renderStory() {
     const box = $('#story');
     const show = state.mode === 'story' && !state.plannerOpen;
@@ -2279,6 +2281,13 @@
     if (!show) { storyEditing = false; return; }
     const e = era(), eras = sortedEras(), can = canEditTl() && e;
     const end = e ? eraEnd(e) : null;
+    const secs = e ? storyOf(e.year, end) : storyOf(null, eras.length ? eras[0].year - 1 : null);
+    const secForm = x => `<div class="story-sec editing">
+      <input id="secTitle" placeholder="${esc(t('storySecTitle'))}" value="${esc(x ? x.title : '')}">
+      <div class="row"><label class="field"><span>${esc(t('storySecYear'))}</span><input id="secYear" value="${esc(fmtYear(x ? x.year : state.year))}"></label>
+        <label class="field"><span>${esc(t('storySecPlaces'))}</span><input id="secPlaces" value="${esc(x ? (x.places || []).join(', ') : '')}"></label></div>
+      <textarea id="secText" class="story-edit" placeholder="${esc(t('storyFmt'))}">${esc(x ? x.text : '')}</textarea>
+      <div class="row"><button id="secSave" class="primary">${esc(t('ok'))}</button><button id="secCancel">${esc(t('cancel'))}</button></div></div>`;
     box.innerHTML = `
       <div class="story-head">
         <div class="story-kicker">📖 ${esc(t('tabStory'))} · ${esc(state.tl.name)}</div>
@@ -2290,8 +2299,32 @@
         <p class="hint">${esc(t('storyFmt'))}</p>`
       : `<div class="story-text">${e && e.desc ? rich(e.desc) : `<p class="hint">${esc(e ? t('storyEmpty') : t('beforeFirstEra'))}</p>`}</div>
         ${can ? `<button id="storyEditBtn">✎ ${esc(t('storyEdit'))}</button>` : ''}`}
+      <h3 style="margin-top:18px">${esc(t('storySections'))} <span class="dim">(${secs.length})</span></h3>
+      <div class="story-secs">${secs.map(x => secEdit === x.id ? secForm(x) : `
+        <article class="story-sec" data-sid="${esc(x.id)}">
+          <div class="sec-head"><b>${esc(x.title)}</b><span class="y">${esc(fmtYear(x.year))}</span>
+            ${can ? `<button class="fixed sec-ed" title="${esc(t('storyEdit'))}">✎</button><button class="fixed danger sec-del" title="${esc(t('delete'))}">✕</button>` : ''}</div>
+          ${(x.places || []).length ? `<div class="dim sec-pl">📍 ${esc(x.places.join(', '))}</div>` : ''}
+          <div class="story-text">${rich(x.text || '')}</div>
+        </article>`).join('') || `<p class="hint">${esc(t('storyNoSections'))}</p>`}
+        ${secEdit === 'new' ? secForm(null) : can || (canEditTl() && !e) ? `<button id="secAdd">＋ ${esc(t('storyAddSection'))}</button>` : ''}</div>
       <h3 style="margin-top:18px">${esc(t('storyChapters'))}</h3>
-      <ol class="story-chapters">${eras.map(x => `<li data-id="${esc(x.id)}" class="${x === e ? 'cur' : ''}"><span class="y">${esc(fmtYear(x.year))}</span> ${esc(x.name)}</li>`).join('')}</ol>`;
+      <ol class="story-chapters">${eras.map(x => { const n = storyOf(x.year, eraEnd(x)).length; return `<li data-id="${esc(x.id)}" class="${x === e ? 'cur' : ''}"><span class="y">${esc(fmtYear(x.year))}</span> ${esc(x.name)}${n ? ` <span class="dim">· ${n}</span>` : ''}</li>`; }).join('')}</ol>`;
+    const sid = el => el.closest('[data-sid]').dataset.sid;
+    box.querySelectorAll('.sec-ed').forEach(b => b.onclick = () => { secEdit = sid(b); renderStory(); });
+    box.querySelectorAll('.sec-del').forEach(b => b.onclick = () => { const x = (state.tl.story || []).find(q => q.id === sid(b)); if (!x || !confirm(t('storyDelQ', x.title))) return; pushUndo(); state.tl.story = state.tl.story.filter(q => q !== x); afterEdit(); renderStory(); });
+    const sa = $('#secAdd'); if (sa) sa.onclick = () => { secEdit = 'new'; renderStory(); $('#secTitle').focus(); };
+    const ss = $('#secSave'); if (ss) ss.onclick = () => {
+      const y = parseYear($('#secYear').value); const title = $('#secTitle').value.trim(), text = $('#secText').value;
+      if (!title && !text.trim()) return;
+      pushUndo(); const list = (state.tl.story ||= []), now = new Date().toISOString();
+      let x = list.find(q => q.id === secEdit);
+      if (!x) { x = { id: uid('st'), created: now, places: [] }; list.push(x); } else x.updated = now;
+      x.title = title || t('storySection') + ' ' + list.length; x.text = text; x.year = y != null ? y : state.year;
+      x.places = $('#secPlaces').value.split(',').map(v => v.trim()).filter(Boolean);
+      secEdit = null; afterEdit(); renderStory();
+    };
+    const sx = $('#secCancel'); if (sx) sx.onclick = () => { secEdit = null; renderStory(); };
     const eb = $('#storyEditBtn'); if (eb) eb.onclick = () => { storyEditing = true; renderStory(); $('#storyText').focus(); };
     const sv = $('#storySave'); if (sv) sv.onclick = () => { pushUndo(); e.desc = $('#storyText').value; storyEditing = false; afterEdit(); renderStory(); };
     const sc = $('#storyCancel'); if (sc) sc.onclick = () => { storyEditing = false; renderStory(); };

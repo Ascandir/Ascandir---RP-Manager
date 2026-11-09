@@ -255,6 +255,8 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
       L.push(`- ${fa.name}: ${parts.join('; ') || (de ? 'eigene Einflussgebiete' : 'own spheres of influence')}`);
     }
   }
+  const st = (tl.story || []).filter(e => e.year <= year).sort((a, b) => a.year - b.year || String(a.created || '').localeCompare(String(b.created || '')));
+  if (st.length) L.push((de ? `Story bisher (${st.length} Abschnitte, neueste zuletzt): ` : `Story so far (${st.length} sections, latest last): `) + st.slice(-5).map(e => `${e.title} (${fmtYear(e.year, f)})`).join(' · '));
   for (const pn of placeNames) {
     const o = findPlace(tl, pn); if (!o) { L.push((de ? 'Unbekannter Ort: ' : 'Unknown place: ') + pn); continue; }
     const p = placeInfo(tl, o, year, lang, snap), fx = p.facts, rows = [];
@@ -277,6 +279,22 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
 // ---------------------------------------------------------------- Schreib-API (für ChatGPT-Actions u. a.)
 const uid = p => p + crypto.randomBytes(5).toString('hex');
 function slug(n) { return (String(n || 'zeitlinie').normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'zeitlinie').slice(0, 60); }
+// ---------------------------------------------------------------- Story-Abschnitte (tl.story)
+function storyList(t, lang, o = {}) {
+  const f = yearFmt(t, lang), from = o.from != null ? parseYear(o.from, f) : null, to = o.to != null ? parseYear(o.to, f) : null;
+  const q = String(o.q || '').toLowerCase().trim();
+  let list = (t.story || []).slice().sort((a, b) => a.year - b.year || String(a.created || '').localeCompare(String(b.created || '')));
+  if (from != null) list = list.filter(e => e.year >= from);
+  if (to != null) list = list.filter(e => e.year <= to);
+  if (o.era) { const er = t.eras.find(x => x.name.toLowerCase() === String(o.era).toLowerCase() || x.id === o.era); if (er) { const s2 = t.eras.slice().sort((a, b) => a.year - b.year), nx = s2[s2.indexOf(er) + 1]; list = list.filter(e => e.year >= er.year && (!nx || e.year < nx.year)); } }
+  if (q) list = list.filter(e => (e.title + ' ' + e.text + ' ' + (e.places || []).join(' ')).toLowerCase().includes(q));
+  return list.map((e, i) => ({ id: e.id, nr: i + 1, year: e.year, yearLabel: fmtYear(e.year, f), era: (eraAt(t, e.year) || {}).name || null, title: e.title, text: e.text, places: e.places || [], created: e.created, updated: e.updated }));
+}
+function storyText(t, lang, list) {
+  const de = lang !== 'en';
+  if (!list.length) return de ? `Noch keine Story-Abschnitte in „${t.name}“.` : `No story sections in "${t.name}" yet.`;
+  return list.map(e => `## ${e.title} (${e.yearLabel}${e.era ? ' · ' + e.era : ''}) [id: ${e.id}]\n${e.places.length ? (de ? 'Orte: ' : 'Places: ') + e.places.join(', ') + '\n' : ''}${e.text}`).join('\n\n');
+}
 function writableTimeline(q, lang) {
   const t = findTimeline(q, lang);
   if (!t) throw Object.assign(new Error('timeline not found'), { code: 404 });
@@ -382,6 +400,31 @@ async function apiWrite(req, res, url, parts) {
     t.eras.sort((a, c) => a.year - c.year);
     saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, era: { id: e.id, name: e.name, year: e.year, label: fmtYear(e.year, f) } });
   }
+  if (ep === 'story' && (req.method === 'POST' || req.method === 'PATCH')) {
+    const f = yearFmt(t, lang); t.story = t.story || [];
+    let e = b.id ? t.story.find(x => x.id === b.id) : null;
+    if (req.method === 'PATCH' && !e) return send(res, 404, { error: 'story section not found (id)' });
+    const now = new Date().toISOString(), y = b.year != null && b.year !== '' ? parseYear(b.year, f) : null;
+    if (!e) {
+      if (!b.title && !b.text) return send(res, 400, { error: 'title or text required' });
+      const last = t.story.slice().sort((a, c) => a.year - c.year)[t.story.length - 1];
+      const s2 = t.eras.slice().sort((a, c) => a.year - c.year);
+      e = { id: uid('st'), year: y != null ? y : last ? last.year : s2.length ? s2[s2.length - 1].year : 0, title: String(b.title || '').trim() || (lang === 'en' ? 'Section' : 'Abschnitt') + ' ' + (t.story.length + 1), text: String(b.text || ''), places: [], created: now };
+      t.story.push(e);
+    } else {
+      if (y != null) e.year = y;
+      if (b.title !== undefined) e.title = String(b.title);
+      if (b.text !== undefined) e.text = b.append ? (e.text ? e.text + '\n\n' : '') + String(b.text) : String(b.text);
+      e.updated = now;
+    }
+    if (Array.isArray(b.places)) e.places = b.places.map(String).filter(Boolean);
+    saveTimeline(t); return send(res, req.method === 'POST' && !b.id ? 201 : 200, { ok: true, section: storyList(t, lang).find(x => x.id === e.id) });
+  }
+  if (ep === 'story' && req.method === 'DELETE') {
+    const id = b.id || q.get('id'); const n = (t.story || []).length;
+    t.story = (t.story || []).filter(x => x.id !== id); if (t.story.length === n) return send(res, 404, { error: 'story section not found' });
+    saveTimeline(t); return send(res, 200, { ok: true });
+  }
   if (ep === 'control' && req.method === 'POST') {
     const e = eraForWrite(t, b, lang), o = byName(b.place); if (!o) return send(res, 404, { error: 'place not found' });
     const bid = Object.fromEntries(t.objects.map(x => [x.id, x])); let k = o, n = 0; while (CHILD.includes(k.type) && k.parent && bid[k.parent] && n++ < 8) k = bid[k.parent];
@@ -447,6 +490,7 @@ async function apiV1(req, res, url) {
       'GET /api/v1/state?timeline=&year=&lang=': 'Zeitalter + Fraktionen mit Gebieten im Jahr',
       'GET /api/v1/place?name=&timeline=&year=&lang=': 'Eckdaten und Kontrolle eines Ortes im Jahr',
       'GET /api/v1/search?q=&timeline=': 'Orte suchen',
+      'GET /api/v1/story?timeline=&from=&to=&era=&q=&last=&format=text': 'Story-Abschnitte lesen',
       'GET /api/v1/summary?timeline=&year=&place=&place=&lang=&max=': 'Fertiger Text für den KI-Kontext (text/plain)',
       'GET /api/v1/travel?from=&to=&via=&class=&stay=&timeline=&year=&format=text': 'Reiseplaner: Route und Reisezeit (Hyperantrieb-Klasse)',
       'GET /api/v1/openapi.json': 'OpenAPI-Beschreibung (z.B. für ChatGPT-Actions)',
@@ -455,6 +499,7 @@ async function apiV1(req, res, url) {
       'POST /api/v1/faction': 'Fraktion anlegen/ändern',
       'POST /api/v1/era': 'Zeitalter anlegen/ändern',
       'POST /api/v1/control': 'Kontrolle über einen Ort setzen',
+      'POST /api/v1/story | PATCH /api/v1/story | DELETE /api/v1/story': 'Story-Abschnitt anlegen (title, text, year, places) / ändern (id, append) / löschen (id)',
       'PUT /api/v1/timeline?timeline=': 'Komplette Zeitlinie ersetzen'
     },
     hints: { year: 'z.B. "3640 VSY", "3640 BBY", "-3640", "4 NSY"', timeline: 'ID, Name oder Dateiname; leer = Kanon' }
@@ -473,6 +518,12 @@ async function apiV1(req, res, url) {
     const t = tl(), y = year(t), o = findPlace(t, q.get('name'));
     if (!o) return send(res, 404, { error: 'place not found' });
     return send(res, 200, Object.assign({ year: y, yearLabel: fmtYear(y, yearFmt(t, lang)) }, placeInfo(t, o, y, lang)));
+  }
+  if (ep === 'story') {
+    const t = tl(), list = storyList(t, lang, { from: q.get('from'), to: q.get('to'), era: q.get('era'), q: q.get('q') });
+    const lim = +q.get('last') || 0, out = lim > 0 ? list.slice(-lim) : list;
+    if (q.get('format') === 'text') return send(res, 200, storyText(t, lang, out), 'text/plain; charset=utf-8');
+    return send(res, 200, { timeline: t.name, count: list.length, sections: out });
   }
   if (ep === 'search') {
     const t = tl(), qq = (q.get('q') || '').toLowerCase();
@@ -542,12 +593,21 @@ const MCP_TOOLS = [
     run: a => internalCall('POST', '/api/v1/place', {}, a) },
   { name: 'delete_place', title: 'Ort löschen', description: 'Löscht einen Ort aus einer eigenen Zeitlinie.', destructive: true, inputSchema: S({ timeline: TL, name: str('Name') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/place', {}, a) },
   { name: 'upsert_faction', title: 'Fraktion anlegen/ändern', description: 'Legt eine Fraktion an oder ändert Name, Farbe (#rrggbb) oder Reichweite.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), color: str('Farbe #rrggbb'), reach: { type: 'number' } }, ['timeline', 'name']), run: a => internalCall('POST', '/api/v1/faction', {}, a) },
+  { name: 'list_story', title: 'Story lesen', description: 'Story-Abschnitte einer Zeitlinie lesen (chronologisch). Vor dem Weiterschreiben aufrufen. Filter: Jahresbereich, Zeitalter, Suchtext oder nur die letzten N Abschnitte.', ro: true,
+    inputSchema: S({ timeline: TL, from: str('ab Jahr, z.B. "3641 BBY"'), to: str('bis Jahr'), era: str('nur dieses Zeitalter (Name)'), query: str('Suchtext'), last: { type: 'number', description: 'nur die letzten N Abschnitte' }, lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/story', { timeline: a.timeline, from: a.from, to: a.to, era: a.era, q: a.query, last: a.last, lang: a.lang, format: 'text' }, null, v) },
+  { name: 'add_story_entry', title: 'Story-Abschnitt anlegen', description: 'Neuen Story-Abschnitt anlegen (erscheint im Story-Reiter). Ein Abschnitt pro Szene/Ereignis. Ohne Jahr wird das Jahr des letzten Abschnitts verwendet.',
+    inputSchema: S({ timeline: TL, title: str('kurzer Titel'), text: str('Text (Leerzeile = Absatz, **fett**, *kursiv*)'), year: YR, places: { type: 'array', items: { type: 'string' }, description: 'beteiligte Orte' } }, ['timeline', 'title', 'text']), run: a => internalCall('POST', '/api/v1/story', {}, a) },
+  { name: 'update_story_entry', title: 'Story-Abschnitt ändern', description: 'Abschnitt per id ändern. append=true hängt den Text an statt ihn zu ersetzen.',
+    inputSchema: S({ timeline: TL, id: str('id aus list_story'), title: str('neuer Titel'), text: str('Text'), append: { type: 'boolean', description: 'Text anhängen' }, year: YR, places: { type: 'array', items: { type: 'string' } } }, ['timeline', 'id']), run: a => internalCall('PATCH', '/api/v1/story', {}, a) },
+  { name: 'delete_story_entry', title: 'Story-Abschnitt löschen', description: 'Abschnitt per id löschen.', inputSchema: S({ timeline: TL, id: str('id aus list_story') }, ['timeline', 'id']), run: a => internalCall('DELETE', '/api/v1/story', {}, a) },
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
   { name: 'set_control', title: 'Kontrolle setzen', description: 'Legt fest, welche Fraktion einen Ort ab dem Zeitalter des angegebenen Jahres kontrolliert (faction leer = neutral).', inputSchema: S({ timeline: TL, place: str('Ort'), faction: str('Fraktion'), year: YR, era: str('oder Name des Zeitalters') }, ['timeline', 'place']), run: a => internalCall('POST', '/api/v1/control', {}, a) }
 ];
 const MCP_INSTRUCTIONS = 'Ascandir InteractiveMap: interaktive Karte (Star Wars u. eigene Welten) mit Zeitlinien, Zeitaltern, Fraktionen und Orten. ' +
   'Der Kanon ist schreibgeschützt – Änderungen nur in eigenen Zeitlinien (vorher list_timelines oder copy_timeline). Jahre als "3640 BBY"/"4 ABY". ' +
-  'Vor Änderungen den Stand mit get_place/get_state lesen. Beschreibungen kurz und ohne Präfixe.';
+  'Vor Änderungen den Stand mit get_place/get_state lesen. Beschreibungen kurz und ohne Präfixe. ' +
+  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse.';
 async function handleMcp(req, res, url, writeAllowed) {
   if (req.method === 'GET') {
     if ((req.headers.accept || '').includes('text/event-stream')) return send(res, 405, { error: 'Use POST (Streamable HTTP)' }, 'application/json', { Allow: 'POST' });
