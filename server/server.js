@@ -255,7 +255,7 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
       L.push(`- ${fa.name}: ${parts.join('; ') || (de ? 'eigene Einflussgebiete' : 'own spheres of influence')}`);
     }
   }
-  const st = (tl.story || []).filter(e => e.year <= year).sort((a, b) => a.year - b.year || String(a.created || '').localeCompare(String(b.created || '')));
+  const st = (tl.story || []).filter(e => e.year <= year).sort(storySort);
   const chs = tl.characters || [];
   if (chs.length) L.push((de ? 'Charaktere: ' : 'Characters: ') + chs.slice(0, 20).map(c => `${c.name}${c.title ? ' (' + c.title + ')' : ''}${c.location ? ' @ ' + c.location : ''}`).join(' · ') + (chs.length > 20 ? ' …' : ''));
   if (st.length) L.push((de ? `Story bisher (${st.length} Abschnitte, neueste zuletzt): ` : `Story so far (${st.length} sections, latest last): `) + st.slice(-5).map(e => `${e.title} (${fmtYear(e.year, f)})`).join(' · '));
@@ -282,10 +282,19 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
 const uid = p => p + crypto.randomBytes(5).toString('hex');
 function slug(n) { return (String(n || 'zeitlinie').normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'zeitlinie').slice(0, 60); }
 // ---------------------------------------------------------------- Story-Abschnitte (tl.story)
+// Reihenfolge: Jahr, dann Position innerhalb des Jahres (order), dann Anlagezeit
+const storySort = (a, b) => a.year - b.year || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.created || '').localeCompare(String(b.created || ''));
+// Abschnitt e innerhalb seines Jahres hinter "after" (oder an Index pos) einordnen und Positionen neu durchzählen
+function storyPlace(t, e, after) {
+  const same = t.story.filter(x => x.year === e.year && x !== e).sort(storySort);
+  let i = same.length;
+  if (after === 'start') i = 0; else if (after) { const k = same.findIndex(x => x.id === after); if (k >= 0) i = k + 1; }
+  same.splice(i, 0, e); same.forEach((x, n) => { x.order = n; });
+}
 function storyList(t, lang, o = {}) {
   const f = yearFmt(t, lang), from = o.from != null ? parseYear(o.from, f) : null, to = o.to != null ? parseYear(o.to, f) : null;
   const q = String(o.q || '').toLowerCase().trim();
-  let list = (t.story || []).slice().sort((a, b) => a.year - b.year || String(a.created || '').localeCompare(String(b.created || '')));
+  let list = (t.story || []).slice().sort(storySort);
   if (from != null) list = list.filter(e => e.year >= from);
   if (to != null) list = list.filter(e => e.year <= to);
   if (o.era) { const er = t.eras.find(x => x.name.toLowerCase() === String(o.era).toLowerCase() || x.id === o.era); if (er) { const s2 = t.eras.slice().sort((a, b) => a.year - b.year), nx = s2[s2.indexOf(er) + 1]; list = list.filter(e => e.year >= er.year && (!nx || e.year < nx.year)); } }
@@ -506,18 +515,37 @@ async function apiWrite(req, res, url, parts) {
     const now = new Date().toISOString(), y = b.year != null && b.year !== '' ? parseYear(b.year, f) : null;
     if (!e) {
       if (!b.title && !b.text) return send(res, 400, { error: 'title or text required' });
-      const last = t.story.slice().sort((a, c) => a.year - c.year)[t.story.length - 1];
+      const aft = b.after && b.after !== 'start' ? t.story.find(x => x.id === b.after) : null;
+      const last = aft || t.story.slice().sort(storySort)[t.story.length - 1];
       const s2 = t.eras.slice().sort((a, c) => a.year - c.year);
       e = { id: uid('st'), year: y != null ? y : last ? last.year : s2.length ? s2[s2.length - 1].year : 0, title: String(b.title || '').trim() || (lang === 'en' ? 'Section' : 'Abschnitt') + ' ' + (t.story.length + 1), text: String(b.text || ''), places: [], created: now };
-      t.story.push(e);
+      t.story.push(e); storyPlace(t, e, b.after);
     } else {
-      if (y != null) e.year = y;
+      if (y != null && y !== e.year) { e.year = y; storyPlace(t, e, b.after); }
+      else if (b.after) storyPlace(t, e, b.after);
       if (b.title !== undefined) e.title = String(b.title);
       if (b.text !== undefined) e.text = b.append ? (e.text ? e.text + '\n\n' : '') + String(b.text) : String(b.text);
       e.updated = now;
     }
     if (Array.isArray(b.places)) e.places = b.places.map(String).filter(Boolean);
     saveTimeline(t); return send(res, req.method === 'POST' && !b.id ? 201 : 200, { ok: true, section: storyList(t, lang).find(x => x.id === e.id) });
+  }
+  if (ep === 'story/order' && req.method === 'POST') {
+    const ids = Array.isArray(b.ids) ? b.ids.map(String) : []; if (!ids.length) return send(res, 400, { error: 'ids required (story section ids in chronological order)' });
+    t.story = t.story || []; const rank = new Map(ids.map((id, i) => [id, i])), unknown = ids.filter(id => !t.story.some(x => x.id === id));
+    const f = yearFmt(t, lang), warn = [];
+    if (b.adjustYears) { // Jahre absteigender Einträge an den Vorgänger angleichen
+      let prev = null; for (const id of ids) { const e = t.story.find(x => x.id === id); if (!e) continue; if (prev && e.year < prev.year) { warn.push(`${e.title}: ${fmtYear(e.year, f)} → ${fmtYear(prev.year, f)}`); e.year = prev.year; } prev = e; }
+    }
+    const years = [...new Set(t.story.map(x => x.year))];
+    for (const y of years) {
+      const grp = t.story.filter(x => x.year === y).sort((a, c) => (rank.has(a.id) ? rank.get(a.id) : 1e6 + (a.order ?? 1e5)) - (rank.has(c.id) ? rank.get(c.id) : 1e6 + (c.order ?? 1e5)) || storySort(a, c));
+      grp.forEach((x, n) => { x.order = n; });
+    }
+    const conflicts = []; let prev = null;
+    if (!b.adjustYears) for (const id of ids) { const e = t.story.find(x => x.id === id); if (!e) continue; if (prev && e.year < prev.year) conflicts.push(`„${e.title}“ (${fmtYear(e.year, f)}) soll nach „${prev.title}“ (${fmtYear(prev.year, f)}) kommen – Jahr passt nicht; mit adjustYears=true angleichen oder per update_story_entry ändern`); prev = e; }
+    saveTimeline(t);
+    return send(res, 200, { ok: true, unknownIds: unknown, yearChanges: warn, conflicts, order: storyList(t, lang).map(e => `${e.nr}. ${e.title} (${e.yearLabel})`) });
   }
   if (ep === 'story' && req.method === 'DELETE') {
     const id = b.id || q.get('id'); const n = (t.story || []).length;
@@ -602,6 +630,7 @@ async function apiV1(req, res, url) {
       'POST /api/v1/control': 'Kontrolle über einen Ort setzen',
       'POST /api/v1/character | DELETE /api/v1/character': 'Charakter anlegen/ändern (name + Felder, append) / löschen',
       'POST /api/v1/character/image': 'Bild hinzufügen (name, url oder data, caption, portrait)',
+      'POST /api/v1/story/order': 'Story-Abschnitte sortieren (ids, adjustYears)',
       'POST /api/v1/story | PATCH /api/v1/story | DELETE /api/v1/story': 'Story-Abschnitt anlegen (title, text, year, places) / ändern (id, append) / löschen (id)',
       'PUT /api/v1/timeline?timeline=': 'Komplette Zeitlinie ersetzen'
     },
@@ -716,9 +745,11 @@ const MCP_TOOLS = [
     inputSchema: S({ timeline: TL, from: str('ab Jahr, z.B. "3641 BBY"'), to: str('bis Jahr'), era: str('nur dieses Zeitalter (Name)'), query: str('Suchtext'), last: { type: 'number', description: 'nur die letzten N Abschnitte' }, lang: LG }, ['timeline']),
     run: (a, v) => internalCall('GET', '/api/v1/story', { timeline: a.timeline, from: a.from, to: a.to, era: a.era, q: a.query, last: a.last, lang: a.lang, format: 'text' }, null, v) },
   { name: 'add_story_entry', title: 'Story-Abschnitt anlegen', description: 'Neuen Story-Abschnitt anlegen (erscheint im Story-Reiter). Ein Abschnitt pro Szene/Ereignis. Ohne Jahr wird das Jahr des letzten Abschnitts verwendet.',
-    inputSchema: S({ timeline: TL, title: str('kurzer Titel'), text: str('Text (Leerzeile = Absatz, **fett**, *kursiv*)'), year: YR, places: { type: 'array', items: { type: 'string' }, description: 'beteiligte Orte' } }, ['timeline', 'title', 'text']), run: a => internalCall('POST', '/api/v1/story', {}, a) },
+    inputSchema: S({ timeline: TL, title: str('kurzer Titel'), text: str('Text (Leerzeile = Absatz, **fett**, *kursiv*)'), year: YR, after: str('optional: id des Abschnitts, hinter dem eingefügt wird ("start" = an den Anfang des Jahres)'), places: { type: 'array', items: { type: 'string' }, description: 'beteiligte Orte' } }, ['timeline', 'title', 'text']), run: a => internalCall('POST', '/api/v1/story', {}, a) },
   { name: 'update_story_entry', title: 'Story-Abschnitt ändern', description: 'Abschnitt per id ändern. append=true hängt den Text an statt ihn zu ersetzen.',
-    inputSchema: S({ timeline: TL, id: str('id aus list_story'), title: str('neuer Titel'), text: str('Text'), append: { type: 'boolean', description: 'Text anhängen' }, year: YR, places: { type: 'array', items: { type: 'string' } } }, ['timeline', 'id']), run: a => internalCall('PATCH', '/api/v1/story', {}, a) },
+    inputSchema: S({ timeline: TL, id: str('id aus list_story'), title: str('neuer Titel'), text: str('Text'), append: { type: 'boolean', description: 'Text anhängen' }, year: YR, after: str('optional: hinter diesen Abschnitt verschieben (id oder "start")'), places: { type: 'array', items: { type: 'string' } } }, ['timeline', 'id']), run: a => internalCall('PATCH', '/api/v1/story', {}, a) },
+  { name: 'reorder_story', title: 'Story sortieren', description: 'Story-Abschnitte in chronologische Reihenfolge bringen: ids in der gewünschten Reihenfolge übergeben (alle oder ein Teil). Sortiert wird nach Jahr und innerhalb eines Jahres nach dieser Reihenfolge. adjustYears=true setzt Abschnitte, die laut Reihenfolge später kommen, aber ein früheres Jahr haben, auf das Jahr ihres Vorgängers.',
+    inputSchema: S({ timeline: TL, ids: { type: 'array', items: { type: 'string' }, description: 'Abschnitts-ids in chronologischer Reihenfolge' }, adjustYears: { type: 'boolean' } }, ['timeline', 'ids']), run: a => internalCall('POST', '/api/v1/story/order', {}, a) },
   { name: 'delete_story_entry', title: 'Story-Abschnitt löschen', description: 'Abschnitt per id löschen.', inputSchema: S({ timeline: TL, id: str('id aus list_story') }, ['timeline', 'id']), run: a => internalCall('DELETE', '/api/v1/story', {}, a) },
   { name: 'list_characters', title: 'Charaktere auflisten', description: 'Charaktere einer Zeitlinie (Name, Rolle, Fraktion, Ort, Status). Filter: Suchtext, Fraktion, Ort.', ro: true,
     inputSchema: S({ timeline: TL, query: str('Suchtext'), faction: str('Fraktion'), place: str('Ort/Heimatwelt'), group: str('Gruppe'), lang: LG }, ['timeline']),

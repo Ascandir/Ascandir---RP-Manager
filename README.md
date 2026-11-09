@@ -82,6 +82,7 @@ Im Reiter *Story* gibt es pro Zeitalter beliebig viele **Abschnitte** (Titel, Ja
 - **MCP (ChatGPT/Claude):** `list_story` liest (z. B. `last: 5` für die letzten fünf), `add_story_entry` legt einen neuen Abschnitt an, `update_story_entry` ändert oder ergänzt (`append: true`), `delete_story_entry` löscht.
 - **REST:** `GET /api/v1/story?timeline=…&format=text`, `POST/PATCH/DELETE /api/v1/story` (mit Token).
 - `get_summary` nennt automatisch die letzten Abschnitte, damit die KI weiß, wo die Geschichte steht.
+- **Reihenfolge:** Abschnitte sind nach Jahr sortiert, innerhalb eines Jahres nach ihrer Position. Die KI kann mit `reorder_story` (ids in chronologischer Reihenfolge, optional `adjustYears`) neu sortieren und mit `after` einen Abschnitt gezielt hinter einen anderen einfügen oder verschieben. Im Story-Reiter gehen die Pfeile ↑/↓ innerhalb desselben Jahres.
 
 Die Abschnitte werden in der Zeitlinien-Datei unter `"story"` gespeichert.
 

@@ -2275,7 +2275,15 @@
   function afterEdit(full) { editVersion++; rebuildTree(); if (full) renderAll(true); else { renderFactionFilter(); renderInfo(); renderYear(); updateToolHint(); draw(); } saveSoon(); }
   let storyEditing = false, secEdit = null;
   const storyOf = (from, to) => (state.tl.story || []).filter(x => (from == null || x.year >= from) && (to == null || x.year <= to))
-    .sort((a, b) => a.year - b.year || String(a.created || '').localeCompare(String(b.created || '')));
+    .sort(storySortFn);
+  const storySortFn = (a, b) => a.year - b.year || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.created || '').localeCompare(String(b.created || ''));
+  // Abschnitt innerhalb desselben Jahres um eine Position verschieben
+  function moveSection(id, dir) {
+    const x = (state.tl.story || []).find(q => q.id === id); if (!x) return;
+    const same = state.tl.story.filter(q => q.year === x.year).sort(storySortFn), i = same.indexOf(x), j = i + dir;
+    if (j < 0 || j >= same.length) return;
+    pushUndo(); same.splice(i, 1); same.splice(j, 0, x); same.forEach((q, n) => { q.order = n; }); afterEdit(); renderStory();
+  }
   function renderStory() {
     const box = $('#story');
     const show = state.mode === 'story' && !state.plannerOpen;
@@ -2305,7 +2313,7 @@
       <div class="story-secs">${secs.map(x => secEdit === x.id ? secForm(x) : `
         <article class="story-sec" data-sid="${esc(x.id)}">
           <div class="sec-head"><b>${esc(x.title)}</b><span class="y">${esc(fmtYear(x.year))}</span>
-            ${can ? `<button class="fixed sec-ed" title="${esc(t('storyEdit'))}">✎</button><button class="fixed danger sec-del" title="${esc(t('delete'))}">✕</button>` : ''}</div>
+            ${can ? `<button class="fixed sec-up" title="${esc(t('storyUp'))}" ${secs.some(q => q !== x && q.year === x.year && storySortFn(q, x) < 0) ? '' : 'disabled'}>↑</button><button class="fixed sec-dn" title="${esc(t('storyDown'))}" ${secs.some(q => q !== x && q.year === x.year && storySortFn(q, x) > 0) ? '' : 'disabled'}>↓</button><button class="fixed sec-ed" title="${esc(t('storyEdit'))}">✎</button><button class="fixed danger sec-del" title="${esc(t('delete'))}">✕</button>` : ''}</div>
           ${(x.places || []).length ? `<div class="dim sec-pl">📍 ${esc(x.places.join(', '))}</div>` : ''}
           <div class="story-text">${rich(x.text || '')}</div>
         </article>`).join('') || `<p class="hint">${esc(t('storyNoSections'))}</p>`}
@@ -2314,6 +2322,8 @@
       <ol class="story-chapters">${eras.map(x => { const n = storyOf(x.year, eraEnd(x)).length; return `<li data-id="${esc(x.id)}" class="${x === e ? 'cur' : ''}"><span class="y">${esc(fmtYear(x.year))}</span> ${esc(x.name)}${n ? ` <span class="dim">· ${n}</span>` : ''}</li>`; }).join('')}</ol>`;
     const sid = el => el.closest('[data-sid]').dataset.sid;
     box.querySelectorAll('.sec-ed').forEach(b => b.onclick = () => { secEdit = sid(b); renderStory(); });
+    box.querySelectorAll('.sec-up').forEach(b => b.onclick = () => moveSection(sid(b), -1));
+    box.querySelectorAll('.sec-dn').forEach(b => b.onclick = () => moveSection(sid(b), 1));
     box.querySelectorAll('.sec-del').forEach(b => b.onclick = () => { const x = (state.tl.story || []).find(q => q.id === sid(b)); if (!x || !confirm(t('storyDelQ', x.title))) return; pushUndo(); state.tl.story = state.tl.story.filter(q => q !== x); afterEdit(); renderStory(); });
     const sa = $('#secAdd'); if (sa) sa.onclick = () => { secEdit = 'new'; renderStory(); $('#secTitle').focus(); };
     const ss = $('#secSave'); if (ss) ss.onclick = () => {
@@ -2322,7 +2332,8 @@
       pushUndo(); const list = (state.tl.story ||= []), now = new Date().toISOString();
       let x = list.find(q => q.id === secEdit);
       if (!x) { x = { id: uid('st'), created: now, places: [] }; list.push(x); } else x.updated = now;
-      x.title = title || t('storySection') + ' ' + list.length; x.text = text; x.year = y != null ? y : state.year;
+      const oldY = x.year; x.title = title || t('storySection') + ' ' + list.length; x.text = text; x.year = y != null ? y : state.year;
+      if (oldY !== x.year) x.order = Math.max(-1, ...list.filter(q => q !== x && q.year === x.year).map(q => q.order ?? -1)) + 1;
       x.places = $('#secPlaces').value.split(',').map(v => v.trim()).filter(Boolean);
       secEdit = null; afterEdit(); renderStory();
     };
