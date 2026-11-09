@@ -46,6 +46,18 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
   - **Fantasy:** Pergamentkarte mit Hauptstädten, Städten, Dörfern, Festungen und Wahrzeichen
 - Das Design passt sich automatisch an den Welttyp an.
 
+### Galaxie-Atlas (Star Wars)
+
+Die Star-Wars-Welt enthält zusätzlich das komplette offizielle Systemverzeichnis mit **rund 6.750 Systemen**. Jedes System hat sein Rasterfeld (z. B. *R-16*), seine Region und seinen Sektor.
+
+- Die bekannten Welten mit Beschreibung und Eckdaten liegen jetzt auf ihren offiziellen Rasterfeldern.
+- Die übrigen ~6.500 Systeme bilden eine leichte Zusatzebene. Beim Hineinzoomen erscheinen sie als Punkte und dann mit Namen. Suche, Reiseplaner, API und MCP finden sie alle.
+- Ein Klick zeigt Region, Sektor, Rasterfeld und die Fraktion laut berechneten Grenzen. Mit *In Zeitlinie übernehmen* wird das System zu einem normalen, bearbeitbaren Objekt deiner Zeitlinie.
+- Die genaue Lage innerhalb eines Rasterfelds ist gestreut und damit angenähert.
+- Ein- und ausblenden: links *Anzeige → Atlas-Systeme*.
+- Der neue **Kartenstil „Atlas“** (Standard) zeigt die Galaxie in Nachtblau mit getönten Regionsringen, gebogener Regionsbeschriftung und Rasterleiste am Bildrand. Unter *Einstellungen → Design → Kartenstil* kannst du zurück zu „Klassisch“ wechseln. Die Grenzen kommen weiterhin aus dem Territorien-Verfahren.
+- **Ältere eigene Zeitlinien** (erstellt vor v0.12) nutzen noch die alten, geschätzten Positionen. Unter *Einstellungen → Aktuelle Welt → Zeitlinie an den Atlas angleichen* werden die eingebauten Welten und die mitgelieferten Einflusszonen auf die neuen Positionen verschoben. Vorher wird automatisch eine Sicherungskopie angelegt. Eigene Orte, Texte, Fraktionen und die Story bleiben unverändert.
+
 ### Territorien
 
 Gebiete werden als echte Territorien mit Grenzlinien dargestellt: Jeder Bereich gehört der Fraktion mit dem nächstgelegenen kontrollierten Ort (Reichweite je Fraktion einstellbar), beanspruchte Regionen und gemalte Gebiete fließen mit ein. Wo zwei Mächte aufeinandertreffen, entsteht eine klare Grenze. Der alte Stil mit Einfluss-Blasen ist unter *Einstellungen → Darstellung der Gebiete* wählbar.
@@ -196,7 +208,7 @@ Die Kanon-Zeitlinie bleibt schreibgeschützt; Änderungen landen immer in einer 
 
 ## Hinweise
 
-- Positionen und Einflussgebiete der Star-Wars-Welt sind **Annäherungen** an das bekannte Galaxie-Raster.
+- Rasterfelder, Regionen und Sektoren stammen aus dem offiziellen Star-Wars-Galaxy-Map-Gazetteer (nur als Faktenliste übernommen). Die Lage innerhalb eines Rasterfelds und die Einflussgebiete sind **Annäherungen**.
 - Inoffizielles Fanprojekt ohne Verbindung zu Lucasfilm oder Disney. Es enthält keine offiziellen Karten, Logos oder Grafiken.
 
 ## Für Entwickler

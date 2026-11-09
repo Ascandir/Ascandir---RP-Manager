@@ -34,9 +34,9 @@
   const oldSet = loadJSON('swgm.settings.v1', {});
   const settings = Object.assign({
     lang: (navigator.language || 'de').toLowerCase().startsWith('de') ? 'de' : 'en',
-    theme: 'auto', autoUpdate: true, terrStyle: 'borders', activeWorld: 'starwars', activeTl: {}, years: {},
+    theme: 'auto', mapStyle: 'atlas', autoUpdate: true, terrStyle: 'borders', activeWorld: 'starwars', activeTl: {}, years: {},
     types: Object.assign({ sun: true, planet: true, moon: true, station: true, capital: true, city: true, village: true, fortress: true, landmark: true }, oldSet.types || {}),
-    opts: Object.assign({ influence: true, regions: true, grid: false, names: true, routes: true, sectors: true }, oldSet.opts || {}),
+    opts: Object.assign({ influence: true, regions: true, grid: false, names: true, routes: true, sectors: true, atlas: true }, oldSet.opts || {}),
     hiddenFactions: oldSet.hiddenFactions || [],
     planner: { stops: ['', ''], cls: 1, stay: 0, mode: 'horse', km: 1 }
   }, loadJSON(STORE_SET, {}));
@@ -362,7 +362,7 @@
   function huttCircle() {
     const n = state.tl.objects.find(o => o.id === 'nalhutta') || state.tl.objects.find(o => o.region === 'huttspace' && o.type === 'planet');
     const p = n ? posOf(n) : { x: 1950, y: 1150 };
-    return { x: p.x, y: p.y, r: 190 };
+    return { x: p.x, y: p.y, r: GEO.huttR || 190 };
   }
   function fillRegion(c, key) {
     if (key === 'unknown') { c.beginPath(); wedgePath(c); c.fill(); return; }
@@ -384,8 +384,38 @@
 
   // ------------------------------------------------------------- Positionen
   let posCache = {}, childrenOf = {}, objMap = {};
+  // ---- Galaxie-Atlas: ~6.500 weitere offizielle Systeme als Zusatzebene (werden nicht in Zeitlinien gespeichert)
+  let atlasState = { key: '', list: [], buckets: new Map(), sectors: [] };
+  const AB = 50, bkey = (x, y) => Math.floor(x / AB) + ',' + Math.floor(y / AB);
+  function atlasObjs() {
+    if (!isSW() || !SW.atlas || !state.tl) return [];
+    const key = state.tl.id + '|' + editVersion + '|' + state.tl.objects.length;
+    if (atlasState.key === key) return atlasState.list;
+    const names = new Set(), ids = new Set();
+    for (const o of state.tl.objects) { names.add(SW.normName(o.name)); ids.add(o.id); }
+    const list = SW.atlas().filter(a => !ids.has(a.id) && !names.has(SW.normName(a.name)));
+    const buckets = new Map();
+    for (const a of list) { const k = bkey(a.x, a.y); let b = buckets.get(k); if (!b) buckets.set(k, b = []); b.push(a); }
+    // Sektor-Beschriftungen: Schwerpunkt aller Systeme eines Sektors
+    const g = {};
+    for (const o of list.concat(state.tl.objects.filter(o => !o.parent))) if (o.sector) { const q = (g[o.sector] ||= { n: 0, x: 0, y: 0 }); q.n++; q.x += o.x; q.y += o.y; }
+    const sectors = Object.entries(g).map(([name, q]) => ({ name, n: q.n, x: q.x / q.n, y: q.y / q.n })).sort((a, b) => b.n - a.n);
+    atlasState = { key, list, buckets, sectors };
+    return list;
+  }
+  const atlasOn = () => isSW() && settings.opts.atlas !== false && settings.types.planet !== false;
+  const ATLAS_Z = 0.25, ATLAS_HIT_Z = 0.9, ATLAS_LABEL_Z = 2.4;
+  function atlasInView(pad = 20) {
+    const a = s2w(-pad, -pad), b = s2w(W + pad, H + pad), out = [];
+    atlasObjs();
+    const x0 = Math.floor(a.x / AB), x1 = Math.floor(b.x / AB), y0 = Math.floor(a.y / AB), y1 = Math.floor(b.y / AB);
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > 6000) { for (const o of atlasState.list) if (o.x >= a.x && o.x <= b.x && o.y >= a.y && o.y <= b.y) out.push(o); return out; }
+    for (let ix = x0; ix <= x1; ix++) for (let iy = y0; iy <= y1; iy++) { const bk = atlasState.buckets.get(ix + ',' + iy); if (bk) for (const o of bk) out.push(o); }
+    return out;
+  }
   function rebuildTree() {
     childrenOf = {}; objMap = {};
+    if (isSW()) for (const a of atlasObjs()) objMap[a.id] = a;
     for (const o of state.tl.objects) objMap[o.id] = o;
     for (const o of state.tl.objects) if (o.parent && objMap[o.parent]) (childrenOf[o.parent] ||= []).push(o);
     for (const k in childrenOf) childrenOf[k].sort((a, b) => typeOrder(a) - typeOrder(b) || a.name.localeCompare(b.name));
@@ -416,7 +446,16 @@
     const e = era(); if (!e) return null;
     let f = e.control[controlKey(o)];
     if (!f && o.type === 'sun') { const ch = (childrenOf[o.id] || []).find(c => e.control[c.id]); if (ch) f = e.control[ch.id]; }
+    if (!f && o.atlas) f = territoryAt(o.x, o.y);
     return f ? facById(f) : null;
+  }
+  // Welche Fraktion beansprucht diesen Punkt laut berechneten Grenzen?
+  const hitCtx = document.createElement('canvas').getContext('2d');
+  function territoryAt(x, y) {
+    if (!settings.opts.influence) return null;
+    const paths = territories();
+    for (const f of state.tl.factions) if (paths[f.id] && !state.hiddenFactions.has(f.id) && hitCtx.isPointInPath(paths[f.id], x, y, 'evenodd')) return f.id;
+    return null;
   }
 
   // ------------------------------------------------------------- Zeichnen
@@ -433,17 +472,19 @@
     const lowRes = performance.now() < interactUntil;
     const v = state.view;
     const key = [v.cx, v.cy, v.z, W, H, DPR, state.year, dataVersion, state.tl.id, state.world.id, state.theme, state.selected, lowRes,
-      JSON.stringify(settings.opts), JSON.stringify(settings.types), settings.terrStyle, [...state.hiddenFactions].join(','), window.I18N.lang].join('|');
+      JSON.stringify(settings.opts), JSON.stringify(settings.types), settings.terrStyle, settings.mapStyle, [...state.hiddenFactions].join(','), window.I18N.lang].join('|');
     if (key !== baseKey) {
       rebuildTree(); computePositions();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       if (state.world.type === 'fantasy') drawParchment(); else drawSpace();
-      if (isSW() && settings.opts.regions) drawRegions();
+      if (isSW() && settings.opts.regions) { if (atlasStyle()) drawRegionsAtlas(); else drawRegions(); }
       if (settings.opts.influence && era()) { if (settings.terrStyle === 'bubbles') drawInfluence(lowRes); else drawTerritories(); }
       if (settings.opts.grid) drawGrid();
       if (settings.opts.routes) drawRoutes();
       if (isSW() && settings.opts.sectors) drawSectors();
+      if (atlasOn()) drawAtlasDots();
       drawObjects();
+      if (atlasStyle() && settings.opts.grid) drawGridLabels();
       baseCtx.setTransform(1, 0, 0, 1, 0, 0); baseCtx.clearRect(0, 0, base.width, base.height); baseCtx.drawImage(canvas, 0, 0);
       baseKey = key;
     } else {
@@ -481,7 +522,18 @@
   function computePlan() {
     const P = settings.planner, stops = P.stops.map(x => (x || '').trim());
     if (stops.filter(Boolean).length < 2 || !stops[0] || !stops[stops.length - 1]) { state.plan = null; return; }
-    state.plan = TR.plan(state.tl, { stops: stops.filter(Boolean), year: state.year, worldType: state.world.type, hyperClass: P.cls, stayHours: P.stay, mode: P.mode, kmPerUnit: P.km });
+    state.plan = TR.plan(withAtlasStops(state.tl, stops), { stops: stops.filter(Boolean), year: state.year, worldType: state.world.type, hyperClass: P.cls, stayHours: P.stay, mode: P.mode, kmPerUnit: P.km });
+  }
+  // Atlas-Systeme, die als Halt angegeben sind, für die Berechnung ergänzen
+  function withAtlasStops(tl, stops) {
+    if (!isSW()) return tl;
+    const has = new Set(tl.objects.map(o => o.name.toLowerCase())), extra = [];
+    for (const q of stops) {
+      const s = (q || '').toLowerCase(); if (!s || has.has(s) || tl.objects.some(o => o.id === q)) continue;
+      const a = SW.atlas().find(o => o.name.toLowerCase() === s || o.id === q) || SW.atlas().find(o => o.name.toLowerCase().startsWith(s));
+      if (a && !extra.includes(a)) extra.push(a);
+    }
+    return extra.length ? Object.assign({}, tl, { objects: tl.objects.concat(extra) }) : tl;
   }
   const dur = h => TR.fmtDuration(h, settings.lang);
   function planText() {
@@ -569,11 +621,17 @@
     ctx.beginPath(); ctx.arc(p.x, p.y, 10 * sizeF, 0, Math.PI * 2); ctx.stroke();
   }
 
+  const atlasStyle = () => isSW() && !fantasy() && settings.mapStyle !== 'classic';
   function drawSpace() {
-    const z = state.view.z;
-    ctx.fillStyle = fantasy() ? '#1d1810' : '#04060c'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const z = state.view.z, at = atlasStyle();
+    if (at) {
+      // Atlas-Stil: tiefes Nachtblau statt Schwarz, ruhigerer Galaxiekern
+      const g = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, 0, canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height) * 0.75);
+      g.addColorStop(0, '#0b1a2e'); g.addColorStop(1, '#040a14');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else { ctx.fillStyle = fantasy() ? '#1d1810' : '#04060c'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
     worldTransform(ctx);
-    ctx.globalAlpha = z > 3 ? Math.max(0.35, 3 / z) : 1;
+    ctx.globalAlpha = (z > 3 ? Math.max(0.35, 3 / z) : 1) * (at ? 0.55 : 1);
     ctx.drawImage(glow, -150, -150, 2600, 2600);
     ctx.globalAlpha = 1;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -581,7 +639,8 @@
       const p = w2s(s.x, s.y);
       if (p.x < -2 || p.y < -2 || p.x > W + 2 || p.y > H + 2) continue;
       const sz = Math.max(0.6, Math.min(2, 0.5 + z * 0.6)) * (s.b > 0.85 ? 1.6 : 1);
-      ctx.fillStyle = s.c < 0.15 ? `rgba(255,210,160,${s.b})` : s.c > 0.85 ? `rgba(170,200,255,${s.b})` : `rgba(235,240,255,${s.b * 0.85})`;
+      const sb = at ? s.b * 0.55 : s.b;
+      ctx.fillStyle = s.c < 0.15 ? `rgba(255,210,160,${sb})` : s.c > 0.85 ? `rgba(170,200,255,${sb})` : `rgba(235,240,255,${sb * 0.85})`;
       ctx.fillRect(p.x, p.y, sz, sz);
     }
     if (z > 0.9) drawDeepStars();
@@ -664,6 +723,92 @@
     p = w2s(h.x, h.y + h.r - 14); ctx.fillText(t('regions.huttspace').toUpperCase(), p.x, p.y);
   }
 
+  // Atlas-Stil: Regionsringe als ruhige, leicht getönte Flächen mit feinen Linien und gesperrter Beschriftung
+  const ATLAS_TINT = { deepcore: 'rgba(150,200,255,0.10)', core: 'rgba(120,180,245,0.085)', colonies: 'rgba(110,170,240,0.07)', innerrim: 'rgba(100,160,235,0.06)',
+    expansion: 'rgba(90,150,230,0.05)', midrim: 'rgba(80,140,225,0.04)', outerrim: 'rgba(70,130,220,0.03)', wildspace: 'rgba(60,110,200,0.02)' };
+  function drawRegionsAtlas() {
+    const z = state.view.z;
+    worldTransform(ctx);
+    for (const b of GEO.bands) { ctx.fillStyle = ATLAS_TINT[b.key] || 'transparent'; fillRegion(ctx, b.key); }
+    ctx.fillStyle = 'rgba(140,110,220,0.05)'; fillRegion(ctx, 'unknown');
+    ctx.fillStyle = 'rgba(220,180,90,0.05)'; fillRegion(ctx, 'huttspace');
+    ctx.lineWidth = 1 / z; ctx.strokeStyle = 'rgba(150,200,255,0.20)';
+    for (const b of GEO.bands) {
+      ctx.save();
+      if (b.r1 > GEO.unknownWedge.r0) { ctx.beginPath(); ctx.rect(-5000, -5000, 12000, 12000); wedgePath(ctx); ctx.clip('evenodd'); }
+      ctx.beginPath(); shapePath(ctx, b.r1); ctx.stroke(); ctx.restore();
+    }
+    ctx.strokeStyle = 'rgba(170,140,240,0.32)'; ctx.beginPath(); wedgePath(ctx); ctx.stroke();
+    const h = huttCircle();
+    ctx.strokeStyle = 'rgba(230,190,100,0.32)'; ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, Math.PI * 2); ctx.stroke();
+    // Beschriftung entlang der Ringe (oben), Buchstaben einzeln gesetzt
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const fs = Math.max(9, Math.min(15, 8 + z * 4));
+    ctx.font = `600 ${fs}px "Segoe UI", "Bahnschrift", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const arcText = (txt, r, th0, color) => {
+      const s = GEO.scale(th0), rr = r * s * z; if (rr < 30) return;
+      const sp = fs * 0.32, chars = [...txt]; let tot = 0; const ws = chars.map(c => { const w = ctx.measureText(c).width + sp; tot += w; return w; });
+      let a = th0 - (tot / rr) / 2; ctx.fillStyle = color;
+      chars.forEach((c, i) => {
+        const am = a + ws[i] / rr / 2, sc = GEO.scale(am);
+        const p = w2s(GEO.center.x + Math.cos(am) * r * sc, GEO.center.y + Math.sin(am) * r * sc);
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(am + Math.PI / 2); ctx.fillText(c, 0, 0); ctx.restore();
+        a += ws[i] / rr;
+      });
+    };
+    for (const b of GEO.bands) {
+      if (b.key === 'deepcore') { if (z < 0.9) continue; const p = w2s(GEO.center.x, GEO.center.y); ctx.fillStyle = 'rgba(190,220,255,0.45)'; ctx.fillText(t('regions.deepcore').toUpperCase(), p.x, p.y); continue; }
+      arcText(t('regions.' + b.key).toUpperCase(), b.r1 - Math.min(26, (b.r1 - b.r0) * 0.35), -Math.PI / 2, 'rgba(170,205,245,0.42)');
+    }
+    ctx.fillStyle = 'rgba(195,170,245,0.5)';
+    let p = w2s(GEO.center.x - 720 * GEO.scale(Math.PI), GEO.center.y); ctx.fillText(t('regions.unknown').toUpperCase(), p.x, p.y);
+    ctx.fillStyle = 'rgba(235,200,120,0.55)';
+    p = w2s(h.x, h.y + h.r - 16); ctx.fillText(t('regions.huttspace').toUpperCase(), p.x, p.y);
+    ctx.textBaseline = 'alphabetic';
+  }
+  function drawAtlasDots() {
+    const z = state.view.z; if (z < ATLAS_Z) return;
+    const a = Math.min(1, 0.5 + (z - ATLAS_Z) * 0.5), r = Math.max(0.55, Math.min(2.6, 0.35 + z * 0.4));
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = fantasy() ? `rgba(60,40,20,${0.7 * a})` : `rgba(175,205,240,${0.8 * a})`;
+    ctx.beginPath();
+    const vis = atlasInView();
+    if (r < 1.1) for (const o of vis) { const p = w2s(o.x, o.y); ctx.rect(p.x - r, p.y - r, r * 2, r * 2); }
+    else for (const o of vis) { const p = w2s(o.x, o.y); ctx.moveTo(p.x + r, p.y); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); }
+    ctx.fill();
+    if (state.selected && objMap[state.selected] && objMap[state.selected].atlas) {
+      const o = objMap[state.selected], p = w2s(o.x, o.y);
+      ctx.strokeStyle = '#f5b83d'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  // Beschriftungen der Atlas-Systeme nach den Hauptobjekten, nur wo Platz ist
+  function drawAtlasLabels(boxes) {
+    const z = state.view.z; if (z < ATLAS_LABEL_Z || performance.now() < interactUntil) return;
+    const vis = atlasInView(60); if (vis.length > 1500) return;
+    ctx.font = `400 ${z > 6 ? 11 : 10}px "Segoe UI", sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    let n = 0;
+    for (const o of vis) {
+      if (n > 450) break;
+      const p = w2s(o.x, o.y), w = ctx.measureText(o.name).width, x = p.x + 5, y = p.y;
+      const box = [x - 1, y - 6, x + w + 1, y + 6];
+      if (boxes.some(b => !(box[2] < b[0] || box[0] > b[2] || box[3] < b[1] || box[1] > b[3]))) continue;
+      boxes.push(box); n++;
+      ctx.fillStyle = 'rgba(4,8,16,0.7)'; ctx.fillText(o.name, x + 1, y + 1);
+      ctx.fillStyle = 'rgba(175,195,220,0.85)'; ctx.fillText(o.name, x, y);
+    }
+    ctx.textBaseline = 'alphabetic';
+  }
+  // Raster-Beschriftung am Bildrand (bleibt beim Verschieben sichtbar)
+  function drawGridLabels() {
+    const c = GEO.gridCell;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = 'rgba(6,14,26,0.72)'; ctx.fillRect(0, 0, W, 16); ctx.fillRect(0, 16, 22, H - 16);
+    ctx.font = '600 10px "Segoe UI", sans-serif'; ctx.fillStyle = 'rgba(160,200,240,0.8)'; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    for (let i = 0; i < 24; i++) { const m = w2s((i + 0.5) * c, 0); if (m.x > 24 && m.x < W - 6) ctx.fillText(String.fromCharCode(65 + i), m.x, 8); }
+    for (let j = 0; j < 22; j++) { const m = w2s(0, (j + 0.5) * c); if (m.y > 18 && m.y < H - 4) ctx.fillText(String(j + 1), 11, m.y); }
+    ctx.textBaseline = 'alphabetic';
+  }
+
   function drawInfluence(lowRes) {
     const e = era();
     // Einflussflächen in CSS-Pixel-Auflösung (bei Interaktion halbe Auflösung) berechnen – deutlich schneller
@@ -734,7 +879,7 @@
     worldTransform(ctx);
     for (const f of state.tl.factions) {
       const p = paths[f.id]; if (!p || state.hiddenFactions.has(f.id)) continue;
-      ctx.globalAlpha = fan ? 0.24 : 0.2; ctx.fillStyle = f.color; ctx.fill(p, 'evenodd');
+      ctx.globalAlpha = fan ? 0.24 : atlasStyle() ? 0.16 : 0.2; ctx.fillStyle = f.color; ctx.fill(p, 'evenodd');
     }
     ctx.globalAlpha = 1; ctx.lineJoin = 'round';
     for (const f of state.tl.factions) {
@@ -751,17 +896,19 @@
   function drawGrid() {
     const c = GEO.gridCell, cols = state.world.type === 'fantasy' ? Math.ceil(FANTASY_SIZE.w / c) : 24, rows = state.world.type === 'fantasy' ? Math.ceil(FANTASY_SIZE.h / c) : 22;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.strokeStyle = fantasy() ? 'rgba(90,61,30,0.18)' : 'rgba(120,160,220,0.13)'; ctx.lineWidth = 1;
+    const at = atlasStyle();
+    ctx.strokeStyle = fantasy() ? 'rgba(90,61,30,0.18)' : at ? 'rgba(120,180,240,0.16)' : 'rgba(120,160,220,0.13)'; ctx.lineWidth = 1;
+    if (at) ctx.fillStyle = 'transparent';
     ctx.font = '10px "Segoe UI", sans-serif'; ctx.fillStyle = fantasy() ? 'rgba(90,61,30,0.75)' : 'rgba(160,190,230,0.6)';
     for (let i = 0; i <= cols; i++) {
       const a = w2s(i * c, 0), b = w2s(i * c, rows * c);
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      if (i < cols) { const m = w2s((i + 0.5) * c, 0); ctx.textAlign = 'center'; ctx.fillText(String.fromCharCode(65 + i), m.x, Math.max(12, a.y - 4)); }
+      if (i < cols && !at) { const m = w2s((i + 0.5) * c, 0); ctx.textAlign = 'center'; ctx.fillText(String.fromCharCode(65 + i), m.x, Math.max(12, a.y - 4)); }
     }
     for (let j = 0; j <= rows; j++) {
       const a = w2s(0, j * c), b = w2s(cols * c, j * c);
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      if (j < rows) { const m = w2s(0, (j + 0.5) * c); ctx.textAlign = 'right'; ctx.fillText(String(j + 1), Math.max(18, a.x - 4), m.y + 3); }
+      if (j < rows && !at) { const m = w2s(0, (j + 0.5) * c); ctx.textAlign = 'right'; ctx.fillText(String(j + 1), Math.max(18, a.x - 4), m.y + 3); }
     }
   }
 
@@ -793,6 +940,21 @@
   }
   function drawSectors() {
     const z = state.view.z; if (z < 1.0) return;
+    if (atlasOn()) {
+      atlasObjs();
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.font = `italic 600 ${Math.min(13, 8 + z * 1.2)}px "Segoe UI", sans-serif`; ctx.textAlign = 'center';
+      ctx.fillStyle = atlasStyle() ? 'rgba(140,190,240,0.33)' : 'rgba(200,215,240,0.32)';
+      const boxes = [], minN = z < 1.6 ? 25 : z < 2.5 ? 10 : z < 4 ? 4 : 1, suf = t('sector') === 'Sektor' ? '-Sektor' : ' sector';
+      for (const q of atlasState.sectors) {
+        if (q.n < minN) continue;
+        const p = w2s(q.x, q.y); if (p.x < -150 || p.y < -20 || p.x > W + 150 || p.y > H + 20) continue;
+        const txt = (q.name + suf).toUpperCase(), w = ctx.measureText(txt).width, box = [p.x - w / 2, p.y - 8, p.x + w / 2, p.y + 6];
+        if (boxes.some(b => !(box[2] < b[0] || box[0] > b[2] || box[3] < b[1] || box[1] > b[3]))) continue;
+        boxes.push(box); ctx.fillText(txt, p.x, p.y);
+      }
+      return;
+    }
     const groups = {};
     for (const o of state.tl.objects) if (o.sector && !o.parent) (groups[o.sector] ||= []).push(posOf(o));
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -891,6 +1053,7 @@
       ctx.fillText(o.name, x, y);
     }
     ctx.textBaseline = 'alphabetic';
+    if (atlasOn()) drawAtlasLabels(boxes);
   }
 
   let mouse = { x: 0, y: 0, in: false };
@@ -918,6 +1081,13 @@
       if (!visibleObj(o)) continue;
       const p = w2s(posOf(o).x, posOf(o).y), d = Math.hypot(p.x - sx, p.y - sy);
       if (d < bd || (d === bd && best && typeOrder(o) > typeOrder(best))) { bd = d; best = o; }
+    }
+    if (!best && atlasOn() && state.view.z >= ATLAS_HIT_Z) {
+      const w = s2w(sx, sy), rad = 9 / state.view.z; let ad = 9;
+      atlasObjs();
+      for (let ix = Math.floor((w.x - rad) / AB); ix <= Math.floor((w.x + rad) / AB); ix++) for (let iy = Math.floor((w.y - rad) / AB); iy <= Math.floor((w.y + rad) / AB); iy++) {
+        for (const o of atlasState.buckets.get(ix + ',' + iy) || []) { const p = w2s(o.x, o.y), d = Math.hypot(p.x - sx, p.y - sy); if (d < ad) { ad = d; best = o; } }
+      }
     }
     return best;
   }
@@ -954,13 +1124,13 @@
     const r = canvas.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, w = s2w(sx, sy);
     if (e.button === 1 || e.button === 2 || !editable() || state.tool === 'select') {
       const hit = e.button === 0 ? hitTest(sx, sy) : null;
-      if (hit && editable() && state.tool === 'select') { const root = rootOf(hit); pushUndo(); drag = { kind: 'move', obj: root, ox: w.x - root.x, oy: w.y - root.y, moved: false, hit }; }
+      if (hit && !hit.atlas && editable() && state.tool === 'select') { const root = rootOf(hit); pushUndo(); drag = { kind: 'move', obj: root, ox: w.x - root.x, oy: w.y - root.y, moved: false, hit }; }
       else drag = { kind: 'pan', sx, sy, cx: state.view.cx, cy: state.view.cy, moved: false, hit };
       canvas.classList.add('dragging'); return;
     }
     if (state.tool === 'assign') {
-      const hit = hitTest(sx, sy); if (!hit || !needEra()) return;
-      pushUndo(); const key = controlKey(hit);
+      let hit = hitTest(sx, sy); if (!hit || !needEra()) return;
+      pushUndo(); if (hit.atlas) hit = adoptAtlas(hit, true); const key = controlKey(hit);
       if (state.activeFaction) era().control[key] = state.activeFaction; else delete era().control[key];
       state.selected = hit.id; afterEdit();
     } else if (state.tool === 'region') {
@@ -976,7 +1146,8 @@
       if (!needEra()) return; pushUndo(); drag = { kind: 'erase' }; eraseAt(w);
     } else if (state.tool === 'add') addObjectAt(w, sx, sy);
     else if (state.tool === 'route') {
-      const hit = hitTest(sx, sy); if (!hit) return;
+      let hit = hitTest(sx, sy); if (!hit) return;
+      if (hit.atlas) { pushUndo(); hit = adoptAtlas(hit, true); }
       state.routeDraft ||= [];
       if (state.routeDraft[state.routeDraft.length - 1] !== hit.id) state.routeDraft.push(hit.id);
       renderEditor(); draw();
@@ -1314,13 +1485,17 @@
     $$('#factionFilter input').forEach(cb => cb.addEventListener('change', () => { cb.checked ? state.hiddenFactions.delete(cb.dataset.fac) : state.hiddenFactions.add(cb.dataset.fac); saveSoon(); draw(); }));
   }
   function renderSearchList() {
-    $('#searchList').innerHTML = state.tl.objects.slice().sort((a, b) => a.name.localeCompare(b.name)).map(o => `<option value="${esc(o.name)}">${esc(typeLabel(o.type))}</option>`).join('');
+    const own = state.tl.objects.slice().sort((a, b) => a.name.localeCompare(b.name)).map(o => `<option value="${esc(o.name)}">${esc(typeLabel(o.type))}</option>`);
+    const atl = atlasOn() ? atlasObjs().slice().sort((a, b) => a.name.localeCompare(b.name)).map(o => `<option value="${esc(o.name)}">${esc(t('atlasSystem'))} · ${esc(o.grid)}</option>`) : [];
+    $('#searchList').innerHTML = own.concat(atl).join('');
   }
   $('#search').addEventListener('change', () => {
     const q = $('#search').value.trim().toLowerCase(); if (!q) return;
     const cands = state.tl.objects.filter(o => o.name.toLowerCase() === q);
-    const o = cands.sort((a, b) => typeOrder(a) === 1 ? -1 : typeOrder(b) === 1 ? 1 : 0)[0] || state.tl.objects.find(o => o.name.toLowerCase().includes(q));
-    if (o) { if (settings.types[o.type] === false) { settings.types[o.type] = true; renderLeft(); } if (!existsNow(o) && o.from != null) setYear(+o.from); centerOn(o, 1.4); if (isMobile()) { setDrawer(false); setSheet(true); $('#search').blur(); } }
+    const atl = atlasOn() ? atlasObjs() : [];
+    const o = cands.sort((a, b) => typeOrder(a) === 1 ? -1 : typeOrder(b) === 1 ? 1 : 0)[0] || atl.find(o => o.name.toLowerCase() === q)
+      || state.tl.objects.find(o => o.name.toLowerCase().includes(q)) || atl.find(o => o.name.toLowerCase().startsWith(q)) || atl.find(o => o.name.toLowerCase().includes(q));
+    if (o) { if (settings.types[o.type] === false) { settings.types[o.type] = true; renderLeft(); } if (!existsNow(o) && o.from != null) setYear(+o.from); centerOn(o, o.atlas ? 3 : 1.4); if (isMobile()) { setDrawer(false); setSheet(true); $('#search').blur(); } }
   });
   $('#search').addEventListener('keydown', e => { if (e.key === 'Enter') $('#search').dispatchEvent(new Event('change')); });
 
@@ -1373,6 +1548,23 @@
     }
     rebuildTree();
     const fac = controllerOf(o), parent = o.parent && objMap[o.parent], kids = childrenOf[o.id] || [], e = era();
+    const gridRow = isSW() && o.type !== 'sun' ? `<span class="k">${esc(t('gridSquare'))}</span><span>${esc(o.grid || SW.gridOf(posOf(o).x, posOf(o).y))}</span>` : '';
+    if (o.atlas) {
+      box.innerHTML = `
+        <div class="info-title">${esc(o.name)}</div>
+        <div class="info-type">${esc(t('atlasSystem'))}</div>
+        <div class="kv">
+          <span class="k">${esc(t('region'))}</span><span>${esc(regionLabel(o.region))}</span>
+          ${o.sector ? `<span class="k">${esc(t('sector'))}</span><span>${esc(o.sector)}${o.subsector ? ` <span class="dim">(${esc(o.subsector)})</span>` : ''}</span>` : ''}
+          ${gridRow}
+          <span class="k">${esc(t('control'))}</span><span>${fac ? `<span style="color:${esc(fac.color)}">■</span> ${esc(fac.name)} <span class="dim">(${esc(t('byBorders'))})</span>` : esc(t('neutral'))}</span>
+        </div>
+        <p class="hint">${esc(t('atlasHint'))}</p>
+        <div class="row">${canEditTl() ? `<button id="atAdopt" class="primary">＋ ${esc(t('atlasAdopt'))}</button>` : ''}<button id="atPlan">🧭 ${esc(t('plAsDest'))}</button></div>`;
+      const ad = $('#atAdopt'); if (ad) ad.onclick = () => { pushUndo(); const n = adoptAtlas(o); state.selected = n.id; if (state.mode !== 'edit') setMode('edit'); afterEdit(true); };
+      $('#atPlan').onclick = () => { const P = settings.planner; P.stops[P.stops.length - 1] = o.name; state.plannerOpen = true; saveSoon(); renderPlanner(); draw(); };
+      return;
+    }
     if (!editable()) {
       box.innerHTML = `
         <div class="info-title">${esc(o.name)}</div>
@@ -1381,6 +1573,7 @@
         <div class="kv">
           ${o.region ? `<span class="k">${esc(t('region'))}</span><span>${esc(regionLabel(o.region))}</span>` : ''}
           ${o.sector ? `<span class="k">${esc(t('sector'))}</span><span>${esc(o.sector)}</span>` : ''}
+          ${gridRow}
           <span class="k">${esc(t('control'))}</span><span>${fac ? `<span style="color:${esc(fac.color)}">■</span> ${esc(fac.name)}` : esc(t('neutral'))}</span>
           ${parent ? `<span class="k">${esc(t('belongsTo'))}</span><span><a href="#" data-go="${esc(parent.id)}">${esc(parent.name)}</a></span>` : ''}
           ${kids.length ? `<span class="k">${esc(t('contains'))}</span><span>${kids.map(k => `<a href="#" data-go="${esc(k.id)}">${esc(k.name)}</a>`).join(', ')}</span>` : ''}
@@ -1466,6 +1659,13 @@
     bind('#addFact', 'click', () => { mark(); (facts().extra ||= []).push(['', '']); renderInfo(); const rows = $$('#factExtra .exL'); if (rows.length) rows[rows.length - 1].focus(); saveSoon(); });
     bind('#oCenter', 'click', () => centerOn(o));
     bind('#oDelete', 'click', () => deleteObject(o.id));
+  }
+  // Atlas-System als echtes Objekt in die Zeitlinie übernehmen (danach frei bearbeitbar)
+  function adoptAtlas(a, quiet) {
+    const n = { id: a.id, name: a.name, type: 'planet', x: a.x, y: a.y, region: a.region, sector: a.sector || null, grid: a.grid, desc: '', parent: null, from: null, to: null };
+    state.tl.objects.push(n); editVersion++; rebuildTree();
+    if (!quiet) toast(t('atlasAdopted', a.name));
+    return n;
   }
   function isDescendant(x, o) { let c = x, n = 0; while (c && c.parent && n++ < 10) { if (c.parent === o.id) return true; c = objMap[c.parent]; } return false; }
   function deleteObject(id) {
@@ -1846,7 +2046,8 @@
     v.innerHTML = `<div class="settings-inner">
       <div class="settings-head"><h2>${esc(t('settings'))}</h2><button id="setBack">${esc(t('back'))}</button></div>
       <section class="card"><h3>${esc(t('theme'))}</h3>
-        <div class="seg">${['auto', 'scifi', 'fantasy'].map(k => `<button data-theme="${k}" class="${settings.theme === k ? 'active' : ''}">${esc(t(k === 'auto' ? 'themeAuto' : k === 'scifi' ? 'themeScifi' : 'themeFantasy'))}</button>`).join('')}</div></section>
+        <div class="seg">${['auto', 'scifi', 'fantasy'].map(k => `<button data-theme="${k}" class="${settings.theme === k ? 'active' : ''}">${esc(t(k === 'auto' ? 'themeAuto' : k === 'scifi' ? 'themeScifi' : 'themeFantasy'))}</button>`).join('')}</div>
+        ${isSW() ? `<h4>${esc(t('mapStyle'))}</h4><div class="seg">${['atlas', 'classic'].map(k => `<button data-mapstyle="${k}" class="${(settings.mapStyle || 'atlas') === k ? 'active' : ''}">${esc(t(k === 'atlas' ? 'mapAtlas' : 'mapClassic'))}</button>`).join('')}</div>` : ''}</section>
       ${window.iamDesktop ? `<section class="card"><h3>☁ ${esc(t('srvTitle'))}</h3>
         ${FS && FS.server ? `<p>${esc(t('srvConnected', location.origin))}</p><button id="srvOff">${esc(t('srvDisconnect'))}</button>`
           : `<p class="hint">${esc(t('srvHint'))}</p><div class="row"><input id="srvUrl" placeholder="https://map.example.com"><button id="srvOn" class="fixed primary">${esc(t('srvConnect'))}</button></div>`}
@@ -1860,7 +2061,8 @@
         <p class="hint"><a href="#" id="setReleases">${esc(t('releases'))}</a></p></section>` : ''}
       ${FS && FS.server && srvInfo().loginRequired && isAdminUser() ? `<section class="card" id="usersCard"><h3>👥 ${esc(t('users'))}</h3><div id="usersBox" class="hint">…</div></section>` : ''}
       <section class="card"><h3>${esc(t('worldSettings'))}: ${esc(worldName(w))}</h3>
-        ${w.builtin ? `<p class="hint">${esc(t('builtinWorld'))}</p>` : !isAdminUser() ? `<p class="hint">${esc(t('adminOnly'))}</p>` : `
+        ${w.builtin ? `<p class="hint">${esc(t('builtinWorld'))}</p>${isSW() && SW.atlasCount ? `<h4>🗺 ${esc(t('atlasTitle'))}</h4><p class="hint">${esc(t('atlasInfo', SW.atlasCount.toLocaleString()))}</p>
+          ${canEditTl() ? `<p class="hint">${esc(t('atlasSyncHint'))}</p><button id="setAtlasSync">${esc(t('atlasSync'))}: ${esc(state.tl.name)}</button>` : ''}` : ''}` : !isAdminUser() ? `<p class="hint">${esc(t('adminOnly'))}</p>` : `
         <label class="field"><span>${esc(t('worldName'))}</span><input id="setWName" value="${esc(w.name)}"></label>
         <div class="row">
           <label class="field"><span>${esc(t('yearSuffixNeg'))}</span><input id="setNeg" value="${esc(w.yearFmt.neg)}"></label>
@@ -1898,6 +2100,8 @@
       $('#srvRetry2').onclick = () => window.iamDesktop.setServer(u);
       $('#srvOff2').onclick = () => window.iamDesktop.setServer(null);
     });
+    $$('.seg [data-mapstyle]').forEach(b => b.addEventListener('click', () => { settings.mapStyle = b.dataset.mapstyle; saveSoon(); renderSettings(); draw(); }));
+    const asy = $('#setAtlasSync'); if (asy) asy.addEventListener('click', atlasSync);
     $$('.seg [data-terr]').forEach(b => b.addEventListener('click', () => { settings.terrStyle = b.dataset.terr; saveSoon(); renderSettings(); draw(); }));
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
     if ($('#usersBox')) renderUsers();
@@ -1918,6 +2122,34 @@
       });
     }
     renderUpdStatus();
+  }
+  // Ältere Star-Wars-Zeitlinien auf die offiziellen Rasterfelder umstellen (mit Sicherungskopie)
+  function atlasSync() {
+    const tl = state.tl; if (!isSW() || !canEditTl(tl)) return;
+    const canon = SW.canonTimeline(settings.lang), cm = Object.fromEntries(canon.objects.map(o => [o.id, o]));
+    const byId = Object.fromEntries(tl.objects.map(o => [o.id, o]));
+    const plan = [];
+    for (const o of tl.objects) {
+      if (o.parent && byId[o.parent]) continue;
+      const c = cm[o.id]; if (!c || (c.parent && cm[c.parent])) continue;
+      if (c.x !== o.x || c.y !== o.y || c.region !== o.region || (c.grid && c.grid !== o.grid)) plan.push([o, c]);
+    }
+    let zones = 0;
+    for (const e of tl.eras) for (const z of e.zones || []) { const m = SW.moveZone(z); if (m.x !== z.x || m.y !== z.y) zones++; }
+    if (!plan.length && !zones) { toast(t('atlasSyncNone')); return; }
+    if (!confirm(t('atlasSyncQ', tl.name))) return;
+    const copy = clone(tl); copy.id = uid('tl'); copy.readonly = false; delete copy._file; copy.name = tl.name + ' – ' + t('backupSuffix');
+    state.timelines.push(copy);
+    pushUndo();
+    const kidsOf = id => tl.objects.filter(x => x.parent === id);
+    for (const [o, c] of plan) {
+      o.x = c.x; o.y = c.y; o.region = c.region; if (c.sector) o.sector = c.sector; if (c.grid) o.grid = c.grid;
+      const stack = kidsOf(o.id); let n = 0;
+      while (stack.length && n++ < 500) { const k = stack.pop(); k.x = c.x; k.y = c.y; k.region = c.region; if (c.sector && !k.sector) k.sector = c.sector; stack.push(...kidsOf(k.id)); }
+    }
+    for (const e of tl.eras) e.zones = (e.zones || []).map(z => SW.moveZone(z));
+    editVersion++; terrCache.key = '';
+    renderAll(true); saveSoon(); toast(t('atlasSynced', plan.length, zones, copy.name));
   }
   // ------------------------------------------------------------- Benutzerverwaltung (Server, nur Admins)
   const api = (path, method = 'GET', body) => fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })
@@ -2095,5 +2327,5 @@
     if (off) setTimeout(() => { let b = $('#offBanner'); if (!b) { b = document.createElement('div'); b.id = 'offBanner'; $('#mapWrap').appendChild(b); } b.innerHTML = `<b>☁</b> ${esc(t('srvOffline', off))} <button id="offRetry" class="primary">${esc(t('srvRetry'))}</button> <button id="offClose">${esc(t('close'))}</button>`; b.hidden = false;
       $('#offRetry').onclick = () => window.iamDesktop && window.iamDesktop.getServer().then(u => u && window.iamDesktop.setServer(u)); $('#offClose').onclick = () => { b.hidden = true; }; }, 600);
   })();
-  window.__iam = { state, setYear, regionAt, settings, setLang, switchWorld, fmtYear, parseYear };
+  window.__iam = { state, setYear, regionAt, settings, setLang, switchWorld, fmtYear, parseYear, draw, renderInfo, atlasObjs };
 })();

@@ -88,7 +88,7 @@ const loginAttempts = new Map();
 const sandbox = { window: {}, navigator: { language: 'de' }, console };
 sandbox.window.window = sandbox.window;
 vm.createContext(sandbox);
-for (const f of ['i18n.js', 'worlds/starwars.js', 'worlds/starwars-facts.js', 'travel.js']) {
+for (const f of ['i18n.js', 'worlds/starwars-atlas.js', 'worlds/starwars.js', 'worlds/starwars-facts.js', 'travel.js']) {
   vm.runInContext(fs.readFileSync(path.join(SRC_DIR, f), 'utf8'), sandbox, { filename: f });
 }
 const SW = sandbox.window.IAM_WORLDS.starwars;
@@ -212,14 +212,31 @@ function placeInfo(tl, o, year, lang, snap) {
     id: o.id, name: o.name, type: o.type, typeLabel: I18N.t('types.' + o.type), region: regionName(o.region), sector: o.sector || null,
     orbits: o.parent && byId[o.parent] ? byId[o.parent].name : null, contains: kids,
     existsInYear: exists(o, year), existsFrom: fmtYear(o.from, f), existsTo: fmtYear(o.to, f),
-    controlledBy: fac ? fac.name : null, description: o.desc || '', biome: o.biome ? I18N.t('biomes.' + o.biome) : null,
+    grid: o.grid || (tl.world === 'starwars' && SW.gridOf ? SW.gridOf(o.x, o.y) : undefined), atlasOnly: o.atlas ? true : undefined,
+    subsector: o.subsector || undefined,
+    controlledBy: fac ? fac.name : (o.atlas ? undefined : null), description: o.desc || '', biome: o.biome ? I18N.t('biomes.' + o.biome) : null,
     facts: o.facts || {}
   };
+}
+// Galaxie-Atlas: weitere offizielle Systeme, die nicht in der Zeitlinie stehen
+function atlasFor(tl) {
+  if ((tl.world || 'starwars') !== 'starwars' || !SW.atlas) return [];
+  const names = new Set(tl.objects.map(o => SW.normName(o.name))), ids = new Set(tl.objects.map(o => o.id));
+  return SW.atlas().filter(a => !ids.has(a.id) && !names.has(SW.normName(a.name)));
+}
+function withAtlasStops(tl, stops) {
+  const atl = atlasFor(tl); if (!atl.length) return tl;
+  const extra = [];
+  for (const q of stops) { const s = String(q).toLowerCase(); if (tl.objects.some(o => o.id === q || o.name.toLowerCase() === s)) continue;
+    const a = atl.find(o => o.name.toLowerCase() === s || o.id === q) || atl.find(o => o.name.toLowerCase().startsWith(s)); if (a && !extra.includes(a)) extra.push(a); }
+  return extra.length ? Object.assign({}, tl, { objects: tl.objects.concat(extra) }) : tl;
 }
 function findPlace(tl, name) {
   const q = String(name || '').toLowerCase().trim(); if (!q) return null;
   const cands = tl.objects.filter(o => o.name.toLowerCase() === q || o.id.toLowerCase() === q);
-  return cands.sort((a, b) => (a.type === 'planet' ? -1 : 0) - (b.type === 'planet' ? -1 : 0))[0] || tl.objects.find(o => o.name.toLowerCase().includes(q)) || null;
+  const atl = () => atlasFor(tl);
+  return cands.sort((a, b) => (a.type === 'planet' ? -1 : 0) - (b.type === 'planet' ? -1 : 0))[0] || atl().find(o => o.name.toLowerCase() === q || o.id === q)
+    || tl.objects.find(o => o.name.toLowerCase().includes(q)) || atl().find(o => o.name.toLowerCase().startsWith(q)) || null;
 }
 function summaryText(tl, year, lang, placeNames, maxPlaces) {
   I18N.setLang(lang);
@@ -305,11 +322,14 @@ async function apiWrite(req, res, url, parts) {
     nt.id = t.id; nt.world = nt.world || t.world; nt._file = t._file; delete nt.timeline; saveTimeline(nt); return send(res, 200, { ok: true });
   }
   const t = writableTimeline(tlName, lang);
-  const byName = n => findPlace(t, n);
+  // Atlas-Systeme werden beim ersten Schreibzugriff als echtes Objekt in die Zeitlinie übernommen
+  const adopt = a => { const n = { id: a.id, name: a.name, type: 'planet', x: a.x, y: a.y, region: a.region, sector: a.sector || null, grid: a.grid, desc: '', parent: null, from: null, to: null }; t.objects.push(n); return n; };
+  const byName = n => { const o = findPlace(t, n); return o && o.atlas ? adopt(o) : o; };
 
   if (ep === 'place' && (req.method === 'POST' || req.method === 'PATCH')) {
     if (!b.name) return send(res, 400, { error: 'name required' });
     let o = (b.id && t.objects.find(x => x.id === b.id)) || t.objects.find(x => x.name.toLowerCase() === String(b.name).toLowerCase());
+    if (!o) { const a = atlasFor(t).find(x => x.name.toLowerCase() === String(b.name).toLowerCase()); if (a) o = adopt(a); }
     const created = !o;
     if (!o) { o = { id: uid('o'), name: b.name, type: 'planet', x: 0, y: 0, region: null, sector: null, desc: '', parent: null, from: null, to: null }; t.objects.push(o); }
     if (b.newName) o.name = b.newName;
@@ -334,7 +354,7 @@ async function apiWrite(req, res, url, parts) {
     saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, place: o });
   }
   if (ep === 'place' && req.method === 'DELETE') {
-    const o = byName(b.name || q.get('name')); if (!o) return send(res, 404, { error: 'place not found' });
+    const o = findPlace(t, b.name || q.get('name')); if (!o || o.atlas) return send(res, 404, { error: 'place not found' });
     for (const k of t.objects) if (k.parent === o.id) k.parent = o.parent || null;
     t.objects = t.objects.filter(x => x !== o); for (const e of t.eras) delete e.control[o.id];
     for (const r of t.routes || []) r.points = r.points.filter(p => p !== o.id);
@@ -456,12 +476,15 @@ async function apiV1(req, res, url) {
   }
   if (ep === 'search') {
     const t = tl(), qq = (q.get('q') || '').toLowerCase();
-    return send(res, 200, t.objects.filter(o => !qq || o.name.toLowerCase().includes(qq)).slice(0, 100).map(o => ({ id: o.id, name: o.name, type: o.type, region: o.region || null, sector: o.sector || null })));
+    const own = t.objects.filter(o => !qq || o.name.toLowerCase().includes(qq)).slice(0, 100).map(o => ({ id: o.id, name: o.name, type: o.type, region: o.region || null, sector: o.sector || null }));
+    const atl = qq ? atlasFor(t).filter(o => o.name.toLowerCase().includes(qq)).slice(0, Math.max(0, 100 - own.length))
+      .map(o => ({ id: o.id, name: o.name, type: o.type, region: o.region, sector: o.sector || null, grid: o.grid, atlas: true })) : [];
+    return send(res, 200, own.concat(atl));
   }
   if (ep === 'travel') {
     const t = tl(), y = year(t), stops = [q.get('from')].concat(q.getAll('via'), [q.get('to')]).filter(Boolean);
     const wtype = (allWorlds(lang, { admin: true }).find(w => w.id === t.world) || {}).type || 'scifi';
-    const r = TRAVEL.plan(t, { stops, year: y, worldType: wtype, hyperClass: +q.get('class') || 1, stayHours: +q.get('stay') || 0, mode: q.get('mode') || 'horse', kmPerUnit: +q.get('km') || 1 });
+    const r = TRAVEL.plan(withAtlasStops(t, stops), { stops, year: y, worldType: wtype, hyperClass: +q.get('class') || 1, stayHours: +q.get('stay') || 0, mode: q.get('mode') || 'horse', kmPerUnit: +q.get('km') || 1 });
     if (!r.ok) return send(res, r.error === 'notFound' ? 404 : 400, r);
     const de = lang !== 'en', d = h => TRAVEL.fmtDuration(h, lang);
     const text = [`${de ? 'Reise' : 'Journey'}: ${r.stops.join(' → ')}`]
@@ -506,7 +529,7 @@ const MCP_TOOLS = [
     run: (a, v) => internalCall('GET', '/api/v1/summary', { timeline: a.timeline, year: a.year, place: a.places || [], lang: a.lang }, null, v) },
   { name: 'get_state', title: 'Mächte und Gebiete (JSON)', description: 'Zeitalter und Fraktionen mit kontrollierten Orten in einem Jahr.', ro: true, inputSchema: S({ timeline: TL, year: YR, lang: LG }), run: (a, v) => internalCall('GET', '/api/v1/state', a, null, v) },
   { name: 'get_place', title: 'Ort abfragen', description: 'Eckdaten (Bevölkerung, Klima, Bewohner …), Beschreibung und Kontrolle eines Ortes in einem Jahr.', ro: true, inputSchema: S({ name: str('Name des Ortes'), timeline: TL, year: YR, lang: LG }, ['name']), run: (a, v) => internalCall('GET', '/api/v1/place', a, null, v) },
-  { name: 'search_places', title: 'Orte suchen', description: 'Orte nach Namensteil suchen.', ro: true, inputSchema: S({ query: str('Suchtext'), timeline: TL }, ['query']), run: (a, v) => internalCall('GET', '/api/v1/search', { q: a.query, timeline: a.timeline }, null, v) },
+  { name: 'search_places', title: 'Orte suchen', description: 'Orte nach Namensteil suchen (inkl. der ~6.500 Systeme des Galaxie-Atlas mit Rasterfeld, Region und Sektor).', ro: true, inputSchema: S({ query: str('Suchtext'), timeline: TL }, ['query']), run: (a, v) => internalCall('GET', '/api/v1/search', { q: a.query, timeline: a.timeline }, null, v) },
   { name: 'plan_travel', title: 'Reise planen', description: 'Route und Reisezeit zwischen Orten (bevorzugt Hyperraumrouten). Hyperantrieb-Klasse 0.5 = sehr schnell, 1 = schnell, 2 = übliche Frachter.', ro: true,
     inputSchema: S({ from: str('Start'), to: str('Ziel'), via: { type: 'array', items: { type: 'string' }, description: 'Zwischenstopps' }, hyperdrive_class: { type: 'number', description: 'Klasse, Standard 1' }, stay_hours: { type: 'number', description: 'Aufenthalt pro Zwischenstopp in Stunden' }, timeline: TL, year: YR, lang: LG }, ['from', 'to']),
     run: (a, v) => internalCall('GET', '/api/v1/travel', { from: a.from, to: a.to, via: a.via || [], class: a.hyperdrive_class, stay: a.stay_hours, timeline: a.timeline, year: a.year, lang: a.lang, format: 'text' }, null, v) },

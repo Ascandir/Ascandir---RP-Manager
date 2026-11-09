@@ -22,7 +22,8 @@
       { key: 'outerrim', r0: 700, r1: 1000 },
       { key: 'wildspace', r0: 1000, r1: 1150 }
     ],
-    gridCell: 100
+    gridCell: 100,
+    huttR: 220
   };
   const REGION_KEYS = GEO.bands.map(b => b.key).concat(['unknown', 'huttspace']);
   const REGION_CODES = { dc: 'deepcore', co: 'core', cl: 'colonies', ir: 'innerrim', ex: 'expansion', mr: 'midrim', or: 'outerrim', ws: 'wildspace', ur: 'unknown', hs: 'huttspace' };
@@ -33,27 +34,56 @@
   }
   function hash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; }
 
-  // Raster-Feld (z.B. "R16") + Region -> Weltposition (mit leichter, fester Streuung je Name)
+  // Raster-Feld (z.B. "R16") + Region -> Weltposition (mit fester Streuung je Name innerhalb des Feldes).
+  // Liegt das Feld nur teilweise in der Region, wird der Punkt weich in den Regionsring gezogen.
   function place(grid, region, id) {
     const col = grid.charCodeAt(0) - 65, row = parseInt(grid.slice(1), 10);
-    let gx = (col + 0.5) * GEO.gridCell + (hash(id + 'x') - 0.5) * 70;
-    let gy = (row - 0.5) * GEO.gridCell + (hash(id + 'y') - 0.5) * 70;
+    let gx = (col + 0.5) * GEO.gridCell + (hash(id + 'x') - 0.5) * 86;
+    let gy = (row - 0.5) * GEO.gridCell + (hash(id + 'y') - 0.5) * 86;
     const dx = gx - GEO.center.x, dy = gy - GEO.center.y;
     let theta = Math.atan2(dy, dx);
     let dn = Math.hypot(dx, dy) / GEO.scale(theta);
     let band = GEO.bands.find(b => b.key === region);
-    if (region === 'huttspace') band = { r0: 720, r1: 960 };
+    if (region === 'huttspace') band = { r0: 620, r1: 1000 };
     if (region === 'unknown') {
-      band = { r0: 380, r1: 1110 };
+      band = { r0: GEO.unknownWedge.r0, r1: 1110 };
       if (!inWedge(theta)) {
         const t = theta < 0 ? theta + 2 * Math.PI : theta;
-        theta = t < Math.PI ? GEO.unknownWedge.from + 0.06 + hash(id) * 0.15 : GEO.unknownWedge.to - 0.06 - hash(id) * 0.15;
+        theta = t < Math.PI ? GEO.unknownWedge.from + 0.04 + hash(id) * 0.12 : GEO.unknownWedge.to - 0.04 - hash(id) * 0.12;
       }
     }
-    if (band) dn = Math.min(band.r1 - 12, Math.max(band.r0 + 12, dn));
+    if (band) {
+      const w = band.r1 - band.r0, m = Math.min(10, w * 0.1), spread = Math.min(45, w * 0.4) * hash(id + 'r');
+      if (dn < band.r0 + m) dn = band.r0 + m + spread;
+      else if (dn > band.r1 - m) dn = band.r1 - m - spread;
+    }
     const s2 = GEO.scale(theta);
     return { x: Math.round(GEO.center.x + Math.cos(theta) * dn * s2), y: Math.round(GEO.center.y + Math.sin(theta) * dn * s2) };
   }
+  // Hutt-Raum ist auf der Karte ein Kreis um Nal Hutta: Punkte außerhalb hineinziehen
+  function huttPull(p, id, c) {
+    const d = Math.hypot(p.x - c.x, p.y - c.y), lim = GEO.huttR - 18;
+    if (d <= lim) return p;
+    const r = lim * (0.55 + 0.45 * hash(id + 'h')), a = Math.atan2(p.y - c.y, p.x - c.x);
+    return { x: Math.round(c.x + Math.cos(a) * r), y: Math.round(c.y + Math.sin(a) * r) };
+  }
+
+  // ---------------------------------------------------------------- Galaxie-Atlas (offizielles Systemverzeichnis)
+  const normName = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+  const ATLAS = String((window.IAM_WORLDS && window.IAM_WORLDS.starwarsAtlasData) || '').trim().split('\n').filter(Boolean).map(l => {
+    const [name, sector, rc, grid] = l.split('|'); return { name, sector: sector || null, rc, grid };
+  });
+  const atlasByName = {};
+  ATLAS.forEach((e, i) => { const k = normName(e.name); if (!(k in atlasByName)) atlasByName[k] = i; });
+  // Namen, die im Atlas anders heißen
+  const ATLAS_ALIAS = { korriban: 'Moraband', onderon: 'Onderon Japrael' };
+  const atlasUsed = new Set();
+  function atlasMatch(id, name) {
+    let i = atlasByName[normName(ATLAS_ALIAS[id] || name)];
+    if (i == null) i = atlasByName[normName(name)];
+    return i == null ? null : i;
+  }
+  const gridOf = (x, y) => String.fromCharCode(65 + Math.max(0, Math.min(25, Math.floor(x / GEO.gridCell)))) + Math.max(1, Math.floor(y / GEO.gridCell) + 1);
 
   // ---------------------------------------------------------------- Systeme
   // id | Name | Rasterfeld | Region | Sektor   (Name EN nur falls abweichend: "Name DE/Name EN")
@@ -262,7 +292,7 @@ bimmisaari|Bimmisaari|N6|or|
 sernpidal|Sernpidal|L18|or|
 dubrillion|Dubrillion|J4|or|
 nar_kreeta|Nar Kreeta|T11|hs|
-nalhutta|Nal Hutta|S12|hs|Y'Toub
+nalhutta|Nal Hutta|S11|hs|Y'Toub
 ylesia|Ylesia|S11|hs|
 toydaria|Toydaria|S11|hs|
 klatooine|Klatooine|S12|hs|
@@ -341,12 +371,18 @@ lwotil|Sarvchi|C8|ur|Chiss
   const objects = [];
   const byId = {};
   function add(o) { objects.push(o); byId[o.id] = o; return o; }
-  for (const [id, name, grid, code, sector] of SYSTEMS) {
+  for (const row of SYSTEMS) {
+    let [id, name, grid, code, sector] = row;
+    // offizielle Rasterfelder, Regionen und Sektoren aus dem Atlas übernehmen
+    const ai = atlasMatch(id, name);
+    if (ai != null) { const a = ATLAS[ai]; atlasUsed.add(ai); grid = a.grid; code = a.rc; if (a.sector) sector = a.sector.replace(/\s*\(.*\)$/, ''); }
     const region = REGION_CODES[code];
     const p = place(grid, region, id);
     const d = DESC[id];
-    add({ id, name, type: 'planet', x: p.x, y: p.y, region, sector: sector || null, desc: d ? d[0] : '', descEn: d ? d[1] : '', parent: null, from: null, to: null });
+    add({ id, name, type: 'planet', x: p.x, y: p.y, region, sector: sector || null, grid, desc: d ? d[0] : '', descEn: d ? d[1] : '', parent: null, from: null, to: null });
   }
+  const HUTT_C = { x: byId.nalhutta.x, y: byId.nalhutta.y };
+  for (const o of objects) if (o.region === 'huttspace' && o.id !== 'nalhutta') Object.assign(o, huttPull(o, o.id, HUTT_C));
 
   // Sonnen (Planet wird Kind der Sonne)
   const SUNS = [['tatoo1', 'Tatoo I', 'tatooine'], ['tatoo2', 'Tatoo II', 'tatooine'], ['coruscantprime', 'Coruscant Prime', 'coruscant'],
@@ -603,6 +639,19 @@ lwotil|Sarvchi|C8|ur|Chiss
     }
   ];
 
+  // Seit v0.12 liegen viele Welten auf ihren offiziellen Rasterfeldern. Gemalte Einflusszonen
+  // der eingebauten Zeitalter wurden entsprechend verschoben: [Fraktion, alt x, alt y, neu x, neu y]
+  const ZONE_MOVES = [
+    ['sithemp', 1480, 300, 1610, 470], ['sithemp', 1700, 360, 1730, 570], ['sithemp', 1300, 260, 1440, 380], ['sithemp', 1180, 300, 1330, 430],
+    ['zakuul', 1950, 560, 400, 1190], ['zakuul', 2050, 900, 390, 990], ['alliance', 1780, 260, 360, 1390],
+    ['chiss', 230, 900, 545, 790], ['sith', 200, 1150, 560, 660], ['reb', 1700, 380, 1810, 660],
+    ['kus', 1820, 640, 1720, 600], ['kus', 1300, 330, 1520, 460]
+  ];
+  function moveZone(z) {
+    const m = ZONE_MOVES.find(([f, x, y]) => f === (z.f || z.faction) && x === z.x && y === z.y);
+    return m ? Object.assign({}, z, { x: m[3], y: m[4] }) : z;
+  }
+
   function buildEra(def, idx, en) {
     const control = {};
     for (const o of objects) {
@@ -617,7 +666,7 @@ lwotil|Sarvchi|C8|ur|Chiss
     let z = 0;
     return {
       id: 'era' + idx, name: def.name[en ? 1 : 0], year: def.year, desc: def.desc[en ? 1 : 0],
-      control, regionClaims, zones: def.zones.map(q => ({ id: 'z' + idx + '_' + (++z), faction: q.f, x: q.x, y: q.y, r: q.r }))
+      control, regionClaims, zones: def.zones.map(moveZone).map(q => ({ id: 'z' + idx + '_' + (++z), faction: q.f, x: q.x, y: q.y, r: q.r }))
     };
   }
 
@@ -637,11 +686,28 @@ lwotil|Sarvchi|C8|ur|Chiss
     };
   }
 
+  // Alle übrigen Atlas-Systeme als leichte Zusatzebene (nicht Teil der Zeitlinien-Dateien)
+  let atlasCache = null;
+  function atlas() {
+    if (atlasCache) return atlasCache;
+    const out = [], seen = new Set(objects.map(o => o.id));
+    ATLAS.forEach((e, i) => {
+      if (atlasUsed.has(i)) return;
+      let id = 'ga_' + (normName(e.name) || 'x' + i); if (seen.has(id)) id += '_' + e.grid.toLowerCase(); if (seen.has(id)) id += '_' + i; seen.add(id);
+      const region = REGION_CODES[e.rc] || 'outerrim';
+      let p = place(e.grid, region, id);
+      if (region === 'huttspace') p = huttPull(p, id, HUTT_C);
+      const sm = e.sector && e.sector.match(/^(.*?)\s*\((.*)\)$/);
+      out.push({ id, name: e.name, type: 'planet', x: p.x, y: p.y, region, sector: sm ? sm[1] : e.sector, subsector: sm ? sm[2] : null, grid: e.grid, atlas: true });
+    });
+    return (atlasCache = out);
+  }
+
   window.IAM_WORLDS = window.IAM_WORLDS || {};
   window.IAM_WORLDS.starwars = {
     id: 'starwars', builtin: true, type: 'scifi', geometry: 'galaxy-sw',
     name: { de: 'Star Wars', en: 'Star Wars' },
     yearFmt: { de: { neg: 'VSY', pos: 'NSY' }, en: { neg: 'BBY', pos: 'ABY' } },
-    GEO, REGION_KEYS, inWedge, canonTimeline
+    GEO, REGION_KEYS, inWedge, canonTimeline, atlas, normName, gridOf, moveZone, atlasCount: ATLAS.length
   };
 })();
