@@ -87,13 +87,27 @@ Die Abschnitte werden in der Zeitlinien-Datei unter `"story"` gespeichert.
 
 ### Charaktere
 
-Der Reiter *Charaktere* verwaltet die Figuren einer Zeitlinie. Jede Figur hat einen Steckbrief (Rolle, Fraktion, Spezies, Alter, Heimatwelt, Aufenthaltsort, Status), Textfelder (Aussehen, Persönlichkeit, Fähigkeiten, Hintergrund, Notizen), Beziehungen, Tags, ein Porträt und eine Bildergalerie.
+Der Reiter *Charaktere* verwaltet die Figuren einer Zeitlinie. Der Steckbrief ist so gegliedert:
 
-- Aufenthaltsort und Heimatwelt sind mit der Karte verknüpft: Klick springt zum Ort, und im Infofeld eines Ortes stehen die Charaktere, die dort sind.
-- **MCP (ChatGPT/Claude):** `list_characters`, `get_character`, `upsert_character` (nur angegebene Felder werden geändert, `append` hängt an), `add_character_image` (Bild per Link – wird heruntergeladen und dauerhaft im Datenordner unter `images/` gespeichert – oder Base64; `portrait: true` setzt es als Porträt), `delete_character`.
+| Bereich | Inhalt |
+|---|---|
+| Identität | Name, Spezies, Alter, Geschlecht, Herkunftswelt |
+| Erscheinungsbild | Gesicht, Haare, Augen, Körperbau, Kleidung |
+| Persönlichkeit | Charakterzüge, Verhalten, Eigenheiten |
+| Hintergrund | Herkunft, Ausbildung, Vergangenheit |
+| Zugehörigkeit | Fraktion, Rang, Organisation, Meister |
+| Fähigkeiten | Machtfähigkeiten, Kampfstil, Fachwissen |
+| Beziehungen | Verbündete, Feinde, Familie, Kontakte (farbig markiert) |
+| Wissen | Was weiß die Person über Tim und andere? |
+| Aktueller Stand | Aufenthaltsort, Status, laufende Handlungsstränge |
+
+Dazu kommen Tags, Notizen, ein Porträt und eine Bildergalerie.
+
+- **Gruppen** (z. B. „Crew der Trailblazer“, „Sith-Orden“) haben eine eigene Farbe. Die Liste ist danach gegliedert und lässt sich filtern; jeder Charakter trägt die Gruppe als farbiges Etikett. Bearbeiten über *⚙ Gruppen*.
+- Aufenthaltsort und Herkunftswelt sind mit der Karte verknüpft; im Infofeld eines Ortes stehen die Charaktere, die dort sind. Namen in Beziehungen und beim Meister sind anklickbar, wenn es den Charakter gibt.
+- **MCP (ChatGPT/Claude):** `list_characters` (Filter u. a. nach Gruppe), `get_character` (kompletter Steckbrief als Text), `upsert_character` (nur angegebene Felder werden geändert; `append` hängt an, z. B. an Wissen oder Handlungsstränge; `addRelations` ergänzt einzelne Beziehungen; `group` legt die Gruppe bei Bedarf an), `add_character_image` (Bild per Link – wird heruntergeladen und dauerhaft unter `images/` im Datenordner gespeichert – oder Base64; `portrait: true` setzt es als Porträt), `delete_character`.
 - **REST:** `GET /api/v1/characters`, `GET /api/v1/character?name=…`, `POST/DELETE /api/v1/character`, `POST /api/v1/character/image`.
-- Bilder, die du selbst im Editor hochlädst, werden verkleinert direkt in der Zeitlinien-Datei gespeichert.
-- `get_summary` nennt die Charaktere mit Rolle und Aufenthaltsort.
+- Selbst hochgeladene Bilder werden verkleinert direkt in der Zeitlinien-Datei gespeichert.
 
 ## Daten per JSON / GeoJSON bearbeiten
 

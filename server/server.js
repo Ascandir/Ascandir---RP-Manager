@@ -298,23 +298,48 @@ function storyText(t, lang, list) {
   return list.map(e => `## ${e.title} (${e.yearLabel}${e.era ? ' · ' + e.era : ''}) [id: ${e.id}]\n${e.places.length ? (de ? 'Orte: ' : 'Places: ') + e.places.join(', ') + '\n' : ''}${e.text}`).join('\n\n');
 }
 // ---------------------------------------------------------------- Charaktere (tl.characters)
-const CHAR_TEXT = ['title', 'species', 'gender', 'age', 'homeworld', 'location', 'status', 'appearance', 'personality', 'abilities', 'bio', 'notes'];
+const CHAR_TEXT = ['title', 'species', 'gender', 'age', 'homeworld', 'organization', 'master', 'location', 'status', 'appearance', 'personality', 'bio', 'abilities', 'knowledge', 'threads', 'notes'];
+const REL_KINDS = ['ally', 'enemy', 'family', 'contact', 'other'];
 const findChar = (t, n) => { const q = String(n || '').toLowerCase().trim(); return (t.characters || []).find(c => c.id === n || c.name.toLowerCase() === q) || (q ? (t.characters || []).find(c => c.name.toLowerCase().includes(q)) : null) || null; };
+const GROUP_COLORS = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4dd0e1', '#f06292', '#aed581', '#ffd54f', '#90a4ae'];
+function groupFor(t, name, color) {
+  const q = String(name || '').trim(); if (!q) return null;
+  t.charGroups = t.charGroups || [];
+  let g = t.charGroups.find(x => x.id === q || x.name.toLowerCase() === q.toLowerCase());
+  if (!g) { g = { id: uid('cg'), name: q, color: color || GROUP_COLORS[t.charGroups.length % GROUP_COLORS.length] }; t.charGroups.push(g); }
+  else if (color) g.color = color;
+  return g;
+}
 function charOut(t, c, full) {
-  const fac = c.faction ? t.factions.find(f => f.id === c.faction) : null;
-  const base = { id: c.id, name: c.name, title: c.title || '', faction: fac ? fac.name : (c.faction || ''), location: c.location || '', status: c.status || '', image: c.image || null };
+  const fac = c.faction ? t.factions.find(f => f.id === c.faction) : null, grp = c.group ? (t.charGroups || []).find(g => g.id === c.group) : null;
+  const base = { id: c.id, name: c.name, group: grp ? grp.name : '', title: c.title || '', faction: fac ? fac.name : (c.faction || ''), location: c.location || '', status: c.status || '', image: c.image || null };
   if (!full) return base;
   return Object.assign(base, { species: c.species || '', gender: c.gender || '', age: c.age || '', homeworld: c.homeworld || '', appearance: c.appearance || '', personality: c.personality || '',
-    abilities: c.abilities || '', bio: c.bio || '', notes: c.notes || '', tags: c.tags || [], relations: c.relations || [], gallery: (c.gallery || []).map(g => ({ src: g.src && g.src.startsWith('data:') ? '(eingebettetes Bild)' : g.src, caption: g.caption || '' })), updated: c.updated || null });
+    abilities: c.abilities || '', bio: c.bio || '', notes: c.notes || '', organization: c.organization || '', master: c.master || '', knowledge: c.knowledge || '', threads: c.threads || '', tags: c.tags || [], relations: c.relations || [], gallery: (c.gallery || []).map(g => ({ src: g.src && g.src.startsWith('data:') ? '(eingebettetes Bild)' : g.src, caption: g.caption || '' })), updated: c.updated || null });
 }
 function charText(t, c, lang) {
   const de = lang !== 'en', o = charOut(t, c, true), L = [`# ${o.name}${o.title ? ' – ' + o.title : ''} [id: ${o.id}]`];
-  const lab = de ? { species: 'Spezies', gender: 'Geschlecht', age: 'Alter', homeworld: 'Heimatwelt', faction: 'Fraktion', location: 'Aufenthaltsort', status: 'Status', appearance: 'Aussehen', personality: 'Persönlichkeit', abilities: 'Fähigkeiten', bio: 'Hintergrund', notes: 'Notizen' }
-    : { species: 'Species', gender: 'Gender', age: 'Age', homeworld: 'Homeworld', faction: 'Faction', location: 'Location', status: 'Status', appearance: 'Appearance', personality: 'Personality', abilities: 'Abilities', bio: 'Background', notes: 'Notes' };
-  for (const k of ['species', 'gender', 'age', 'homeworld', 'faction', 'location', 'status']) if (o[k]) L.push(`${lab[k]}: ${o[k]}`);
+  const lab = de ? { species: 'Spezies', gender: 'Geschlecht', age: 'Alter', homeworld: 'Herkunftswelt', faction: 'Fraktion', title: 'Rang/Rolle', organization: 'Organisation', master: 'Meister/Mentor', location: 'Aufenthaltsort', status: 'Status',
+      appearance: 'Erscheinungsbild', personality: 'Persönlichkeit', bio: 'Hintergrund', abilities: 'Fähigkeiten', knowledge: 'Wissen', threads: 'Laufende Handlungsstränge', notes: 'Notizen',
+      secId: 'Identität', secAff: 'Zugehörigkeit', secNow: 'Aktueller Stand', rel: 'Beziehungen', kinds: { ally: 'Verbündete', enemy: 'Feinde', family: 'Familie', contact: 'Kontakte', other: 'Sonstige' } }
+    : { species: 'Species', gender: 'Gender', age: 'Age', homeworld: 'Homeworld', faction: 'Faction', title: 'Rank/role', organization: 'Organisation', master: 'Master/mentor', location: 'Location', status: 'Status',
+      appearance: 'Appearance', personality: 'Personality', bio: 'Background', abilities: 'Abilities', knowledge: 'Knowledge', threads: 'Ongoing storylines', notes: 'Notes',
+      secId: 'Identity', secAff: 'Affiliation', secNow: 'Current state', rel: 'Relations', kinds: { ally: 'Allies', enemy: 'Enemies', family: 'Family', contact: 'Contacts', other: 'Other' } };
+  const block = (head, keys) => { const r = keys.filter(k => o[k]).map(k => `${lab[k]}: ${o[k]}`); if (r.length) L.push(`\n## ${head}\n` + r.join('\n')); };
+  if (o.group) L.push((de ? 'Gruppe: ' : 'Group: ') + o.group);
   if (o.tags.length) L.push('Tags: ' + o.tags.join(', '));
-  if (o.relations.length) L.push((de ? 'Beziehungen: ' : 'Relations: ') + o.relations.map(r => `${r.name}${r.relation ? ' (' + r.relation + ')' : ''}`).join(', '));
-  for (const k of ['appearance', 'personality', 'abilities', 'bio', 'notes']) if (o[k]) L.push(`\n## ${lab[k]}\n${o[k]}`);
+  block(lab.secId, ['species', 'age', 'gender', 'homeworld']);
+  for (const k of ['appearance', 'personality', 'bio']) if (o[k]) L.push(`\n## ${lab[k]}\n${o[k]}`);
+  block(lab.secAff, ['faction', 'title', 'organization', 'master']);
+  if (o.abilities) L.push(`\n## ${lab.abilities}\n${o.abilities}`);
+  if (o.relations.length) {
+    L.push(`\n## ${lab.rel}`);
+    for (const k of REL_KINDS) { const r = o.relations.filter(x => (x.kind || 'other') === k); if (r.length) L.push(`${lab.kinds[k]}: ` + r.map(x => `${x.name}${x.relation ? ' (' + x.relation + ')' : ''}`).join(', ')); }
+  }
+  if (o.knowledge) L.push(`\n## ${lab.knowledge}\n${o.knowledge}`);
+  const now = ['location', 'status'].filter(k => o[k]).map(k => `${lab[k]}: ${o[k]}`);
+  if (now.length || o.threads) L.push(`\n## ${lab.secNow}\n` + now.join('\n') + (o.threads ? (now.length ? '\n' : '') + `${lab.threads}:\n${o.threads}` : ''));
+  if (o.notes) L.push(`\n## ${lab.notes}\n${o.notes}`);
   const imgs = (o.image ? 1 : 0) + o.gallery.length; if (imgs) L.push(`\n${de ? 'Bilder' : 'Images'}: ${imgs}`);
   return L.join('\n');
 }
@@ -463,7 +488,10 @@ async function apiWrite(req, res, url, parts) {
     for (const k of CHAR_TEXT) if (b[k] !== undefined) c[k] = app.includes(k) && c[k] ? c[k] + '\n\n' + String(b[k]) : String(b[k] ?? '');
     if (b.faction !== undefined) { const f = b.faction ? findFaction(t, b.faction) : null; c.faction = f ? f.id : (b.faction || ''); }
     if (Array.isArray(b.tags)) c.tags = b.tags.map(String).filter(Boolean);
-    if (Array.isArray(b.relations)) c.relations = b.relations.filter(r => r && r.name).map(r => ({ name: String(r.name), relation: String(r.relation || '') }));
+    if (b.group !== undefined) { const g = groupFor(t, b.group, b.groupColor); c.group = g ? g.id : ''; }
+    const rel = r => ({ name: String(r.name), relation: String(r.relation || ''), kind: REL_KINDS.includes(r.kind) ? r.kind : 'other' });
+    if (Array.isArray(b.relations)) c.relations = b.relations.filter(r => r && r.name).map(rel);
+    if (Array.isArray(b.addRelations)) { c.relations = c.relations || []; for (const r of b.addRelations.filter(r => r && r.name)) { const ex = c.relations.find(x => x.name.toLowerCase() === String(r.name).toLowerCase()); if (ex) Object.assign(ex, rel(Object.assign({}, ex, r))); else c.relations.push(rel(r)); } }
     c.updated = new Date().toISOString();
     saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, character: charOut(t, c, true) });
   }
@@ -600,7 +628,8 @@ async function apiV1(req, res, url) {
     if (qq) list = list.filter(c => JSON.stringify([c.name, c.title, c.tags, c.bio, c.notes]).toLowerCase().includes(qq));
     if (fq) list = list.filter(c => { const f = t.factions.find(x => x.id === c.faction); return (f ? f.name : c.faction || '').toLowerCase().includes(fq); });
     if (pq) list = list.filter(c => (c.location || '').toLowerCase().includes(pq) || (c.homeworld || '').toLowerCase().includes(pq));
-    if (q.get('format') === 'text') return send(res, 200, list.length ? list.map(c => { const o = charOut(t, c); return `- ${o.name}${o.title ? ' – ' + o.title : ''}${o.faction ? ' · ' + o.faction : ''}${o.location ? ' · ' + o.location : ''}${o.status ? ' · ' + o.status : ''} [id: ${o.id}]`; }).join('\n') : (lang === 'en' ? 'No characters yet.' : 'Noch keine Charaktere.'), 'text/plain; charset=utf-8');
+    const gq = (q.get('group') || '').toLowerCase(); if (gq) list = list.filter(c => { const g = (t.charGroups || []).find(x => x.id === c.group); return g && g.name.toLowerCase().includes(gq); });
+    if (q.get('format') === 'text') return send(res, 200, list.length ? list.map(c => { const o = charOut(t, c); return `- ${o.name}${o.group ? ' [' + o.group + ']' : ''}${o.title ? ' – ' + o.title : ''}${o.faction ? ' · ' + o.faction : ''}${o.location ? ' · ' + o.location : ''}${o.status ? ' · ' + o.status : ''} [id: ${o.id}]`; }).join('\n') : (lang === 'en' ? 'No characters yet.' : 'Noch keine Charaktere.'), 'text/plain; charset=utf-8');
     return send(res, 200, { timeline: t.name, count: list.length, characters: list.map(c => charOut(t, c)) });
   }
   if (ep === 'character') {
@@ -662,6 +691,7 @@ function internalCall(method, pathname, params, body, viewer) {
 const S = (props, required = []) => ({ type: 'object', properties: props, required });
 const str = d => ({ type: 'string', description: d });
 const TL = str('Zeitlinie (Name oder ID). Leer = Kanon (schreibgeschützt).'), YR = str('Jahr, z.B. "3640 BBY", "4 ABY" oder "-3640"'), LG = { type: 'string', enum: ['de', 'en'], description: 'Sprache der Antwort' };
+const REL = { type: 'object', properties: { name: { type: 'string' }, relation: { type: 'string', description: 'z.B. Schwester, Rivale, Informant' }, kind: { type: 'string', enum: ['ally', 'enemy', 'family', 'contact', 'other'] } }, required: ['name'] };
 const MCP_TOOLS = [
   { name: 'list_timelines', title: 'Zeitlinien auflisten', description: 'Alle Welten-Zeitlinien mit ihren Zeitaltern.', ro: true, inputSchema: S({ lang: LG }), run: (a, v) => internalCall('GET', '/api/v1/timelines', a, null, v) },
   { name: 'get_summary', title: 'Lage der Galaxis', description: 'Kurzer Text zum Stand in einem Jahr: Zeitalter, Mächte und ihre Gebiete, optional Eckdaten zu Orten. Ideal als Kontext für Geschichten.', ro: true,
@@ -691,15 +721,21 @@ const MCP_TOOLS = [
     inputSchema: S({ timeline: TL, id: str('id aus list_story'), title: str('neuer Titel'), text: str('Text'), append: { type: 'boolean', description: 'Text anhängen' }, year: YR, places: { type: 'array', items: { type: 'string' } } }, ['timeline', 'id']), run: a => internalCall('PATCH', '/api/v1/story', {}, a) },
   { name: 'delete_story_entry', title: 'Story-Abschnitt löschen', description: 'Abschnitt per id löschen.', inputSchema: S({ timeline: TL, id: str('id aus list_story') }, ['timeline', 'id']), run: a => internalCall('DELETE', '/api/v1/story', {}, a) },
   { name: 'list_characters', title: 'Charaktere auflisten', description: 'Charaktere einer Zeitlinie (Name, Rolle, Fraktion, Ort, Status). Filter: Suchtext, Fraktion, Ort.', ro: true,
-    inputSchema: S({ timeline: TL, query: str('Suchtext'), faction: str('Fraktion'), place: str('Ort/Heimatwelt'), lang: LG }, ['timeline']),
-    run: (a, v) => internalCall('GET', '/api/v1/characters', { timeline: a.timeline, q: a.query, faction: a.faction, place: a.place, lang: a.lang, format: 'text' }, null, v) },
+    inputSchema: S({ timeline: TL, query: str('Suchtext'), faction: str('Fraktion'), place: str('Ort/Heimatwelt'), group: str('Gruppe'), lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/characters', { timeline: a.timeline, q: a.query, faction: a.faction, place: a.place, group: a.group, lang: a.lang, format: 'text' }, null, v) },
   { name: 'get_character', title: 'Charakter lesen', description: 'Alle Details eines Charakters (Steckbrief, Aussehen, Persönlichkeit, Hintergrund, Beziehungen).', ro: true,
     inputSchema: S({ timeline: TL, name: str('Name oder id'), lang: LG }, ['timeline', 'name']), run: (a, v) => internalCall('GET', '/api/v1/character', { timeline: a.timeline, name: a.name, lang: a.lang, format: 'text' }, null, v) },
-  { name: 'upsert_character', title: 'Charakter anlegen/ändern', description: 'Charakter anlegen oder Felder ändern (nur angegebene Felder werden geändert). append: Liste von Textfeldern, an die angehängt statt ersetzt wird (z.B. ["bio","notes"]). Texte dürfen **fett**/*kursiv* und Leerzeilen enthalten.',
-    inputSchema: S({ timeline: TL, name: str('Name (Schlüssel)'), newName: str('neuer Name'), title: str('Rolle/Rang/Titel'), species: str('Spezies'), gender: str('Geschlecht'), age: str('Alter, z.B. "34" oder "geb. 3674 BBY"'),
-      homeworld: str('Heimatwelt'), faction: str('Fraktion (Name)'), location: str('aktueller Aufenthaltsort'), status: str('z.B. lebt, tot, vermisst'), appearance: str('Aussehen'), personality: str('Persönlichkeit'),
-      abilities: str('Fähigkeiten/Ausrüstung'), bio: str('Hintergrund/Werdegang'), notes: str('Notizen'), tags: { type: 'array', items: { type: 'string' } },
-      relations: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, relation: { type: 'string' } } }, description: 'ersetzt die Beziehungsliste' },
+  { name: 'upsert_character', title: 'Charakter anlegen/ändern', description: 'Charakter anlegen oder Felder ändern (nur angegebene Felder werden geändert). Gliederung: Identität (species, age, gender, homeworld), Erscheinungsbild (appearance: Gesicht, Haare, Augen, Körperbau, Kleidung), Persönlichkeit (personality: Züge, Verhalten, Eigenheiten), Hintergrund (bio: Herkunft, Ausbildung, Vergangenheit), Zugehörigkeit (faction, title=Rang, organization, master), Fähigkeiten (abilities: Machtfähigkeiten, Kampfstil, Fachwissen), Beziehungen (relations/addRelations mit kind ally|enemy|family|contact|other), Wissen (knowledge: was die Person über Tim und andere weiß), Aktueller Stand (location, status, threads = laufende Handlungsstränge). append: Liste von Textfeldern, an die angehängt statt ersetzt wird (z.B. ["knowledge","threads"]). Texte dürfen **fett**/*kursiv* und Leerzeilen enthalten.',
+    inputSchema: S({ timeline: TL, name: str('Name (Schlüssel)'), newName: str('neuer Name'),
+      group: str('Gruppe, z.B. "Crew der Trailblazer" (wird bei Bedarf angelegt; leer = keine)'), groupColor: str('Farbe der Gruppe, z.B. "#e57373"'),
+      species: str('Spezies'), age: str('Alter, z.B. "34" oder "geb. 3674 BBY"'), gender: str('Geschlecht'), homeworld: str('Herkunftswelt'),
+      appearance: str('Erscheinungsbild: Gesicht, Haare, Augen, Körperbau, Kleidung'), personality: str('Charakterzüge, Verhalten, Eigenheiten'), bio: str('Herkunft, Ausbildung, Vergangenheit'),
+      faction: str('Fraktion (Name)'), title: str('Rang/Rolle'), organization: str('Organisation/Orden/Einheit'), master: str('Meister oder Mentor'),
+      abilities: str('Machtfähigkeiten, Kampfstil, Fachwissen'), knowledge: str('Was weiß die Person über Tim und andere?'),
+      location: str('aktueller Aufenthaltsort'), status: str('z.B. lebt, verletzt, tot, vermisst'), threads: str('laufende Handlungsstränge'), notes: str('sonstige Notizen'),
+      tags: { type: 'array', items: { type: 'string' } },
+      relations: { type: 'array', items: REL, description: 'ersetzt die komplette Beziehungsliste' },
+      addRelations: { type: 'array', items: REL, description: 'ergänzt/aktualisiert einzelne Beziehungen (per Name), Rest bleibt' },
       append: { type: 'array', items: { type: 'string' }, description: 'Felder, an die angehängt wird' } }, ['timeline', 'name']), run: a => internalCall('POST', '/api/v1/character', {}, a) },
   { name: 'add_character_image', title: 'Bild zu Charakter', description: 'Bild per öffentlicher URL (wird heruntergeladen und dauerhaft gespeichert) oder Base64 zum Charakter hinzufügen. portrait=true setzt es als Porträt, sonst kommt es in die Galerie.',
     inputSchema: S({ timeline: TL, name: str('Charakter'), url: str('https-Link zum Bild'), data: str('alternativ: Base64 oder data:-URL'), caption: str('Bildunterschrift'), portrait: { type: 'boolean' } }, ['timeline', 'name']),

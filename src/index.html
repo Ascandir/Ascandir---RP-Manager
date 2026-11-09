@@ -15,28 +15,26 @@
   <header id="topbar">
     <div class="brand"><span class="logo"></span>Ascandir <span class="dim">· InteractiveMap</span></div>
     <div class="tl-controls">
-      <label class="dim" for="worldSelect" data-i18n="world"></label>
-      <select id="worldSelect"></select>
-      <button id="btnNewWorld" data-i18n="newWorld"></button>
-      <span class="sep"></span>
-      <label class="dim" for="tlSelect" data-i18n="timeline"></label>
-      <select id="tlSelect"></select>
-      <button id="btnNewTl" data-i18n="btnNew" data-i18n-title="tipNew"></button>
-      <button id="btnDupTl" data-i18n="btnCopy" data-i18n-title="tipCopy"></button>
-      <button id="btnDelTl" data-i18n-title="tipDelete">🗑</button>
-      <span class="sep"></span>
-      <div class="menu">
-        <button id="btnFile"><span data-i18n="file"></span> ▾</button>
-        <div class="menu-list" id="fileMenu" hidden>
-          <button id="btnExport" data-i18n="btnExport" data-i18n-title="tipExport"></button>
-          <button id="btnImport" data-i18n="btnImport" data-i18n-title="tipImport"></button>
-          <button id="btnJson" data-i18n="btnJson" data-i18n-title="tipJson"></button>
-          <button id="btnFolder" data-i18n="btnFolder" data-i18n-title="tipFolder"></button>
-        </div>
-      </div>
+      <select id="worldSelect" data-i18n-title="world"></select>
+      <select id="tlSelect" data-i18n-title="timeline"></select>
+      <button id="btnTools" class="fixed" data-i18n-title="tipTools">⚙</button>
+      <span id="tlTools" class="tl-tools" hidden>
+        <button id="btnNewWorld" data-i18n="newWorld"></button>
+        <button id="btnNewTl" data-i18n="btnNew" data-i18n-title="tipNew"></button>
+        <button id="btnDupTl" data-i18n="btnCopy" data-i18n-title="tipCopy"></button>
+        <button id="btnDelTl" data-i18n-title="tipDelete">🗑</button>
+        <span class="menu">
+          <button id="btnFile"><span data-i18n="file"></span> ▾</button>
+          <div class="menu-list" id="fileMenu" hidden>
+            <button id="btnExport" data-i18n="btnExport" data-i18n-title="tipExport"></button>
+            <button id="btnImport" data-i18n="btnImport" data-i18n-title="tipImport"></button>
+            <button id="btnJson" data-i18n="btnJson" data-i18n-title="tipJson"></button>
+            <button id="btnFolder" data-i18n="btnFolder" data-i18n-title="tipFolder"></button>
+          </div>
+        </span>
+      </span>
       <input type="file" id="fileImport" accept=".json,.geojson,application/json,application/geo+json" hidden>
     </div>
-    <button id="btnServer" hidden></button>
     <div class="lang-switch" id="langSwitch"><button data-l="de">DE</button><button data-l="en">EN</button></div>
     <div class="mode-tabs">
       <button id="btnLogin" hidden></button>

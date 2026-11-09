@@ -1851,7 +1851,7 @@
     $('#btnFolder').hidden = guest || !isAdminUser();
     $('#btnLogin').hidden = !guest;
     const bu = $('#btnUser'); bu.hidden = !(si && si.loginRequired && si.user); if (!bu.hidden) bu.textContent = '👤 ' + si.user.name;
-    const sb = $('#btnServer'); if (sb) { sb.hidden = !(FS && FS.server && FS.desktop); sb.textContent = '☁ ' + location.host; sb.title = t('srvTitle'); }
+    $('#btnTools').classList.toggle('active', !$('#tlTools').hidden);
     $('#btnLogin').textContent = '🔒 ' + t('login');
   }
   function loginDialog() {
@@ -1873,10 +1873,7 @@
     const si = srvInfo();
     modal(t('account'), `<p>${esc(t('loggedInAs', si.user.name))}${si.user.admin ? ' · Admin' : ''}</p>`, () => { FS.logout().then(() => location.reload()); }, { ok: t('logout') });
   });
-  $('#btnServer').addEventListener('click', () => {
-    modal(t('srvTitle'), `<p>${esc(t('srvConnected', location.origin))}</p><p class="hint">${esc(t('srvDisconnectHint'))}</p>`,
-      () => { window.iamDesktop.setServer(null); }, { ok: t('srvDisconnect') });
-  });
+  $('#btnTools').addEventListener('click', () => { $('#tlTools').hidden = !$('#tlTools').hidden; $('#btnTools').classList.toggle('active', !$('#tlTools').hidden); });
   $$('#langSwitch button').forEach(b => b.addEventListener('click', () => { if (b.dataset.l !== settings.lang) setLang(b.dataset.l); }));
   $('#worldSelect').addEventListener('change', e => switchWorld(e.target.value));
   $('#tlSelect').addEventListener('change', e => selectTimeline(e.target.value));
@@ -2337,12 +2334,20 @@
   }
 
   // ------------------------------------------------------------- Charaktere
-  let charSel = null, charEdit = false, charQ = '';
-  const CH_INFO = ['species', 'gender', 'age', 'homeworld', 'location', 'status'];
-  const CH_TEXT = ['appearance', 'personality', 'abilities', 'bio', 'notes'];
+  let charSel = null, charEdit = false, charQ = '', charGroupF = '', groupsEdit = false;
+  const GROUP_COLORS = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4dd0e1', '#f06292', '#aed581', '#ffd54f', '#90a4ae'];
+  const grpOf = c => c && c.group ? (state.tl.charGroups || []).find(g => g.id === c.group) : null;
+  const grpTag = g => g ? `<span class="gtag" style="--gc:${esc(g.color)}">${esc(g.name)}</span>` : '';
+  // Gliederung des Steckbriefs: [Abschnitt, kurze Felder, Textfelder]
+  const CH_SECTIONS = [['secIdentity', ['species', 'age', 'gender', 'homeworld'], []], ['secLooks', [], ['appearance']], ['secPersonality', [], ['personality']],
+    ['secBackground', [], ['bio']], ['secAffil', ['faction', 'title', 'organization', 'master'], []], ['secAbilities', [], ['abilities']],
+    ['secRelations', [], []], ['secKnowledge', [], ['knowledge']], ['secCurrent', ['location', 'status'], ['threads']], ['secNotes', [], ['notes']]];
+  const REL_KINDS = ['ally', 'enemy', 'family', 'contact', 'other'];
+  const REL_COL = { ally: '#81c784', enemy: '#e57373', family: '#ffb74d', contact: '#64b5f6', other: '#90a4ae' };
   const charsAt = o => (state.tl.characters || []).filter(c => { const n = o.name.toLowerCase(); return (c.location || '').toLowerCase() === n || (c.homeworld || '').toLowerCase() === n; });
   function openChar(id) { charSel = id; charEdit = false; if (state.plannerOpen) state.plannerOpen = false; setMode('chars'); }
   const placeByName = n => { const q = String(n || '').toLowerCase().trim(); return q && (state.tl.objects.find(o => o.name.toLowerCase() === q) || (isSW() ? atlasObjs().find(o => o.name.toLowerCase() === q) : null)); };
+  function charLink(name) { if (!name) return ''; const o = (state.tl.characters || []).find(x => x.name.toLowerCase() === String(name).toLowerCase()); return o ? `<a href="#" data-cid="${esc(o.id)}">${esc(name)}</a>` : esc(name); }
   function charImgBox(src, cls) { return src ? `<img class="${cls}" src="${esc(src)}" alt="" data-zoom="${esc(src)}">` : `<div class="${cls} ph">👤</div>`; }
   function zoomImg(src, cap) {
     const d = document.createElement('div'); d.className = 'lightbox';
@@ -2365,16 +2370,35 @@
     if (c && charEdit && can) return charForm(box, c);
     if (c) return charDetail(box, c, can);
     charSel = null;
-    const q = charQ.toLowerCase();
-    const shown = list.filter(x => !q || JSON.stringify([x.name, x.title, x.location, x.tags]).toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+    const q = charQ.toLowerCase(), groups = (state.tl.charGroups ||= []);
+    const shown = list.filter(x => (!q || JSON.stringify([x.name, x.title, x.location, x.tags]).toLowerCase().includes(q)) && (!charGroupF || (charGroupF === '-' ? !grpOf(x) : x.group === charGroupF)))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const card = x => { const f = x.faction && facById(x.faction), g = grpOf(x); return `
+        <div class="char-card" data-id="${esc(x.id)}" ${g ? `style="--gc:${esc(g.color)}"` : ''}>${charImgBox(x.image, 'thumb')}
+          <div class="cc-main"><b>${esc(x.name)}</b> ${grpTag(g)}${x.title ? `<div class="dim">${esc(x.title)}</div>` : ''}
+            <div class="dim small">${f ? `<span style="color:${esc(f.color)}">■</span> ${esc(f.name)}` : x.faction && !f ? esc(x.faction) : ''}${x.location ? ` · 📍 ${esc(x.location)}` : ''}${x.status ? ` · ${esc(x.status)}` : ''}</div></div></div>`; };
+    const sections = groups.map(g => ({ g, items: shown.filter(x => x.group === g.id) })).filter(s => s.items.length);
+    const rest = shown.filter(x => !grpOf(x));
     box.innerHTML = `
       <div class="story-kicker">👤 ${esc(t('tabChars'))} · ${esc(state.tl.name)}</div>
-      <div class="row" style="margin:8px 0"><input id="chSearch" placeholder="${esc(t('charSearch'))}" value="${esc(charQ)}">${can ? `<button id="chNew" class="fixed primary">＋</button>` : ''}</div>
-      <div class="char-list">${shown.map(x => { const f = x.faction && facById(x.faction); return `
-        <div class="char-card" data-id="${esc(x.id)}">${charImgBox(x.image, 'thumb')}
-          <div class="cc-main"><b>${esc(x.name)}</b>${x.title ? `<div class="dim">${esc(x.title)}</div>` : ''}
-            <div class="dim small">${f ? `<span style="color:${esc(f.color)}">■</span> ${esc(f.name)}` : x.faction && !f ? esc(x.faction) : ''}${x.location ? ` · 📍 ${esc(x.location)}` : ''}${x.status ? ` · ${esc(x.status)}` : ''}</div></div></div>`; }).join('')
-        || `<p class="hint">${esc(list.length ? t('charNoMatch') : t('charEmpty'))}</p>`}</div>`;
+      <div class="row" style="margin:8px 0"><input id="chSearch" placeholder="${esc(t('charSearch'))}" value="${esc(charQ)}">${can ? `<button id="chNew" class="fixed primary" title="${esc(t('charNew'))}">＋</button>` : ''}</div>
+      ${groups.length || can ? `<div class="gfilter"><button data-gf="" class="${!charGroupF ? 'active' : ''}">${esc(t('allG'))}</button>${groups.map(g => `<button data-gf="${esc(g.id)}" class="${charGroupF === g.id ? 'active' : ''}" style="--gc:${esc(g.color)}"><i></i>${esc(g.name)}</button>`).join('')}
+        ${groups.length ? `<button data-gf="-" class="${charGroupF === '-' ? 'active' : ''}">${esc(t('charNoGroup'))}</button>` : ''}${can ? `<button id="grpEdit" title="${esc(t('charGroupsEdit'))}">⚙ ${esc(t('charGroups'))}</button>` : ''}</div>` : ''}
+      ${groupsEdit && can ? `<div class="grp-edit">${groups.map(g => `<div class="row" data-gid="${esc(g.id)}"><input type="color" class="gcol fixed" value="${esc(g.color)}"><input class="gname" value="${esc(g.name)}"><button class="gdel2 fixed danger">✕</button></div>`).join('')}
+        <div class="row"><button id="grpAdd">＋ ${esc(t('charGroupAdd'))}</button><button id="grpDone" class="fixed primary">${esc(t('ok'))}</button></div></div>` : ''}
+      <div class="char-list">${shown.length ? sections.map(s => `<div class="grp-head" style="--gc:${esc(s.g.color)}"><i></i>${esc(s.g.name)} <span class="dim">${s.items.length}</span></div>${s.items.map(card).join('')}`).join('')
+        + (rest.length ? (sections.length ? `<div class="grp-head"><i></i>${esc(t('charNoGroup'))} <span class="dim">${rest.length}</span></div>` : '') + rest.map(card).join('') : '')
+        : `<p class="hint">${esc(list.length ? t('charNoMatch') : t('charEmpty'))}</p>`}</div>`;
+    box.querySelectorAll('[data-gf]').forEach(b => b.onclick = () => { charGroupF = b.dataset.gf; renderChars(); });
+    const ge = $('#grpEdit'); if (ge) ge.onclick = () => { groupsEdit = !groupsEdit; renderChars(); };
+    const gd = $('#grpDone'); if (gd) gd.onclick = () => { groupsEdit = false; renderChars(); };
+    const ga = $('#grpAdd'); if (ga) ga.onclick = () => { const n = prompt(t('charGroupName')); if (!n || !n.trim()) return; pushUndo(); groups.push({ id: uid('cg'), name: n.trim(), color: GROUP_COLORS[groups.length % GROUP_COLORS.length] }); afterEdit(); renderChars(); };
+    box.querySelectorAll('.grp-edit [data-gid]').forEach(row => {
+      const g = groups.find(x => x.id === row.dataset.gid); if (!g) return;
+      row.querySelector('.gcol').onchange = e => { pushUndo(); g.color = e.target.value; afterEdit(); renderChars(); };
+      row.querySelector('.gname').onchange = e => { if (!e.target.value.trim()) return; pushUndo(); g.name = e.target.value.trim(); afterEdit(); renderChars(); };
+      row.querySelector('.gdel2').onclick = () => { if (!confirm(t('charGroupDelQ', g.name))) return; pushUndo(); state.tl.charGroups = groups.filter(x => x !== g); for (const c of list) if (c.group === g.id) c.group = ''; if (charGroupF === g.id) charGroupF = ''; afterEdit(); renderChars(); };
+    });
     $('#chSearch').addEventListener('input', e => { charQ = e.target.value; const pos = e.target.selectionStart; renderChars(); const el = $('#chSearch'); el.focus(); el.setSelectionRange(pos, pos); });
     box.querySelectorAll('.char-card').forEach(el => el.onclick = () => { charSel = el.dataset.id; renderChars(); });
     const nb = $('#chNew'); if (nb) nb.onclick = () => {
@@ -2384,17 +2408,24 @@
   }
   function charDetail(box, c, can) {
     const f = c.faction && facById(c.faction), pl = placeByName(c.location), hw = placeByName(c.homeworld);
-    const val = k => k === 'location' && pl ? `<a href="#" data-place="${esc(pl.id)}">📍 ${esc(c.location)}</a>` : k === 'homeworld' && hw ? `<a href="#" data-place="${esc(hw.id)}">${esc(c.homeworld)}</a>` : esc(c[k]);
-    const rel = (c.relations || []).map(r => { const o = (state.tl.characters || []).find(x => x.name.toLowerCase() === r.name.toLowerCase()); return `${o ? `<a href="#" data-cid="${esc(o.id)}">${esc(r.name)}</a>` : esc(r.name)}${r.relation ? ` <span class="dim">(${esc(r.relation)})</span>` : ''}`; });
+    const val = k => k === 'location' && pl ? `<a href="#" data-place="${esc(pl.id)}">📍 ${esc(c.location)}</a>` : k === 'homeworld' && hw ? `<a href="#" data-place="${esc(hw.id)}">${esc(c.homeworld)}</a>`
+      : k === 'faction' ? (f ? `<span style="color:${esc(f.color)}">■</span> ${esc(f.name)}` : esc(c.faction)) : k === 'master' ? charLink(c.master) : esc(c[k]);
+    const rels = c.relations || [];
+    const relHtml = REL_KINDS.map(k => { const r = rels.filter(x => (x.kind || 'other') === k); return r.length ? `<span class="k"><span class="rk" style="--gc:${REL_COL[k]}"></span>${esc(t('rel_' + k))}</span><span>${r.map(x => `${charLink(x.name)}${x.relation ? ` <span class="dim">(${esc(x.relation)})</span>` : ''}`).join(', ')}</span>` : ''; }).join('');
+    const sec = ([key, info, texts]) => {
+      if (key === 'secRelations') return relHtml ? `<h3 class="facts-h">${esc(t(key))}</h3><div class="kv">${relHtml}</div>` : '';
+      const iv = info.filter(k => c[k]), tv = texts.filter(k => c[k]); if (!iv.length && !tv.length) return '';
+      return `<h3 class="facts-h">${esc(t(key))}</h3>${iv.length ? `<div class="kv">${iv.map(k => `<span class="k">${esc(t('ch_' + k))}</span><span>${val(k)}</span>`).join('')}</div>` : ''}
+        ${tv.map(k => `${texts.length > 1 || info.length ? `<div class="k sub">${esc(t('ch_' + k))}</div>` : ''}<div class="story-text">${rich(c[k])}</div>`).join('')}`;
+    };
     box.innerHTML = `
       <div class="row" style="margin-bottom:8px"><button id="chBack" class="fixed">← ${esc(t('tabChars'))}</button>${can ? `<button id="chEdit">✎ ${esc(t('charEdit'))}</button>` : ''}</div>
       <div class="char-head">${charImgBox(c.image, 'portrait')}
-        <div><div class="info-title">${esc(c.name)}</div>${c.title ? `<div class="info-type">${esc(c.title)}</div>` : ''}
-          ${f ? `<div><span style="color:${esc(f.color)}">■</span> ${esc(f.name)}</div>` : c.faction ? `<div>${esc(c.faction)}</div>` : ''}</div></div>
-      <div class="kv">${CH_INFO.filter(k => c[k]).map(k => `<span class="k">${esc(t('ch_' + k))}</span><span>${val(k)}</span>`).join('')}
-        ${rel.length ? `<span class="k">${esc(t('ch_relations'))}</span><span>${rel.join(', ')}</span>` : ''}
-        ${(c.tags || []).length ? `<span class="k">Tags</span><span>${c.tags.map(x => `<span class="tag">${esc(x)}</span>`).join(' ')}</span>` : ''}</div>
-      ${CH_TEXT.filter(k => c[k]).map(k => `<h3 class="facts-h">${esc(t('ch_' + k))}</h3><div class="story-text">${rich(c[k])}</div>`).join('')}
+        <div><div class="info-title">${esc(c.name)}</div>${grpTag(grpOf(c))}${c.title ? `<div class="info-type">${esc(c.title)}</div>` : ''}
+          ${f ? `<div><span style="color:${esc(f.color)}">■</span> ${esc(f.name)}</div>` : c.faction ? `<div>${esc(c.faction)}</div>` : ''}
+          ${c.status ? `<div class="dim">${esc(c.status)}</div>` : ''}
+          ${(c.tags || []).length ? `<div style="margin-top:4px">${c.tags.map(x => `<span class="tag">${esc(x)}</span>`).join(' ')}</div>` : ''}</div></div>
+      ${CH_SECTIONS.map(sec).join('')}
       ${(c.gallery || []).length ? `<h3 class="facts-h">${esc(t('charGallery'))}</h3><div class="char-gallery">${c.gallery.map(g => `<figure><img src="${esc(g.src)}" alt="" data-zoom="${esc(g.src)}" data-cap="${esc(g.caption || '')}">${g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure>`).join('')}</div>` : ''}`;
     $('#chBack').onclick = () => { charSel = null; renderChars(); };
     const eb = $('#chEdit'); if (eb) eb.onclick = () => { charEdit = true; renderChars(true); };
@@ -2403,20 +2434,28 @@
     box.querySelectorAll('[data-cid]').forEach(a => a.onclick = ev => { ev.preventDefault(); charSel = a.dataset.cid; renderChars(); });
   }
   function charForm(box, c) {
+    const fld = k => `<label class="field"><span>${esc(t('ch_' + k))}</span><input data-f="${k}" ${k === 'location' || k === 'homeworld' ? 'list="searchList"' : ''} value="${esc(c[k] || '')}" placeholder="${esc(t('ph_' + k) === 'ph_' + k ? '' : t('ph_' + k))}"></label>`;
+    const area = (k, rows, head) => `<label class="field"><span>${esc(t(head || ('ch_' + k)))}</span><textarea data-f="${k}" rows="${rows}" placeholder="${esc(t('ph_' + k) === 'ph_' + k ? '' : t('ph_' + k))}">${esc(c[k] || '')}</textarea></label>`;
     box.innerHTML = `<div id="chForm">
       <h3>✎ ${esc(c.name)}</h3>
       <div class="char-head">${charImgBox(c.image, 'portrait')}<div class="col">
         <button id="chImg">🖼 ${esc(t(c.image ? 'imgChange' : 'imgUpload'))}</button>${c.image ? `<button id="chImgDel" class="danger">✕ ${esc(t('charImgRemove'))}</button>` : ''}
         <input type="file" id="chImgFile" accept="image/*" hidden></div></div>
       <label class="field"><span>${esc(t('name'))}</span><input data-f="name" value="${esc(c.name)}"></label>
-      <label class="field"><span>${esc(t('ch_title'))}</span><input data-f="title" value="${esc(c.title || '')}"></label>
+      <label class="field"><span>${esc(t('charGroup'))}</span><select data-f="group"><option value="">–</option>${(state.tl.charGroups || []).map(g => `<option value="${esc(g.id)}" ${g.id === c.group ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}<option value="__new">＋ ${esc(t('charGroupAdd'))}…</option></select></label>
+      <h4>${esc(t('secIdentity'))}</h4>
+      <div class="row">${['species', 'age'].map(fld).join('')}</div><div class="row">${['gender', 'homeworld'].map(fld).join('')}</div>
+      ${area('appearance', 3, 'secLooks')}${area('personality', 3, 'secPersonality')}${area('bio', 5, 'secBackground')}
+      <h4>${esc(t('secAffil'))}</h4>
       <label class="field"><span>${esc(t('ch_faction'))}</span><select data-f="faction"><option value="">–</option>${state.tl.factions.map(f => `<option value="${esc(f.id)}" ${f.id === c.faction ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}
         ${c.faction && !facById(c.faction) ? `<option value="${esc(c.faction)}" selected>${esc(c.faction)}</option>` : ''}</select></label>
-      <div class="row">${['species', 'gender'].map(k => `<label class="field"><span>${esc(t('ch_' + k))}</span><input data-f="${k}" value="${esc(c[k] || '')}"></label>`).join('')}</div>
-      <div class="row">${['age', 'status'].map(k => `<label class="field"><span>${esc(t('ch_' + k))}</span><input data-f="${k}" value="${esc(c[k] || '')}"></label>`).join('')}</div>
-      <div class="row">${['homeworld', 'location'].map(k => `<label class="field"><span>${esc(t('ch_' + k))}</span><input data-f="${k}" list="searchList" value="${esc(c[k] || '')}"></label>`).join('')}</div>
-      ${CH_TEXT.map(k => `<label class="field"><span>${esc(t('ch_' + k))}</span><textarea data-f="${k}" rows="${k === 'bio' ? 6 : 3}">${esc(c[k] || '')}</textarea></label>`).join('')}
-      <label class="field"><span>${esc(t('ch_relations'))} <span class="dim">(${esc(t('charRelHint'))})</span></span><textarea data-f="relations" rows="3">${esc((c.relations || []).map(r => r.name + (r.relation ? ': ' + r.relation : '')).join('\n'))}</textarea></label>
+      <div class="row">${['title', 'organization'].map(fld).join('')}</div>${fld('master')}
+      ${area('abilities', 3, 'secAbilities')}
+      <label class="field"><span>${esc(t('secRelations'))} <span class="dim">(${esc(t('charRelHint'))})</span></span><textarea data-f="relations" rows="4">${esc((c.relations || []).map(r => `${r.name}${r.relation ? ': ' + r.relation : ''}${r.kind && r.kind !== 'other' ? ' [' + t('rel1_' + r.kind) + ']' : ''}`).join('\n'))}</textarea></label>
+      ${area('knowledge', 4, 'secKnowledge')}
+      <h4>${esc(t('secCurrent'))}</h4>
+      <div class="row">${['location', 'status'].map(fld).join('')}</div>${area('threads', 3)}
+      ${area('notes', 3, 'secNotes')}
       <label class="field"><span>Tags <span class="dim">(${esc(t('commaSep'))})</span></span><input data-f="tags" value="${esc((c.tags || []).join(', '))}"></label>
       <h3 class="facts-h">${esc(t('charGallery'))}</h3>
       <div class="char-gallery edit">${(c.gallery || []).map((g, i) => `<figure><img src="${esc(g.src)}" alt=""><input class="gcap" data-i="${i}" placeholder="${esc(t('charCaption'))}" value="${esc(g.caption || '')}">
@@ -2429,8 +2468,13 @@
     box.querySelectorAll('[data-f]').forEach(el => el.addEventListener('change', () => {
       mark(); const k = el.dataset.f, v = el.value;
       if (k === 'tags') c.tags = v.split(',').map(x => x.trim()).filter(Boolean);
-      else if (k === 'relations') c.relations = v.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const i = l.indexOf(':'); return i > 0 ? { name: l.slice(0, i).trim(), relation: l.slice(i + 1).trim() } : { name: l, relation: '' }; });
+      else if (k === 'relations') c.relations = v.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+        let kind = 'other'; const km = l.match(/\[([^\]]+)\]\s*$/);
+        if (km) { const w = km[1].trim().toLowerCase(); kind = REL_KINDS.find(x => x === w || t('rel1_' + x).toLowerCase() === w || t('rel_' + x).toLowerCase() === w) || 'other'; l = l.slice(0, km.index).trim(); }
+        const i = l.indexOf(':'); return i > 0 ? { name: l.slice(0, i).trim(), relation: l.slice(i + 1).trim(), kind } : { name: l, relation: '', kind };
+      });
       else if (k === 'name') { if (v.trim()) c.name = v.trim(); }
+      else if (k === 'group' && v === '__new') { const n = prompt(t('charGroupName')); const gs = (state.tl.charGroups ||= []); if (n && n.trim()) { const g = { id: uid('cg'), name: n.trim(), color: GROUP_COLORS[gs.length % GROUP_COLORS.length] }; gs.push(g); c.group = g.id; } touch(); renderChars(true); return; }
       else c[k] = v;
       touch();
     }));
