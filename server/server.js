@@ -707,7 +707,14 @@ const server = http.createServer(async (req, res) => {
     let rel = decodeURIComponent(url.pathname); if (rel === '/') rel = '/index.html';
     const fp = path.resolve(SRC_DIR, '.' + rel);
     if (!fp.startsWith(SRC_DIR + path.sep) || !fs.existsSync(fp) || !fs.statSync(fp).isFile()) return send(res, 404, 'Not found', 'text/plain');
-    return send(res, 200, fs.readFileSync(fp), MIME[path.extname(fp).toLowerCase()] || 'application/octet-stream', { 'Cache-Control': 'no-cache' });
+    // Kein Zwischenspeichern (auch nicht bei Cloudflare). In index.html bekommen Skripte/CSS die Version als
+    // Parameter, damit nach einem Update nie alte Dateien aus einem Cache mit neuer Seite gemischt werden.
+    const noCache = { 'Cache-Control': 'no-store, max-age=0', 'CDN-Cache-Control': 'no-store', 'Cloudflare-CDN-Cache-Control': 'no-store' };
+    if (rel === '/index.html') {
+      const html = fs.readFileSync(fp, 'utf8').replace(/(src|href)="([^":?#]+\.(?:js|css))"/g, (_, a, f) => `${a}="${f}?v=${encodeURIComponent(VERSION)}"`);
+      return send(res, 200, html, 'text/html; charset=utf-8', noCache);
+    }
+    return send(res, 200, fs.readFileSync(fp), MIME[path.extname(fp).toLowerCase()] || 'application/octet-stream', noCache);
   } catch (err) {
     return send(res, err.code && Number.isInteger(err.code) ? err.code : (err instanceof SyntaxError ? 400 : 500), { error: err.message });
   }
