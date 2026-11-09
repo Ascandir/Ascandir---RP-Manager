@@ -1436,6 +1436,7 @@
     if (eid !== lastEraId) { lastEraId = eid; renderFactionFilter(); if (state.mode === 'edit') renderEditor(); }
     if (state.plannerOpen) renderPlanner();
     if (state.mode === 'story' && !storyEditing) renderStory();
+    if (state.mode === 'world' && !wnEdit) renderWorldNotes();
     renderInfo(); saveSoon(); draw();
   }
   function jumpEra(dir) {
@@ -2399,6 +2400,15 @@
   const WN_CATS_DE = ['Galaktische Lage', 'Sith-Imperium', 'Galaktische Republik', 'Planeten & Regionen', 'Organisationen', 'Offene Handlungsstränge', 'Gesicherte Erkenntnisse'];
   const WN_CERT = { confirmed: '#81c784', suspected: '#ffb74d', rumor: '#ba68c8' };
   let wnEdit = null, wnQ = '';
+  function wnRevs(n) {
+    if (!Array.isArray(n.revs)) { n.revs = [{ year: null, text: n.text || '', certainty: n.certainty || 'confirmed', updated: n.updated || n.created || null }]; delete n.text; delete n.certainty; }
+    n.revs.sort((a, b) => (a.year ?? -Infinity) - (b.year ?? -Infinity)); return n.revs;
+  }
+  function wnAt(n, year) {
+    const r = wnRevs(n); if (year == null) return r[r.length - 1];
+    if (n.until != null && year > n.until) return null;
+    let cur = null; for (const x of r) if (x.year == null || x.year <= year) cur = x; return cur;
+  }
   const wnRank = c => { const i = WN_CATS_DE.findIndex(x => x.toLowerCase() === String(c || '').toLowerCase()); return i < 0 ? 100 : i; };
   const wnSort = (a, b) => wnRank(a.category) - wnRank(b.category) || String(a.category || '').localeCompare(String(b.category || '')) || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.title).localeCompare(String(b.title));
   function renderWorldNotes() {
@@ -2407,29 +2417,38 @@
     if (!show) { wnEdit = null; return; }
     if (wnEdit && $('#wnForm') && !renderWorldNotes.force) return;
     renderWorldNotes.force = false;
-    const can = canEditTl(), list = (state.tl.worldNotes ||= []), q = wnQ.toLowerCase();
-    const shown = list.filter(n => !q || (n.title + ' ' + n.text + ' ' + n.category + ' ' + (n.places || []).join(' ')).toLowerCase().includes(q)).sort(wnSort);
+    const can = canEditTl(), list = (state.tl.worldNotes ||= []), q = wnQ.toLowerCase(), byYear = settings.wnScope !== 'all', Y = byYear ? state.year : null;
+    const cur = new Map(list.map(n => [n.id, wnAt(n, Y)]));
+    const shown = list.filter(n => (cur.get(n.id) || wnEdit === n.id) && (!q || (n.title + ' ' + wnRevs(n).map(r => r.text).join(' ') + ' ' + n.category + ' ' + (n.places || []).join(' ')).toLowerCase().includes(q))).sort(wnSort);
+    const hidden = list.length - list.filter(n => cur.get(n.id)).length;
     const cats = [...new Set(shown.map(n => n.category || ''))];
     const allCats = [...new Set(WN_CATS_DE.concat(list.map(n => n.category).filter(Boolean)))];
-    const form = n => `<div class="story-sec editing" id="wnForm">
+    const form = n => { const r = n ? (cur.get(n.id) || wnAt(n, null)) : null; return `<div class="story-sec editing" id="wnForm">
       <input id="wnTitle" placeholder="${esc(t('wnTitle'))}" value="${esc(n ? n.title : '')}">
       <div class="row"><label class="field"><span>${esc(t('wnCategory'))}</span><input id="wnCat" list="wnCatList" value="${esc(n ? n.category : (wnEdit && wnEdit.startsWith('new:') ? wnEdit.slice(4) : WN_CATS_DE[0]))}"></label>
-        <label class="field"><span>${esc(t('wnCertainty'))}</span><select id="wnCert">${Object.keys(WN_CERT).map(k => `<option value="${k}" ${(n ? n.certainty || 'confirmed' : 'confirmed') === k ? 'selected' : ''}>${esc(t('wn_' + k))}</option>`).join('')}</select></label></div>
+        <label class="field"><span>${esc(t('wnCertainty'))}</span><select id="wnCert">${Object.keys(WN_CERT).map(k => `<option value="${k}" ${(r ? r.certainty || 'confirmed' : 'confirmed') === k ? 'selected' : ''}>${esc(t('wn_' + k))}</option>`).join('')}</select></label></div>
       <datalist id="wnCatList">${allCats.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+      <div class="row"><label class="field"><span>${esc(t('wnFrom'))}</span><input id="wnYear" value="${esc(n ? (byYear ? fmtYear(state.year) : (r && r.year != null ? fmtYear(r.year) : '')) : fmtYear(state.year))}" placeholder="${esc(t('wnAlways'))}"></label>
+        <label class="field"><span>${esc(t('wnUntil'))}</span><input id="wnUntil" value="${esc(n && n.until != null ? fmtYear(n.until) : '')}" placeholder="${esc(t('wnOpen'))}"></label></div>
+      <p class="hint" style="margin:0">${esc(t('wnYearHint'))}</p>
       <label class="field"><span>${esc(t('storySecPlaces'))}</span><input id="wnPlaces" value="${esc(n ? (n.places || []).join(', ') : '')}"></label>
-      <textarea id="wnText" class="story-edit" placeholder="${esc(t('storyFmt'))}">${esc(n ? n.text : '')}</textarea>
-      <div class="row"><button id="wnSave" class="primary">${esc(t('ok'))}</button><button id="wnCancel">${esc(t('cancel'))}</button>${n ? `<button id="wnDel" class="danger">${esc(t('delete'))}</button>` : ''}</div></div>`;
-    const note = n => wnEdit === n.id ? form(n) : `
+      <textarea id="wnText" class="story-edit" placeholder="${esc(t('storyFmt'))}">${esc(r ? r.text : '')}</textarea>
+      <div class="row"><button id="wnSave" class="primary">${esc(t('ok'))}</button><button id="wnCancel">${esc(t('cancel'))}</button>${n ? `<button id="wnDel" class="danger">${esc(t('delete'))}</button>` : ''}</div></div>`; };
+    const note = n => { if (wnEdit === n.id) return form(n); const r = cur.get(n.id), revs = wnRevs(n), hk = 'wnh:' + n.id; return `
       <article class="story-sec${fold.has(n.id) ? ' folded' : ''}" data-nid="${esc(n.id)}">
         <div class="sec-head"><span class="fold-tg fold-ar">${fold.has(n.id) ? '▸' : '▾'}</span><b class="fold-tg">${esc(n.title)}</b>
-          <span class="cert" style="--gc:${WN_CERT[n.certainty] || WN_CERT.confirmed}">${esc(t('wn_' + (n.certainty || 'confirmed')))}</span>
+          <span class="cert" style="--gc:${WN_CERT[r.certainty] || WN_CERT.confirmed}">${esc(t('wn_' + (r.certainty || 'confirmed')))}</span>
           ${can && !fold.has(n.id) ? `<span class="sec-btns"><button class="fixed wn-ed" title="${esc(t('storyEdit'))}">✎</button></span>` : ''}</div>
-        ${fold.has(n.id) ? '' : `${(n.places || []).length ? `<div class="dim sec-pl">📍 ${n.places.map(p => { const o = placeByName(p); return o ? `<a href="#" data-place="${esc(o.id)}">${esc(p)}</a>` : esc(p); }).join(', ')}</div>` : ''}
-          <div class="story-text">${rich(n.text || '')}</div>${n.updated ? `<div class="dim upd">${esc(t('wnUpdated'))} ${esc(new Date(n.updated).toLocaleDateString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</div>` : ''}`}
-      </article>`;
+        ${fold.has(n.id) ? '' : `<div class="dim sec-pl">${r.year != null ? `⏱ ${esc(t('wnSince'))} ${esc(fmtYear(r.year))}` : `⏱ ${esc(t('wnAlways'))}`}${n.until != null ? ` · ${esc(t('wnUntil'))} ${esc(fmtYear(n.until))}` : ''}${(n.places || []).length ? ` · 📍 ${n.places.map(p => { const o = placeByName(p); return o ? `<a href="#" data-place="${esc(o.id)}">${esc(p)}</a>` : esc(p); }).join(', ')}` : ''}</div>
+          <div class="story-text">${rich(r.text || '')}</div>
+          ${revs.length > 1 ? `<div class="wn-hist"><a href="#" class="wn-htg">${fold.has(hk) ? '▾' : '▸'} ${esc(t('wnHistory'))} (${revs.length})</a>${fold.has(hk) ? revs.slice().reverse().map(h => `<div class="wn-rev${h === r ? ' cur' : ''}"><span class="y">${esc(h.year != null ? fmtYear(h.year) : t('wnAlways'))}</span> <span class="cert" style="--gc:${WN_CERT[h.certainty] || WN_CERT.confirmed}">${esc(t('wn_' + (h.certainty || 'confirmed')))}</span><div class="story-text">${rich(h.text || '')}</div></div>`).join('') : ''}</div>` : ''}
+          ${r.updated ? `<div class="dim upd">${esc(t('wnUpdated'))} ${esc(new Date(r.updated).toLocaleDateString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</div>` : ''}`}
+      </article>`; };
     box.innerHTML = `
       <div class="story-kicker">🌌 ${esc(t('tabWorld'))} · ${esc(state.tl.name)}</div>
       <p class="hint">${esc(t('wnIntro'))}</p>
+      <div class="story-bar" style="margin-top:6px"><span class="dim">${byYear ? esc(t('wnAsOf', fmtYear(state.year))) : esc(t('wnLatest'))}${byYear && hidden ? ` · ${esc(t('wnHidden', hidden))}` : ''}</span>
+        <div class="seg small"><button data-wnscope="year" class="${byYear ? 'active' : ''}">${esc(t('wnScopeYear'))}</button><button data-wnscope="all" class="${byYear ? '' : 'active'}">${esc(t('wnScopeAll'))}</button></div></div>
       <div class="row" style="margin:8px 0"><input id="wnSearch" placeholder="${esc(t('wnSearch'))}" value="${esc(wnQ)}">
         <button class="fixed small-btn" id="wnFoldAll" title="${esc(t('foldAll'))}">▸▸</button><button class="fixed small-btn" id="wnUnfoldAll" title="${esc(t('unfoldAll'))}">▾▾</button></div>
       <div class="story-secs">
@@ -2439,6 +2458,8 @@
         ${!shown.length ? `<p class="hint">${esc(list.length ? t('charNoMatch') : t('wnEmpty'))}</p>` : ''}
         ${wnEdit === 'new:' && !cats.includes('') ? form(null) : ''}
         ${can && wnEdit !== 'new:' ? `<button id="wnNew">＋ ${esc(t('wnAdd'))}</button>` : ''}</div>`;
+    box.querySelectorAll('[data-wnscope]').forEach(b => b.onclick = () => { settings.wnScope = b.dataset.wnscope; saveSoon(); renderWorldNotes(); });
+    box.querySelectorAll('.wn-htg').forEach(a => a.onclick = ev => { ev.preventDefault(); const k = 'wnh:' + a.closest('[data-nid]').dataset.nid; fold.has(k) ? fold.delete(k) : fold.add(k); saveFold(); renderWorldNotes(); });
     $('#wnSearch').addEventListener('input', e => { wnQ = e.target.value; const pos = e.target.selectionStart; renderWorldNotes(); const el = $('#wnSearch'); el.focus(); el.setSelectionRange(pos, pos); });
     box.querySelectorAll('[data-nid] .fold-tg').forEach(el => el.onclick = () => { const id = el.closest('[data-nid]').dataset.nid; fold.has(id) ? fold.delete(id) : fold.add(id); saveFold(); renderWorldNotes(); });
     box.querySelectorAll('.wn-cat').forEach(el => el.onclick = () => { const k = 'wncat:' + el.closest('[data-cat]').dataset.cat; fold.has(k) ? fold.delete(k) : fold.add(k); saveFold(); renderWorldNotes(); });
@@ -2451,9 +2472,15 @@
     const sv = $('#wnSave'); if (sv) sv.onclick = () => {
       const title = $('#wnTitle').value.trim(); if (!title) { $('#wnTitle').focus(); return; }
       pushUndo(); let n = list.find(x => x.id === wnEdit);
-      if (!n) { n = { id: uid('wn'), created: new Date().toISOString() }; list.push(n); }
-      n.title = title; n.category = $('#wnCat').value.trim() || WN_CATS_DE[0]; n.certainty = $('#wnCert').value; n.text = $('#wnText').value;
-      n.places = $('#wnPlaces').value.split(',').map(v => v.trim()).filter(Boolean); n.updated = new Date().toISOString();
+      if (!n) { n = { id: uid('wn'), created: new Date().toISOString(), revs: [] }; list.push(n); }
+      const now = new Date().toISOString(), yv = $('#wnYear').value.trim(), y = yv ? parseYear(yv) : null, uv = $('#wnUntil').value.trim();
+      n.title = title; n.category = $('#wnCat').value.trim() || WN_CATS_DE[0];
+      n.places = $('#wnPlaces').value.split(',').map(v => v.trim()).filter(Boolean); n.updated = now;
+      n.until = uv ? parseYear(uv) : null; if (n.until == null) delete n.until;
+      // Stand für dieses Jahr ändern oder neuen Stand ab diesem Jahr anlegen
+      const revs = wnRevs(n);
+      let r = revs.find(x => (x.year ?? null) === (y ?? null)); if (!r) { r = { year: y ?? null }; revs.push(r); }
+      r.text = $('#wnText').value; r.certainty = $('#wnCert').value; r.updated = now; wnRevs(n);
       wnEdit = null; afterEdit(); renderWorldNotes.force = true; renderWorldNotes();
     };
     const cc = $('#wnCancel'); if (cc) cc.onclick = () => { wnEdit = null; renderWorldNotes.force = true; renderWorldNotes(); };

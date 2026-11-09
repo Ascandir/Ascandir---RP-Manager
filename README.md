@@ -96,11 +96,13 @@ Der Reiter *Welt* beschreibt den **aktuellen Zustand der Welt** – unabhängig 
 - **Charakterakten:** Wer ist wer, wo ist die Person, was weiß sie?
 - **Weltnotizen:** Wie sieht die Welt gerade aus? (werden aktualisiert statt ständig neu angelegt)
 
-Notizen sind nach Kategorien gegliedert (empfohlen: Galaktische Lage, Sith-Imperium, Galaktische Republik, Planeten & Regionen, Organisationen, Offene Handlungsstränge, Gesicherte Erkenntnisse – eigene Kategorien sind möglich). Jede Notiz hat eine Einstufung *gesichert*, *Vermutung* oder *Gerücht*, betroffene Orte (mit der Karte verknüpft) und das Datum der letzten Aktualisierung. Notizen und Kategorien lassen sich zuklappen.
+Notizen sind nach Kategorien gegliedert (empfohlen: Galaktische Lage, Sith-Imperium, Galaktische Republik, Planeten & Regionen, Organisationen, Offene Handlungsstränge, Gesicherte Erkenntnisse – eigene Kategorien sind möglich). Jede Notiz hat eine Einstufung *gesichert*, *Vermutung* oder *Gerücht*, betroffene Orte (mit der Karte verknüpft) und das Datum der letzten Aktualisierung.
+
+**An Jahre gebunden:** Jede Notiz hat Stände pro Jahr („gilt ab“, optional „bis“). Angezeigt wird der Stand zum eingestellten Jahr – stellst du die Zeitleiste zurück, siehst du die Welt, wie sie damals war. Ändert sich etwas, entsteht ein neuer Stand ab dem neuen Jahr; der alte bleibt im *Verlauf* erhalten. Umschaltbar auf *Neuester Stand*. Für die KI ist das Standardjahr das Jahr des neuesten Story-Abschnitts. Notizen und Kategorien lassen sich zuklappen.
 
 Wichtig: Was in den Weltnotizen steht, weiß **nicht** automatisch jeder Charakter – dafür ist das Feld *Wissen* in den Charakterakten da.
 
-- **MCP:** `list_world_notes` (Filter: Kategorie, Suchtext, Ort), `upsert_world_note` (per Titel oder id aktualisieren, `append` hängt an, `certainty`), `delete_world_note`.
+- **MCP:** `list_world_notes` (Stand zu `year`, `history` für den Verlauf, Filter: Kategorie, Suchtext, Ort), `upsert_world_note` (per Titel oder id aktualisieren, `year` = gilt ab, `until`, `append` hängt an, `certainty`), `delete_world_note`.
 - **REST:** `GET /api/v1/worldnotes`, `POST/DELETE /api/v1/worldnote`.
 
 ### Charaktere

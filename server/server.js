@@ -257,7 +257,8 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
   }
   const st = (tl.story || []).filter(e => e.year <= year).sort(storySortT(tl));
   const wns = tl.worldNotes || [];
-  if (wns.length) L.push((de ? `Weltnotizen (${wns.length}): ` : `World notes (${wns.length}): `) + [...new Set(wns.slice().sort(wnSort).map(n => n.category))].join(' · ') + (de ? ' – Details mit list_world_notes' : ' – details via list_world_notes'));
+  const wnsNow = wns.filter(n => wnAt(n, year));
+  if (wnsNow.length) L.push((de ? `Weltnotizen (${wnsNow.length}): ` : `World notes (${wnsNow.length}): `) + [...new Set(wnsNow.slice().sort(wnSort).map(n => n.category))].join(' · ') + (de ? ' – Details mit list_world_notes' : ' – details via list_world_notes'));
   const chs = tl.characters || [];
   if (chs.length) L.push((de ? 'Charaktere: ' : 'Characters: ') + chs.slice(0, 20).map(c => `${c.name}${c.title ? ' (' + c.title + ')' : ''}${c.location ? ' @ ' + c.location : ''}`).join(' · ') + (chs.length > 20 ? ' …' : ''));
   if (st.length) L.push((de ? `Story bisher (${st.length} Abschnitte, neueste zuletzt): ` : `Story so far (${st.length} sections, latest last): `) + st.slice(-5).map(e => `${e.title} (${fmtYear(e.year, f)})`).join(' · '));
@@ -335,19 +336,39 @@ const WN_CATS = ['Galaktische Lage', 'Sith-Imperium', 'Galaktische Republik', 'P
 const WN_CERT = ['confirmed', 'suspected', 'rumor'];
 const wnCatRank = c => { const i = WN_CATS.findIndex(x => x.toLowerCase() === String(c || '').toLowerCase()); return i < 0 ? 100 : i; };
 const wnSort = (a, b) => wnCatRank(a.category) - wnCatRank(b.category) || String(a.category || '').localeCompare(String(b.category || '')) || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.title).localeCompare(String(b.title));
+// Jede Notiz hat Stände pro Jahr (revs). Angezeigt wird der letzte Stand mit Jahr <= gewähltem Jahr.
+function wnRevs(n) {
+  if (!Array.isArray(n.revs)) { n.revs = [{ year: null, text: n.text || '', certainty: n.certainty || 'confirmed', updated: n.updated || n.created || null }]; delete n.text; delete n.certainty; }
+  n.revs.sort((a, b) => (a.year ?? -Infinity) - (b.year ?? -Infinity)); return n.revs;
+}
+function wnAt(n, year) {
+  const r = wnRevs(n); if (year == null) return r[r.length - 1];
+  if (n.until != null && year > n.until) return null;
+  let cur = null; for (const x of r) if (x.year == null || x.year <= year) cur = x; return cur;
+}
+// Standardjahr = Jahr des neuesten Story-Abschnitts (aktueller RP-Stand), sonst Beginn des letzten Zeitalters
+function rpYear(t) {
+  const st = (t.story || []).slice().sort(storySortT(t)); if (st.length) return st[st.length - 1].year;
+  const er = t.eras.slice().sort((a, b) => a.year - b.year); return er.length ? er[er.length - 1].year : 0;
+}
 function wnFind(t, b) {
   const L = t.worldNotes || []; if (b.id) return L.find(x => x.id === b.id) || null;
   const q = String(b.title || '').toLowerCase().trim(); if (!q) return null;
   return L.find(x => x.title.toLowerCase() === q && (!b.category || String(x.category).toLowerCase() === String(b.category).toLowerCase())) || L.find(x => x.title.toLowerCase() === q) || null;
 }
-function wnText(t, lang, list) {
-  const de = lang !== 'en', C = { confirmed: de ? 'gesichert' : 'confirmed', suspected: de ? 'Vermutung' : 'suspected', rumor: de ? 'Gerücht' : 'rumour' };
-  if (!list.length) return de ? `Noch keine Weltnotizen in „${t.name}“.` : `No world notes in "${t.name}" yet.`;
-  const out = [de ? 'Hinweis: Weltnotizen beschreiben den Zustand der Welt – nicht, was einzelne Charaktere wissen (dafür: Wissen in den Charakterakten).' : 'Note: world notes describe the state of the world – not what individual characters know (see character knowledge).'];
+function wnText(t, lang, list, year, history) {
+  const de = lang !== 'en', f = yearFmt(t, lang), C = { confirmed: de ? 'gesichert' : 'confirmed', suspected: de ? 'Vermutung' : 'suspected', rumor: de ? 'Gerücht' : 'rumour' };
+  const out = [de ? 'Hinweis: Weltnotizen beschreiben den Zustand der Welt – nicht, was einzelne Charaktere wissen (dafür: Wissen in den Charakterakten).' : 'Note: world notes describe the state of the world – not what individual characters know (see character knowledge).',
+    year != null ? (de ? `Stand: ${fmtYear(year, f)}` : `As of: ${fmtYear(year, f)}`) : (de ? 'Stand: jeweils neuester Eintrag' : 'As of: latest entry')];
+  const rows = list.map(n => ({ n, r: wnAt(n, year) })).filter(x => x.r);
+  if (!rows.length) { out.push(de ? `Keine Weltnotizen für diesen Stand in „${t.name}“.` : `No world notes for this point in "${t.name}".`); return out.join('\n'); }
   let cur;
-  for (const n of list) {
+  for (const { n, r } of rows) {
     if (n.category !== cur) { cur = n.category; out.push(`\n# ${cur || (de ? 'Allgemein' : 'General')}`); }
-    out.push(`## ${n.title} [${C[n.certainty] || C.confirmed}] [id: ${n.id}]${n.updated ? ` (${de ? 'aktualisiert' : 'updated'} ${String(n.updated).slice(0, 10)})` : ''}\n${(n.places || []).length ? (de ? 'Orte: ' : 'Places: ') + n.places.join(', ') + '\n' : ''}${n.text || ''}`);
+    const since = r.year != null ? (de ? ` seit ${fmtYear(r.year, f)}` : ` since ${fmtYear(r.year, f)}`) : '';
+    const until = n.until != null ? (de ? `, bis ${fmtYear(n.until, f)}` : `, until ${fmtYear(n.until, f)}`) : '';
+    out.push(`## ${n.title} [${C[r.certainty] || C.confirmed}${since}${until}] [id: ${n.id}]\n${(n.places || []).length ? (de ? 'Orte: ' : 'Places: ') + n.places.join(', ') + '\n' : ''}${r.text || ''}`);
+    if (history) for (const h of wnRevs(n)) if (h !== r) out.push(`  – ${h.year != null ? fmtYear(h.year, f) : (de ? 'Anfang' : 'start')}: [${C[h.certainty] || C.confirmed}] ${String(h.text || '').replace(/\n+/g, ' ')}`);
   }
   return out.join('\n');
 }
@@ -524,16 +545,29 @@ async function apiWrite(req, res, url, parts) {
     saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, era: { id: e.id, name: e.name, year: e.year, label: fmtYear(e.year, f) } });
   }
   if (ep === 'worldnote' && (req.method === 'POST' || req.method === 'PATCH')) {
-    t.worldNotes = t.worldNotes || [];
+    t.worldNotes = t.worldNotes || []; const f = yearFmt(t, lang), now = new Date().toISOString();
     let n = wnFind(t, b); const created = !n;
-    if (!n) { if (req.method === 'PATCH' || !b.title) return send(res, b.title ? 404 : 400, { error: b.title ? 'note not found' : 'title required' }); n = { id: uid('wn'), title: String(b.title).trim(), category: String(b.category || WN_CATS[0]), text: '', certainty: 'confirmed', places: [], created: new Date().toISOString() }; t.worldNotes.push(n); }
+    const year = b.year === 'always' ? null : b.year != null && b.year !== '' ? parseYear(b.year, f) : rpYear(t);
+    if (!n) { if (req.method === 'PATCH' || !b.title) return send(res, b.title ? 404 : 400, { error: b.title ? 'note not found' : 'title required' }); n = { id: uid('wn'), title: String(b.title).trim(), category: String(b.category || WN_CATS[0]), places: [], revs: [], created: now }; t.worldNotes.push(n); }
+    const revs = wnRevs(n);
     if (b.newTitle) n.title = String(b.newTitle);
     if (b.category !== undefined && !created) n.category = String(b.category);
-    if (b.text !== undefined) n.text = b.append && n.text ? n.text + '\n\n' + String(b.text) : String(b.text);
-    if (b.certainty !== undefined) n.certainty = WN_CERT.includes(b.certainty) ? b.certainty : 'confirmed';
     if (Array.isArray(b.places)) n.places = b.places.map(String).filter(Boolean);
-    n.updated = new Date().toISOString();
-    saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, note: n });
+    if (b.until !== undefined) n.until = b.until === null || b.until === '' ? null : parseYear(b.until, f);
+    let action = null;
+    if (b.text !== undefined || b.certainty !== undefined) {
+      // Stand für dieses Jahr ändern oder neuen Stand ab diesem Jahr anlegen (alte Stände bleiben als Verlauf erhalten)
+      let r = revs.find(x => (x.year ?? null) === year);
+      const prev = wnAt(n, year);
+      if (!r) { r = { year, text: prev ? prev.text : '', certainty: prev ? prev.certainty : 'confirmed' }; revs.push(r); action = created ? 'created' : 'new state from ' + (year != null ? fmtYear(year, f) : 'start'); }
+      else action = 'updated state ' + (year != null ? fmtYear(year, f) : 'start');
+      if (b.text !== undefined) r.text = b.append && r.text ? r.text + '\n\n' + String(b.text) : String(b.text);
+      if (b.certainty !== undefined) r.certainty = WN_CERT.includes(b.certainty) ? b.certainty : 'confirmed';
+      r.updated = now; wnRevs(n);
+    }
+    if (!revs.length) revs.push({ year, text: '', certainty: 'confirmed', updated: now });
+    n.updated = now;
+    saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, action, note: { id: n.id, title: n.title, category: n.category, until: n.until ?? null, revisions: revs.map(r => ({ year: r.year != null ? fmtYear(r.year, f) : null, certainty: r.certainty, text: r.text })) } });
   }
   if (ep === 'worldnote' && req.method === 'DELETE') {
     const n = wnFind(t, b); if (!n) return send(res, 404, { error: 'note not found (id or exact title)' });
@@ -742,10 +776,13 @@ async function apiV1(req, res, url) {
     const t = tl(), cq = (q.get('category') || '').toLowerCase(), qq = (q.get('q') || '').toLowerCase(), pq = (q.get('place') || '').toLowerCase();
     let list = (t.worldNotes || []).slice().sort(wnSort);
     if (cq) list = list.filter(n => String(n.category || '').toLowerCase().includes(cq));
-    if (qq) list = list.filter(n => (n.title + ' ' + n.text).toLowerCase().includes(qq));
-    if (pq) list = list.filter(n => (n.places || []).some(p => p.toLowerCase().includes(pq)) || (n.title + ' ' + n.text).toLowerCase().includes(pq));
-    if (q.get('format') === 'text') return send(res, 200, wnText(t, lang, list), 'text/plain; charset=utf-8');
-    return send(res, 200, { timeline: t.name, count: list.length, categories: [...new Set(list.map(n => n.category))], notes: list });
+    const txt = n => n.title + ' ' + wnRevs(n).map(r => r.text).join(' ');
+    if (qq) list = list.filter(n => txt(n).toLowerCase().includes(qq));
+    if (pq) list = list.filter(n => (n.places || []).some(p => p.toLowerCase().includes(pq)) || txt(n).toLowerCase().includes(pq));
+    const yq = q.get('year'), year = yq === 'latest' ? null : yq ? parseYear(yq, yearFmt(t, lang)) : rpYear(t);
+    if (q.get('format') === 'text') return send(res, 200, wnText(t, lang, list, year, q.get('history') === '1' || q.get('history') === 'true'), 'text/plain; charset=utf-8');
+    const f = yearFmt(t, lang);
+    return send(res, 200, { timeline: t.name, year, yearLabel: year != null ? fmtYear(year, f) : null, notes: list.map(n => { const r = wnAt(n, year); return r ? { id: n.id, title: n.title, category: n.category, places: n.places || [], until: n.until ?? null, text: r.text, certainty: r.certainty, since: r.year, sinceLabel: r.year != null ? fmtYear(r.year, f) : null, revisions: wnRevs(n).length } : null; }).filter(Boolean) });
   }
   if (ep === 'characters') {
     const t = tl(), qq = (q.get('q') || '').toLowerCase(), fq = (q.get('faction') || '').toLowerCase(), pq = (q.get('place') || '').toLowerCase();
@@ -854,10 +891,11 @@ const MCP_TOOLS = [
     inputSchema: S({ timeline: TL, ids: { type: 'array', items: { type: 'string' }, description: 'Abschnitts-ids in chronologischer Reihenfolge' }, adjustYears: { type: 'boolean' } }, ['timeline', 'ids']), run: a => internalCall('POST', '/api/v1/story/order', {}, a) },
   { name: 'delete_story_entry', title: 'Story-Abschnitt löschen', description: 'Abschnitt per id löschen.', inputSchema: S({ timeline: TL, id: str('id aus list_story') }, ['timeline', 'id']), run: a => internalCall('DELETE', '/api/v1/story', {}, a) },
   { name: 'list_world_notes', title: 'Weltnotizen lesen', description: 'Aktueller Zustand der Welt (unabhängig von der Spieler-Story): Galaktische Lage, Fraktionen, Planeten & Regionen, Organisationen, offene Handlungsstränge, gesicherte Erkenntnisse. Weltnotizen sind NICHT das Wissen aller Charaktere – das steht in den Charakterakten.', ro: true,
-    inputSchema: S({ timeline: TL, category: str('nur diese Kategorie'), query: str('Suchtext'), place: str('Ort'), lang: LG }, ['timeline']),
-    run: (a, v) => internalCall('GET', '/api/v1/worldnotes', { timeline: a.timeline, category: a.category, q: a.query, place: a.place, lang: a.lang, format: 'text' }, null, v) },
-  { name: 'upsert_world_note', title: 'Weltnotiz anlegen/aktualisieren', description: 'Weltnotiz anlegen oder aktualisieren. Bestehende Notizen bevorzugt aktualisieren (per id oder Titel) statt für jede Kleinigkeit eine neue anzulegen. Kategorien (frei, empfohlen): ' + WN_CATS.join(', ') + '. certainty: confirmed (gesichert), suspected (Vermutung), rumor (Gerücht). append=true hängt Text an.',
+    inputSchema: S({ timeline: TL, year: str('Stand zu diesem Jahr (Standard: Jahr des neuesten Story-Abschnitts; "latest" = jeweils neuester Stand)'), history: { type: 'boolean', description: 'frühere Stände mit ausgeben' }, category: str('nur diese Kategorie'), query: str('Suchtext'), place: str('Ort'), lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/worldnotes', { timeline: a.timeline, year: a.year, history: a.history ? '1' : undefined, category: a.category, q: a.query, place: a.place, lang: a.lang, format: 'text' }, null, v) },
+  { name: 'upsert_world_note', title: 'Weltnotiz anlegen/aktualisieren', description: 'Weltnotiz anlegen oder aktualisieren. Notizen sind an Jahre gebunden: Text/Einstufung gelten ab year (Standard: Jahr des neuesten Story-Abschnitts). Gibt es für dieses Jahr schon einen Stand, wird er geändert; sonst entsteht ein neuer Stand ab diesem Jahr, frühere bleiben als Verlauf erhalten (wichtig für Rückblicke). until = Jahr, ab dem die Notiz nicht mehr gilt. Bestehende Notizen bevorzugt aktualisieren (per id oder Titel) statt für jede Kleinigkeit eine neue anzulegen. Kategorien (frei, empfohlen): ' + WN_CATS.join(', ') + '. certainty: confirmed (gesichert), suspected (Vermutung), rumor (Gerücht). append=true hängt Text an.',
     inputSchema: S({ timeline: TL, title: str('Titel (Schlüssel)'), id: str('alternativ: id'), category: str('Kategorie'), newTitle: str('neuer Titel'), text: str('Inhalt (Markdown: **fett**, *kursiv*, Leerzeile = Absatz)'),
+      year: str('gilt ab diesem Jahr, z.B. "3640 BBY" ("always" = von Anfang an)'), until: str('gilt bis zu diesem Jahr (leer = offen)'),
       append: { type: 'boolean' }, certainty: { type: 'string', enum: WN_CERT }, places: { type: 'array', items: { type: 'string' }, description: 'betroffene Orte' } }, ['timeline']),
     run: a => internalCall('POST', '/api/v1/worldnote', {}, a) },
   { name: 'delete_world_note', title: 'Weltnotiz löschen', description: 'Weltnotiz löschen (id oder exakter Titel).', inputSchema: S({ timeline: TL, title: str('Titel'), id: str('id') }, ['timeline']), run: a => internalCall('DELETE', '/api/v1/worldnote', {}, a) },
