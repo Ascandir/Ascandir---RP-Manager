@@ -77,7 +77,7 @@ Ein Zeitalter gilt ab seinem Startjahr bis zum Beginn des nächsten. Objekte kö
 
 ### Story-Abschnitte
 
-Im Reiter *Story* gibt es beliebig viele **Abschnitte**, gruppiert in **Kapitel mit Titel** (und optionaler Kurzbeschreibung). Umschaltbar: *Ganze Story* oder nur *Dieses Zeitalter*. Abschnitte haben (Titel, Jahr, beteiligte Orte, Text mit **fett**/*kursiv*). Du kannst sie selbst anlegen (＋ Abschnitt hinzufügen) oder von der KI schreiben lassen:
+Im Reiter *Story* gibt es beliebig viele **Abschnitte**, gruppiert in **Kapitel mit Titel** (und optionaler Kurzbeschreibung). Umschaltbar: *Ganze Story* oder nur *Dieses Zeitalter*. Abschnitte haben Titel, Jahr, beteiligte Orte und Text mit **fett**/*kursiv*. Du kannst sie selbst anlegen (＋ Abschnitt hinzufügen) oder von der KI schreiben lassen:
 
 - **MCP (ChatGPT/Claude):** `list_story` liest (z. B. `last: 5` für die letzten fünf), `add_story_entry` legt einen neuen Abschnitt an, `update_story_entry` ändert oder ergänzt (`append: true`), `delete_story_entry` löscht.
 - **REST:** `GET /api/v1/story?timeline=…&format=text`, `POST/PATCH/DELETE /api/v1/story` (mit Token).
