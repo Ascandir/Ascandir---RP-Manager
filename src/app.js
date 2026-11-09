@@ -2280,6 +2280,11 @@
   const storySortFn = (a, b) => a.year - b.year || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.created || '').localeCompare(String(b.created || ''));
   const chapters = () => (state.tl.chapters ||= []).slice().sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
   let chapEdit = null;
+  // Zugeklappte Abschnitte/Kapitel (pro Betrachter im Browser gespeichert)
+  const FOLD_KEY = 'iam.storyFold.v1';
+  let fold; try { fold = new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || '[]')); } catch (e) { fold = new Set(); }
+  const saveFold = () => { try { localStorage.setItem(FOLD_KEY, JSON.stringify([...fold].slice(-3000))); } catch (e) { /* egal */ } };
+  const toggleFold = id => { fold.has(id) ? fold.delete(id) : fold.add(id); saveFold(); renderStory(); };
   const chapClean = v => String(v || '').trim().replace(/^(kapitel|chapter)\s*\d+\s*[:.\-–]\s*/i, '').trim();
   // Abschnitt innerhalb desselben Jahres um eine Position verschieben
   function moveSection(id, dir) {
@@ -2307,11 +2312,11 @@
       <div class="row"><button id="secSave" class="primary">${esc(t('ok'))}</button><button id="secCancel">${esc(t('cancel'))}</button></div></div>`;
     const sameGrp = (q, x) => q !== x && q.year === x.year && (q.chapter || '') === (x.chapter || '');
     const secHtml = x => secEdit === x.id ? secForm(x) : `
-        <article class="story-sec" data-sid="${esc(x.id)}">
-          <div class="sec-head"><b>${esc(x.title)}</b><span class="y">${esc(fmtYear(x.year))}</span>
-            ${canS ? `<span class="sec-btns"><button class="fixed sec-up" title="${esc(t('storyUp'))}" ${secs.some(q => sameGrp(q, x) && storySortFn(q, x) < 0) ? '' : 'disabled'}>↑</button><button class="fixed sec-dn" title="${esc(t('storyDown'))}" ${secs.some(q => sameGrp(q, x) && storySortFn(q, x) > 0) ? '' : 'disabled'}>↓</button><button class="fixed sec-ed" title="${esc(t('storyEdit'))}">✎</button><button class="fixed danger sec-del" title="${esc(t('delete'))}">✕</button></span>` : ''}</div>
-          ${(x.places || []).length ? `<div class="dim sec-pl">📍 ${esc(x.places.join(', '))}</div>` : ''}
-          <div class="story-text">${rich(x.text || '')}</div>
+        <article class="story-sec${fold.has(x.id) ? ' folded' : ''}" data-sid="${esc(x.id)}">
+          <div class="sec-head"><span class="fold-tg fold-ar" title="${esc(t('foldToggle'))}">${fold.has(x.id) ? '▸' : '▾'}</span><b class="fold-tg">${esc(x.title)}</b><span class="y">${esc(fmtYear(x.year))}</span>
+            ${canS && !fold.has(x.id) ? `<span class="sec-btns"><button class="fixed sec-up" title="${esc(t('storyUp'))}" ${secs.some(q => sameGrp(q, x) && storySortFn(q, x) < 0) ? '' : 'disabled'}>↑</button><button class="fixed sec-dn" title="${esc(t('storyDown'))}" ${secs.some(q => sameGrp(q, x) && storySortFn(q, x) > 0) ? '' : 'disabled'}>↓</button><button class="fixed sec-ed" title="${esc(t('storyEdit'))}">✎</button><button class="fixed danger sec-del" title="${esc(t('delete'))}">✕</button></span>` : ''}</div>
+          ${fold.has(x.id) ? '' : `${(x.places || []).length ? `<div class="dim sec-pl">📍 ${esc(x.places.join(', '))}</div>` : ''}
+          <div class="story-text">${rich(x.text || '')}</div>`}
         </article>`;
     const addBtn = cid => secEdit === 'new:' + cid ? secForm(null, cid) : canS ? `<button class="sec-add" data-chap="${esc(cid)}">＋ ${esc(t('storyAddSection'))}</button>` : '';
     const loose = secs.filter(x => !x.chapter || !chIds.has(x.chapter));
@@ -2324,10 +2329,10 @@
       blocks.push(chapEdit === c.id ? `<div class="chap-edit" data-chid="${esc(c.id)}"><input id="chapTitle" value="${esc(c.title)}" placeholder="${esc(t('chapTitle'))}">
           <textarea id="chapSum" rows="3" placeholder="${esc(t('chapSummary'))}">${esc(c.summary || '')}</textarea>
           <div class="row"><button id="chapSave" class="primary">${esc(t('ok'))}</button><button id="chapCancel">${esc(t('cancel'))}</button><button id="chapDel" class="danger">${esc(t('delete'))}</button></div></div>`
-        : `<div class="chap-head" data-chid="${esc(c.id)}"><span class="chap-nr">${esc(t('chapter'))} ${i + 1}</span><b>${esc(c.title)}</b>
+        : `<div class="chap-head" data-chid="${esc(c.id)}"><span class="fold-tg fold-ar chap-tg" title="${esc(t('foldToggle'))}">${fold.has(c.id) ? '▸' : '▾'}</span><span class="chap-nr fold-tg chap-tg">${esc(t('chapter'))} ${i + 1}</span><b class="fold-tg chap-tg">${esc(c.title)}</b>${fold.has(c.id) ? `<span class="dim">(${items.length})</span>` : ''}
           ${canS ? `<span class="chap-btns"><button class="fixed ch-up" ${i ? '' : 'disabled'}>↑</button><button class="fixed ch-dn" ${i < chs.length - 1 ? '' : 'disabled'}>↓</button><button class="fixed ch-ed">✎</button></span>` : ''}</div>
-          ${c.summary ? `<div class="chap-sum">${rich(c.summary)}</div>` : ''}`);
-      blocks.push(items.map(secHtml).join('') + (items.length ? '' : `<p class="hint">${esc(t('chapEmpty'))}</p>`) + addBtn(c.id));
+          ${c.summary && !fold.has(c.id) ? `<div class="chap-sum">${rich(c.summary)}</div>` : ''}`);
+      if (!fold.has(c.id) || chapEdit === c.id) blocks.push(items.map(secHtml).join('') + (items.length ? '' : `<p class="hint">${esc(t('chapEmpty'))}</p>`) + addBtn(c.id));
     });
     box.innerHTML = `
       <div class="story-head">
@@ -2341,12 +2346,17 @@
       : `<div class="story-text">${e && e.desc ? rich(e.desc) : `<p class="hint">${esc(e ? t('storyEmpty') : t('beforeFirstEra'))}</p>`}</div>
         ${can ? `<button id="storyEditBtn">✎ ${esc(t('storyEdit'))}</button>` : ''}`}
       <div class="story-bar"><h3>${esc(t('storySections'))} <span class="dim">(${secs.length})</span></h3>
+        <div class="row" style="gap:6px;flex:0 0 auto"><button class="fixed small-btn" id="foldAll" title="${esc(t('foldAll'))}">▸▸</button><button class="fixed small-btn" id="unfoldAll" title="${esc(t('unfoldAll'))}">▾▾</button></div>
         <div class="seg small"><button data-scope="all" class="${all ? 'active' : ''}">${esc(t('storyAll'))}</button><button data-scope="era" class="${all ? '' : 'active'}">${esc(t('storyThisEra'))}</button></div></div>
       <div class="story-secs">${blocks.join('')}
         ${!secs.length && !chs.length ? `<p class="hint">${esc(t('storyNoSections'))}</p>` : ''}
         ${canS ? `<button id="chapAdd">＋ ${esc(t('chapAdd'))}</button>` : ''}</div>
       <h3 style="margin-top:18px">${esc(t('storyChapters'))}</h3>
       <ol class="story-chapters">${eras.map(x => { const n = storyOf(x.year, eraEnd(x)).length; return `<li data-id="${esc(x.id)}" class="${x === e ? 'cur' : ''}"><span class="y">${esc(fmtYear(x.year))}</span> ${esc(x.name)}${n ? ` <span class="dim">· ${n}</span>` : ''}</li>`; }).join('')}</ol>`;
+    box.querySelectorAll('.story-sec .fold-tg').forEach(el => el.onclick = () => toggleFold(el.closest('[data-sid]').dataset.sid));
+    box.querySelectorAll('.chap-head .chap-tg').forEach(el => el.onclick = () => toggleFold(el.closest('[data-chid]').dataset.chid));
+    $('#foldAll').onclick = () => { for (const x of secs) fold.add(x.id); saveFold(); renderStory(); };
+    $('#unfoldAll').onclick = () => { for (const x of secs) fold.delete(x.id); for (const c of chs) fold.delete(c.id); saveFold(); renderStory(); };
     box.querySelectorAll('[data-scope]').forEach(b => b.onclick = () => { settings.storyScope = b.dataset.scope; saveSoon(); renderStory(); });
     box.querySelectorAll('.sec-add').forEach(b => b.onclick = () => { secEdit = 'new:' + b.dataset.chap; renderStory(); $('#secTitle').focus(); });
     const cid = el => el.closest('[data-chid]').dataset.chid;

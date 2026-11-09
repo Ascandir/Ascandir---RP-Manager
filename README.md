@@ -82,6 +82,7 @@ Im Reiter *Story* gibt es beliebig viele **Abschnitte**, gruppiert in **Kapitel 
 - **MCP (ChatGPT/Claude):** `list_story` liest (z. B. `last: 5` für die letzten fünf), `add_story_entry` legt einen neuen Abschnitt an, `update_story_entry` ändert oder ergänzt (`append: true`), `delete_story_entry` löscht.
 - **REST:** `GET /api/v1/story?timeline=…&format=text`, `POST/PATCH/DELETE /api/v1/story` (mit Token).
 - `get_summary` nennt automatisch die letzten Abschnitte, damit die KI weiß, wo die Geschichte steht.
+- **Zuklappen:** Ein Klick auf den Titel eines Abschnitts oder Kapitels klappt ihn zu (nur noch Titel sichtbar); ▸▸/▾▾ klappt alles zu bzw. auf. Das merkt sich jeder Browser für sich.
 - **Kapitel per KI:** `upsert_chapter` (Titel, `newTitle`, `summary`, Position `after`, `sections` zum Zuordnen), `reorder_chapters`, `delete_chapter`; beim Abschnitt legt `chapter` das Kapitel fest (ohne Angabe: Kapitel des vorherigen Abschnitts).
 - **Reihenfolge:** Abschnitte sind nach Jahr sortiert, innerhalb eines Jahres nach ihrer Position. Die KI kann mit `reorder_story` (ids in chronologischer Reihenfolge, optional `adjustYears`) neu sortieren und mit `after` einen Abschnitt gezielt hinter einen anderen einfügen oder verschieben. Im Story-Reiter gehen die Pfeile ↑/↓ innerhalb desselben Jahres.
 

@@ -424,3 +424,9 @@ body[data-theme="fantasy"] .story-text { font-size: 15px; }
 .story-sec .sec-head b { min-width: 7em; overflow-wrap: anywhere; }
 .story-sec .sec-btns { display: inline-flex; gap: 3px; margin-left: auto; }
 .story-sec .sec-btns button { padding: 1px 6px; }
+
+.fold-tg { cursor: pointer; user-select: none; }
+span.fold-ar { opacity: .7; font-size: 12px; width: 12px; flex: none; display: inline-block; }
+.story-sec.folded { padding-top: 5px; padding-bottom: 5px; }
+.story-sec.folded .sec-head b { font-weight: 600; }
+.small-btn { padding: 2px 7px; font-size: 11px; letter-spacing: -2px; }
