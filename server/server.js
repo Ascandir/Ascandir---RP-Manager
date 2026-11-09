@@ -613,7 +613,9 @@ async function handleMcp(req, res, url, writeAllowed) {
     if ((req.headers.accept || '').includes('text/event-stream')) return send(res, 405, { error: 'Use POST (Streamable HTTP)' }, 'application/json', { Allow: 'POST' });
     // Statusanzeige für den Browser (zur Fehlersuche)
     return send(res, 200, { status: 'ok', server: 'Ascandir InteractiveMap MCP', version: VERSION, transport: 'streamable-http (POST)',
-      access: writeAllowed ? 'lesen + schreiben (Token korrekt)' : 'nur lesen', tools: MCP_TOOLS.filter(t => t.ro || (writeAllowed && !READONLY)).map(t => t.name) });
+      access: writeAllowed ? 'lesen + schreiben (Token korrekt)' : 'nur lesen',
+      ...(writeAllowed ? {} : { hinweis: 'Hier ist kein Token angekommen (Adresse: ' + url.pathname + (url.search ? ' + Parameter' : '') + '). Enthält der Token Zeichen wie # ? & % / oder Leerzeichen, schneidet der Browser ihn ab – dann einen Token nur aus Buchstaben und Zahlen verwenden.' }),
+      tools: MCP_TOOLS.filter(t => t.ro || (writeAllowed && !READONLY)).map(t => t.name) });
   }
   if (req.method === 'DELETE') return send(res, 200, { ok: true });
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
