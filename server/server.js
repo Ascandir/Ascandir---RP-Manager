@@ -256,6 +256,8 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
     }
   }
   const st = (tl.story || []).filter(e => e.year <= year).sort((a, b) => a.year - b.year || String(a.created || '').localeCompare(String(b.created || '')));
+  const chs = tl.characters || [];
+  if (chs.length) L.push((de ? 'Charaktere: ' : 'Characters: ') + chs.slice(0, 20).map(c => `${c.name}${c.title ? ' (' + c.title + ')' : ''}${c.location ? ' @ ' + c.location : ''}`).join(' · ') + (chs.length > 20 ? ' …' : ''));
   if (st.length) L.push((de ? `Story bisher (${st.length} Abschnitte, neueste zuletzt): ` : `Story so far (${st.length} sections, latest last): `) + st.slice(-5).map(e => `${e.title} (${fmtYear(e.year, f)})`).join(' · '));
   for (const pn of placeNames) {
     const o = findPlace(tl, pn); if (!o) { L.push((de ? 'Unbekannter Ort: ' : 'Unknown place: ') + pn); continue; }
@@ -294,6 +296,48 @@ function storyText(t, lang, list) {
   const de = lang !== 'en';
   if (!list.length) return de ? `Noch keine Story-Abschnitte in „${t.name}“.` : `No story sections in "${t.name}" yet.`;
   return list.map(e => `## ${e.title} (${e.yearLabel}${e.era ? ' · ' + e.era : ''}) [id: ${e.id}]\n${e.places.length ? (de ? 'Orte: ' : 'Places: ') + e.places.join(', ') + '\n' : ''}${e.text}`).join('\n\n');
+}
+// ---------------------------------------------------------------- Charaktere (tl.characters)
+const CHAR_TEXT = ['title', 'species', 'gender', 'age', 'homeworld', 'location', 'status', 'appearance', 'personality', 'abilities', 'bio', 'notes'];
+const findChar = (t, n) => { const q = String(n || '').toLowerCase().trim(); return (t.characters || []).find(c => c.id === n || c.name.toLowerCase() === q) || (q ? (t.characters || []).find(c => c.name.toLowerCase().includes(q)) : null) || null; };
+function charOut(t, c, full) {
+  const fac = c.faction ? t.factions.find(f => f.id === c.faction) : null;
+  const base = { id: c.id, name: c.name, title: c.title || '', faction: fac ? fac.name : (c.faction || ''), location: c.location || '', status: c.status || '', image: c.image || null };
+  if (!full) return base;
+  return Object.assign(base, { species: c.species || '', gender: c.gender || '', age: c.age || '', homeworld: c.homeworld || '', appearance: c.appearance || '', personality: c.personality || '',
+    abilities: c.abilities || '', bio: c.bio || '', notes: c.notes || '', tags: c.tags || [], relations: c.relations || [], gallery: (c.gallery || []).map(g => ({ src: g.src && g.src.startsWith('data:') ? '(eingebettetes Bild)' : g.src, caption: g.caption || '' })), updated: c.updated || null });
+}
+function charText(t, c, lang) {
+  const de = lang !== 'en', o = charOut(t, c, true), L = [`# ${o.name}${o.title ? ' – ' + o.title : ''} [id: ${o.id}]`];
+  const lab = de ? { species: 'Spezies', gender: 'Geschlecht', age: 'Alter', homeworld: 'Heimatwelt', faction: 'Fraktion', location: 'Aufenthaltsort', status: 'Status', appearance: 'Aussehen', personality: 'Persönlichkeit', abilities: 'Fähigkeiten', bio: 'Hintergrund', notes: 'Notizen' }
+    : { species: 'Species', gender: 'Gender', age: 'Age', homeworld: 'Homeworld', faction: 'Faction', location: 'Location', status: 'Status', appearance: 'Appearance', personality: 'Personality', abilities: 'Abilities', bio: 'Background', notes: 'Notes' };
+  for (const k of ['species', 'gender', 'age', 'homeworld', 'faction', 'location', 'status']) if (o[k]) L.push(`${lab[k]}: ${o[k]}`);
+  if (o.tags.length) L.push('Tags: ' + o.tags.join(', '));
+  if (o.relations.length) L.push((de ? 'Beziehungen: ' : 'Relations: ') + o.relations.map(r => `${r.name}${r.relation ? ' (' + r.relation + ')' : ''}`).join(', '));
+  for (const k of ['appearance', 'personality', 'abilities', 'bio', 'notes']) if (o[k]) L.push(`\n## ${lab[k]}\n${o[k]}`);
+  const imgs = (o.image ? 1 : 0) + o.gallery.length; if (imgs) L.push(`\n${de ? 'Bilder' : 'Images'}: ${imgs}`);
+  return L.join('\n');
+}
+// Bilder für Charaktere: Download (URL) oder Base64 -> Datei in DATA_DIR/images, ausgeliefert unter /images/<datei>
+const IMG_DIR = path.join(DATA_DIR, 'images');
+const IMG_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
+async function storeImage(b) {
+  let buf, type;
+  if (b.data) {
+    const m = String(b.data).match(/^data:(image\/[a-z+]+);base64,(.*)$/s); type = m ? m[1] : (b.mime || 'image/png');
+    buf = Buffer.from(m ? m[2] : String(b.data), 'base64');
+  } else if (b.url) {
+    if (!/^https?:\/\//i.test(b.url)) throw Object.assign(new Error('url must start with http(s)://'), { code: 400 });
+    let r; try { r = await fetch(b.url, { redirect: 'follow', signal: AbortSignal.timeout(20000) }); } catch (e) { throw Object.assign(new Error('image download failed: ' + e.message), { code: 400 }); }
+    if (!r.ok) throw Object.assign(new Error('image download failed: HTTP ' + r.status), { code: 400 });
+    type = (r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    buf = Buffer.from(await r.arrayBuffer());
+  } else throw Object.assign(new Error('url or data required'), { code: 400 });
+  if (!IMG_EXT[type]) throw Object.assign(new Error('not a supported image (jpeg, png, webp, gif): ' + (type || 'unknown')), { code: 400 });
+  if (buf.length > 10 * 1024 * 1024) throw Object.assign(new Error('image larger than 10 MB'), { code: 400 });
+  fs.mkdirSync(IMG_DIR, { recursive: true });
+  const name = uid('img') + IMG_EXT[type]; fs.writeFileSync(path.join(IMG_DIR, name), buf);
+  return 'images/' + name;
 }
 function writableTimeline(q, lang) {
   const t = findTimeline(q, lang);
@@ -400,6 +444,33 @@ async function apiWrite(req, res, url, parts) {
     t.eras.sort((a, c) => a.year - c.year);
     saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, era: { id: e.id, name: e.name, year: e.year, label: fmtYear(e.year, f) } });
   }
+  if (ep === 'character/image' && req.method === 'POST') {
+    const c = findChar(t, b.id || b.name); if (!c) return send(res, 404, { error: 'character not found' });
+    const src = await storeImage(b);
+    if (b.portrait || !c.image) c.image = src;
+    if (!b.portrait || b.gallery) (c.gallery = c.gallery || []).push({ src, caption: String(b.caption || '') });
+    c.updated = new Date().toISOString();
+    saveTimeline(t); return send(res, 201, { ok: true, src, portrait: c.image === src });
+  }
+  if (ep === 'character' && (req.method === 'POST' || req.method === 'PATCH')) {
+    if (!b.name && !b.id) return send(res, 400, { error: 'name required' });
+    t.characters = t.characters || [];
+    let c = b.id ? t.characters.find(x => x.id === b.id) : t.characters.find(x => x.name.toLowerCase() === String(b.name).toLowerCase());
+    const created = !c;
+    if (!c) { if (!b.name) return send(res, 404, { error: 'character not found (id)' }); c = { id: uid('ch'), name: String(b.name), created: new Date().toISOString() }; t.characters.push(c); }
+    if (b.newName) c.name = String(b.newName);
+    const app = Array.isArray(b.append) ? b.append : [];
+    for (const k of CHAR_TEXT) if (b[k] !== undefined) c[k] = app.includes(k) && c[k] ? c[k] + '\n\n' + String(b[k]) : String(b[k] ?? '');
+    if (b.faction !== undefined) { const f = b.faction ? findFaction(t, b.faction) : null; c.faction = f ? f.id : (b.faction || ''); }
+    if (Array.isArray(b.tags)) c.tags = b.tags.map(String).filter(Boolean);
+    if (Array.isArray(b.relations)) c.relations = b.relations.filter(r => r && r.name).map(r => ({ name: String(r.name), relation: String(r.relation || '') }));
+    c.updated = new Date().toISOString();
+    saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, character: charOut(t, c, true) });
+  }
+  if (ep === 'character' && req.method === 'DELETE') {
+    const c = findChar(t, b.id || b.name || q.get('name')); if (!c || (c.name.toLowerCase() !== String(b.name || q.get('name') || '').toLowerCase() && c.id !== b.id)) return send(res, 404, { error: 'character not found (exact name or id)' });
+    t.characters = t.characters.filter(x => x !== c); saveTimeline(t); return send(res, 200, { ok: true });
+  }
   if (ep === 'story' && (req.method === 'POST' || req.method === 'PATCH')) {
     const f = yearFmt(t, lang); t.story = t.story || [];
     let e = b.id ? t.story.find(x => x.id === b.id) : null;
@@ -490,6 +561,8 @@ async function apiV1(req, res, url) {
       'GET /api/v1/state?timeline=&year=&lang=': 'Zeitalter + Fraktionen mit Gebieten im Jahr',
       'GET /api/v1/place?name=&timeline=&year=&lang=': 'Eckdaten und Kontrolle eines Ortes im Jahr',
       'GET /api/v1/search?q=&timeline=': 'Orte suchen',
+      'GET /api/v1/characters?timeline=&q=&faction=&place=&format=text': 'Charaktere auflisten',
+      'GET /api/v1/character?timeline=&name=&format=text': 'Charakter mit allen Details',
       'GET /api/v1/story?timeline=&from=&to=&era=&q=&last=&format=text': 'Story-Abschnitte lesen',
       'GET /api/v1/summary?timeline=&year=&place=&place=&lang=&max=': 'Fertiger Text für den KI-Kontext (text/plain)',
       'GET /api/v1/travel?from=&to=&via=&class=&stay=&timeline=&year=&format=text': 'Reiseplaner: Route und Reisezeit (Hyperantrieb-Klasse)',
@@ -499,6 +572,8 @@ async function apiV1(req, res, url) {
       'POST /api/v1/faction': 'Fraktion anlegen/ändern',
       'POST /api/v1/era': 'Zeitalter anlegen/ändern',
       'POST /api/v1/control': 'Kontrolle über einen Ort setzen',
+      'POST /api/v1/character | DELETE /api/v1/character': 'Charakter anlegen/ändern (name + Felder, append) / löschen',
+      'POST /api/v1/character/image': 'Bild hinzufügen (name, url oder data, caption, portrait)',
       'POST /api/v1/story | PATCH /api/v1/story | DELETE /api/v1/story': 'Story-Abschnitt anlegen (title, text, year, places) / ändern (id, append) / löschen (id)',
       'PUT /api/v1/timeline?timeline=': 'Komplette Zeitlinie ersetzen'
     },
@@ -518,6 +593,20 @@ async function apiV1(req, res, url) {
     const t = tl(), y = year(t), o = findPlace(t, q.get('name'));
     if (!o) return send(res, 404, { error: 'place not found' });
     return send(res, 200, Object.assign({ year: y, yearLabel: fmtYear(y, yearFmt(t, lang)) }, placeInfo(t, o, y, lang)));
+  }
+  if (ep === 'characters') {
+    const t = tl(), qq = (q.get('q') || '').toLowerCase(), fq = (q.get('faction') || '').toLowerCase(), pq = (q.get('place') || '').toLowerCase();
+    let list = (t.characters || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    if (qq) list = list.filter(c => JSON.stringify([c.name, c.title, c.tags, c.bio, c.notes]).toLowerCase().includes(qq));
+    if (fq) list = list.filter(c => { const f = t.factions.find(x => x.id === c.faction); return (f ? f.name : c.faction || '').toLowerCase().includes(fq); });
+    if (pq) list = list.filter(c => (c.location || '').toLowerCase().includes(pq) || (c.homeworld || '').toLowerCase().includes(pq));
+    if (q.get('format') === 'text') return send(res, 200, list.length ? list.map(c => { const o = charOut(t, c); return `- ${o.name}${o.title ? ' – ' + o.title : ''}${o.faction ? ' · ' + o.faction : ''}${o.location ? ' · ' + o.location : ''}${o.status ? ' · ' + o.status : ''} [id: ${o.id}]`; }).join('\n') : (lang === 'en' ? 'No characters yet.' : 'Noch keine Charaktere.'), 'text/plain; charset=utf-8');
+    return send(res, 200, { timeline: t.name, count: list.length, characters: list.map(c => charOut(t, c)) });
+  }
+  if (ep === 'character') {
+    const t = tl(), c = findChar(t, q.get('name') || q.get('id')); if (!c) return send(res, 404, { error: 'character not found' });
+    if (q.get('format') === 'text') return send(res, 200, charText(t, c, lang), 'text/plain; charset=utf-8');
+    return send(res, 200, charOut(t, c, true));
   }
   if (ep === 'story') {
     const t = tl(), list = storyList(t, lang, { from: q.get('from'), to: q.get('to'), era: q.get('era'), q: q.get('q') });
@@ -601,12 +690,28 @@ const MCP_TOOLS = [
   { name: 'update_story_entry', title: 'Story-Abschnitt ändern', description: 'Abschnitt per id ändern. append=true hängt den Text an statt ihn zu ersetzen.',
     inputSchema: S({ timeline: TL, id: str('id aus list_story'), title: str('neuer Titel'), text: str('Text'), append: { type: 'boolean', description: 'Text anhängen' }, year: YR, places: { type: 'array', items: { type: 'string' } } }, ['timeline', 'id']), run: a => internalCall('PATCH', '/api/v1/story', {}, a) },
   { name: 'delete_story_entry', title: 'Story-Abschnitt löschen', description: 'Abschnitt per id löschen.', inputSchema: S({ timeline: TL, id: str('id aus list_story') }, ['timeline', 'id']), run: a => internalCall('DELETE', '/api/v1/story', {}, a) },
+  { name: 'list_characters', title: 'Charaktere auflisten', description: 'Charaktere einer Zeitlinie (Name, Rolle, Fraktion, Ort, Status). Filter: Suchtext, Fraktion, Ort.', ro: true,
+    inputSchema: S({ timeline: TL, query: str('Suchtext'), faction: str('Fraktion'), place: str('Ort/Heimatwelt'), lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/characters', { timeline: a.timeline, q: a.query, faction: a.faction, place: a.place, lang: a.lang, format: 'text' }, null, v) },
+  { name: 'get_character', title: 'Charakter lesen', description: 'Alle Details eines Charakters (Steckbrief, Aussehen, Persönlichkeit, Hintergrund, Beziehungen).', ro: true,
+    inputSchema: S({ timeline: TL, name: str('Name oder id'), lang: LG }, ['timeline', 'name']), run: (a, v) => internalCall('GET', '/api/v1/character', { timeline: a.timeline, name: a.name, lang: a.lang, format: 'text' }, null, v) },
+  { name: 'upsert_character', title: 'Charakter anlegen/ändern', description: 'Charakter anlegen oder Felder ändern (nur angegebene Felder werden geändert). append: Liste von Textfeldern, an die angehängt statt ersetzt wird (z.B. ["bio","notes"]). Texte dürfen **fett**/*kursiv* und Leerzeilen enthalten.',
+    inputSchema: S({ timeline: TL, name: str('Name (Schlüssel)'), newName: str('neuer Name'), title: str('Rolle/Rang/Titel'), species: str('Spezies'), gender: str('Geschlecht'), age: str('Alter, z.B. "34" oder "geb. 3674 BBY"'),
+      homeworld: str('Heimatwelt'), faction: str('Fraktion (Name)'), location: str('aktueller Aufenthaltsort'), status: str('z.B. lebt, tot, vermisst'), appearance: str('Aussehen'), personality: str('Persönlichkeit'),
+      abilities: str('Fähigkeiten/Ausrüstung'), bio: str('Hintergrund/Werdegang'), notes: str('Notizen'), tags: { type: 'array', items: { type: 'string' } },
+      relations: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, relation: { type: 'string' } } }, description: 'ersetzt die Beziehungsliste' },
+      append: { type: 'array', items: { type: 'string' }, description: 'Felder, an die angehängt wird' } }, ['timeline', 'name']), run: a => internalCall('POST', '/api/v1/character', {}, a) },
+  { name: 'add_character_image', title: 'Bild zu Charakter', description: 'Bild per öffentlicher URL (wird heruntergeladen und dauerhaft gespeichert) oder Base64 zum Charakter hinzufügen. portrait=true setzt es als Porträt, sonst kommt es in die Galerie.',
+    inputSchema: S({ timeline: TL, name: str('Charakter'), url: str('https-Link zum Bild'), data: str('alternativ: Base64 oder data:-URL'), caption: str('Bildunterschrift'), portrait: { type: 'boolean' } }, ['timeline', 'name']),
+    run: a => internalCall('POST', '/api/v1/character/image', {}, a) },
+  { name: 'delete_character', title: 'Charakter löschen', description: 'Charakter löschen (exakter Name oder id).', inputSchema: S({ timeline: TL, name: str('exakter Name oder id') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/character', {}, Object.assign({}, a, { id: a.name })) },
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
   { name: 'set_control', title: 'Kontrolle setzen', description: 'Legt fest, welche Fraktion einen Ort ab dem Zeitalter des angegebenen Jahres kontrolliert (faction leer = neutral).', inputSchema: S({ timeline: TL, place: str('Ort'), faction: str('Fraktion'), year: YR, era: str('oder Name des Zeitalters') }, ['timeline', 'place']), run: a => internalCall('POST', '/api/v1/control', {}, a) }
 ];
 const MCP_INSTRUCTIONS = 'Ascandir InteractiveMap: interaktive Karte (Star Wars u. eigene Welten) mit Zeitlinien, Zeitaltern, Fraktionen und Orten. ' +
   'Der Kanon ist schreibgeschützt – Änderungen nur in eigenen Zeitlinien (vorher list_timelines oder copy_timeline). Jahre als "3640 BBY"/"4 ABY". ' +
   'Vor Änderungen den Stand mit get_place/get_state lesen. Beschreibungen kurz und ohne Präfixe. ' +
+  'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
   'Die laufende Geschichte wird in Story-Abschnitten dokumentiert: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse.';
 async function handleMcp(req, res, url, writeAllowed) {
   if (req.method === 'GET') {
@@ -666,6 +771,9 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
     if (url.pathname === '/health') return send(res, 200, { ok: true });
+    const im = url.pathname.match(/^\/images\/([A-Za-z0-9_-]+\.(?:jpg|png|webp|gif))$/);
+    if (im) { const fp = path.join(IMG_DIR, im[1]); if (!fs.existsSync(fp)) return send(res, 404, 'Not found', 'text/plain');
+      const ext = path.extname(fp); return send(res, 200, fs.readFileSync(fp), { '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' }[ext], { 'Cache-Control': 'public, max-age=31536000, immutable' }); }
     if (url.pathname === '/api/v1/openapi.json') return send(res, 200, openApi(req));
     const mm = url.pathname.match(/^\/mcp(?:\/([^/]+))?\/?$/);
     if (mm) {

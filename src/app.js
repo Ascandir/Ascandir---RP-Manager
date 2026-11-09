@@ -549,7 +549,8 @@
     $('#btnPlanner').textContent = '🧭 ' + t('planner');
     $('#btnPlanner').classList.toggle('active', state.plannerOpen);
     box.hidden = !state.plannerOpen;
-    $('#info').hidden = state.plannerOpen || state.mode === 'story';
+    $('#info').hidden = state.plannerOpen || state.mode === 'story' || state.mode === 'chars';
+    $('#chars').hidden = state.plannerOpen || state.mode !== 'chars';
     $('#story').hidden = state.plannerOpen || state.mode !== 'story';
     if (!state.plannerOpen) return;
     const P = settings.planner, fan = state.world.type === 'fantasy';
@@ -575,7 +576,7 @@
         <label class="field"><span>${esc(t('plClass'))}</span><select id="plCls">${TR.HYPER_CLASSES.map(c => `<option value="${c}" ${+c === +P.cls ? 'selected' : ''}>${esc(t('plClassN', String(c).replace('.', settings.lang === 'en' ? '.' : ',')))}${esc(classHint(c))}</option>`).join('')}</select></label>`}
       <label class="field"><span>${esc(t('plStay'))}</span><input id="plStay" type="number" min="0" step="1" value="${P.stay}"></label>
       <div id="plResult">${planResultHtml(r)}</div>`;
-    $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); renderStory(); draw(); };
+    $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); renderStory(); renderChars(); draw(); };
     $$('.pl-in').forEach(inp => inp.addEventListener('change', () => { P.stops[+inp.dataset.i] = inp.value; saveSoon(); renderPlanner(); draw(); }));
     $$('.pl-pick').forEach(b => b.addEventListener('click', () => { state.pick = state.pick === +b.dataset.i ? null : +b.dataset.i; renderPlanner(); if (state.pick != null) { toast(t('plPickHint')); if (isMobile()) setSheet(false); } }));
     $$('.pl-del').forEach(b => b.addEventListener('click', () => { P.stops.splice(+b.dataset.i, 1); saveSoon(); renderPlanner(); draw(); }));
@@ -1580,9 +1581,11 @@
           ${(o.from != null && o.from !== '') || (o.to != null && o.to !== '') ? `<span class="k">${esc(t('exists'))}</span><span>${fmtYear(o.from)} ${esc(t('to'))} ${fmtYear(o.to)}</span>` : ''}
         </div>
         <div class="desc">${rich(descOf(o))}</div>
+        ${charsAt(o).length ? `<div class="chars-here"><b>👤 ${esc(t('charsHere'))}:</b> ${charsAt(o).map(c => `<a href="#" data-char="${esc(c.id)}">${esc(c.name)}</a>`).join(', ')}</div>` : ''}
         ${factsRows(o) ? `<h3 class="facts-h">${esc(t('facts'))}</h3><div class="kv facts">${factsRows(o)}</div>` : ''}
         ${factsOf(o).notable ? `<div class="notable"><b>${esc(t('notable'))}:</b> ${rich(factsOf(o).notable)}</div>` : ''}`;
       box.querySelectorAll('[data-go]').forEach(a => a.addEventListener('click', ev => { ev.preventDefault(); centerOn(objMap[a.dataset.go]); }));
+      box.querySelectorAll('[data-char]').forEach(a => a.addEventListener('click', ev => { ev.preventDefault(); openChar(a.dataset.char); }));
       return;
     }
     const parentOpts = state.tl.objects.filter(x => x.id !== o.id && !isDescendant(x, o)).sort((a, b) => a.name.localeCompare(b.name))
@@ -1837,6 +1840,7 @@
     $('#tabEdit').classList.toggle('active', state.mode === 'edit');
     $('#tabSettings').classList.toggle('active', state.mode === 'settings');
     $('#tabStory').classList.toggle('active', state.mode === 'story');
+    $('#tabChars').classList.toggle('active', state.mode === 'chars');
     $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
     const guest = isGuest(), si = srvInfo();
     for (const id of ['#tabEdit', '#tabSettings']) $(id).hidden = guest;
@@ -2025,9 +2029,9 @@
 
   // ------------------------------------------------------------- Modus & Einstellungen
   function setMode(m) {
-    if (m !== 'view' && m !== 'story' && isGuest()) { loginDialog(); return; }
+    if (m !== 'view' && m !== 'story' && m !== 'chars' && isGuest()) { loginDialog(); return; }
     state.mode = m;
-    if (isMobile()) setSheet(m === 'edit' || m === 'story');
+    if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars');
     $('#settingsView').hidden = m !== 'settings';
     if (m === 'settings') renderSettings();
     renderAll(true);
@@ -2036,6 +2040,7 @@
   $('#tabView').addEventListener('click', () => setMode('view'));
   $('#tabEdit').addEventListener('click', () => setMode('edit'));
   $('#tabStory').addEventListener('click', () => setMode(state.mode === 'story' ? 'view' : 'story'));
+  $('#tabChars').addEventListener('click', () => setMode(state.mode === 'chars' ? 'view' : 'chars'));
   $('#eraDesc').addEventListener('click', () => setMode('story'));
   $('#eraName').addEventListener('click', () => setMode('story'));
   $('#tabSettings').addEventListener('click', () => setMode(state.mode === 'settings' ? 'view' : 'settings'));
@@ -2331,11 +2336,121 @@
     box.querySelectorAll('.story-chapters li').forEach(li => li.onclick = () => { const x = state.tl.eras.find(q => q.id === li.dataset.id); if (x) { setYear(x.year); fitTrack(); } });
   }
 
+  // ------------------------------------------------------------- Charaktere
+  let charSel = null, charEdit = false, charQ = '';
+  const CH_INFO = ['species', 'gender', 'age', 'homeworld', 'location', 'status'];
+  const CH_TEXT = ['appearance', 'personality', 'abilities', 'bio', 'notes'];
+  const charsAt = o => (state.tl.characters || []).filter(c => { const n = o.name.toLowerCase(); return (c.location || '').toLowerCase() === n || (c.homeworld || '').toLowerCase() === n; });
+  function openChar(id) { charSel = id; charEdit = false; if (state.plannerOpen) state.plannerOpen = false; setMode('chars'); }
+  const placeByName = n => { const q = String(n || '').toLowerCase().trim(); return q && (state.tl.objects.find(o => o.name.toLowerCase() === q) || (isSW() ? atlasObjs().find(o => o.name.toLowerCase() === q) : null)); };
+  function charImgBox(src, cls) { return src ? `<img class="${cls}" src="${esc(src)}" alt="" data-zoom="${esc(src)}">` : `<div class="${cls} ph">👤</div>`; }
+  function zoomImg(src, cap) {
+    const d = document.createElement('div'); d.className = 'lightbox';
+    d.innerHTML = `<img src="${esc(src)}" alt="">${cap ? `<div class="cap">${esc(cap)}</div>` : ''}`; d.onclick = () => d.remove(); document.body.appendChild(d);
+  }
+  function resizeImage(file, max) {
+    return new Promise((res, rej) => {
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => { const sc = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg', 0.86)); };
+      img.onerror = () => rej(new Error(t('imgError'))); img.src = url;
+    });
+  }
+  function renderChars(force) {
+    const box = $('#chars'), show = state.mode === 'chars' && !state.plannerOpen;
+    box.hidden = !show; if (show) $('#info').hidden = true;
+    if (!show) { charEdit = false; return; }
+    if (charEdit && $('#chForm') && !force) return; // Eingaben beim Bearbeiten nicht überschreiben
+    const list = (state.tl.characters ||= []), can = canEditTl(), c = list.find(x => x.id === charSel);
+    if (c && charEdit && can) return charForm(box, c);
+    if (c) return charDetail(box, c, can);
+    charSel = null;
+    const q = charQ.toLowerCase();
+    const shown = list.filter(x => !q || JSON.stringify([x.name, x.title, x.location, x.tags]).toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+    box.innerHTML = `
+      <div class="story-kicker">👤 ${esc(t('tabChars'))} · ${esc(state.tl.name)}</div>
+      <div class="row" style="margin:8px 0"><input id="chSearch" placeholder="${esc(t('charSearch'))}" value="${esc(charQ)}">${can ? `<button id="chNew" class="fixed primary">＋</button>` : ''}</div>
+      <div class="char-list">${shown.map(x => { const f = x.faction && facById(x.faction); return `
+        <div class="char-card" data-id="${esc(x.id)}">${charImgBox(x.image, 'thumb')}
+          <div class="cc-main"><b>${esc(x.name)}</b>${x.title ? `<div class="dim">${esc(x.title)}</div>` : ''}
+            <div class="dim small">${f ? `<span style="color:${esc(f.color)}">■</span> ${esc(f.name)}` : x.faction && !f ? esc(x.faction) : ''}${x.location ? ` · 📍 ${esc(x.location)}` : ''}${x.status ? ` · ${esc(x.status)}` : ''}</div></div></div>`; }).join('')
+        || `<p class="hint">${esc(list.length ? t('charNoMatch') : t('charEmpty'))}</p>`}</div>`;
+    $('#chSearch').addEventListener('input', e => { charQ = e.target.value; const pos = e.target.selectionStart; renderChars(); const el = $('#chSearch'); el.focus(); el.setSelectionRange(pos, pos); });
+    box.querySelectorAll('.char-card').forEach(el => el.onclick = () => { charSel = el.dataset.id; renderChars(); });
+    const nb = $('#chNew'); if (nb) nb.onclick = () => {
+      const name = prompt(t('charNewName')); if (!name || !name.trim()) return;
+      pushUndo(); const n = { id: uid('ch'), name: name.trim(), created: new Date().toISOString() }; list.push(n); charSel = n.id; charEdit = true; afterEdit(); renderChars(true);
+    };
+  }
+  function charDetail(box, c, can) {
+    const f = c.faction && facById(c.faction), pl = placeByName(c.location), hw = placeByName(c.homeworld);
+    const val = k => k === 'location' && pl ? `<a href="#" data-place="${esc(pl.id)}">📍 ${esc(c.location)}</a>` : k === 'homeworld' && hw ? `<a href="#" data-place="${esc(hw.id)}">${esc(c.homeworld)}</a>` : esc(c[k]);
+    const rel = (c.relations || []).map(r => { const o = (state.tl.characters || []).find(x => x.name.toLowerCase() === r.name.toLowerCase()); return `${o ? `<a href="#" data-cid="${esc(o.id)}">${esc(r.name)}</a>` : esc(r.name)}${r.relation ? ` <span class="dim">(${esc(r.relation)})</span>` : ''}`; });
+    box.innerHTML = `
+      <div class="row" style="margin-bottom:8px"><button id="chBack" class="fixed">← ${esc(t('tabChars'))}</button>${can ? `<button id="chEdit">✎ ${esc(t('charEdit'))}</button>` : ''}</div>
+      <div class="char-head">${charImgBox(c.image, 'portrait')}
+        <div><div class="info-title">${esc(c.name)}</div>${c.title ? `<div class="info-type">${esc(c.title)}</div>` : ''}
+          ${f ? `<div><span style="color:${esc(f.color)}">■</span> ${esc(f.name)}</div>` : c.faction ? `<div>${esc(c.faction)}</div>` : ''}</div></div>
+      <div class="kv">${CH_INFO.filter(k => c[k]).map(k => `<span class="k">${esc(t('ch_' + k))}</span><span>${val(k)}</span>`).join('')}
+        ${rel.length ? `<span class="k">${esc(t('ch_relations'))}</span><span>${rel.join(', ')}</span>` : ''}
+        ${(c.tags || []).length ? `<span class="k">Tags</span><span>${c.tags.map(x => `<span class="tag">${esc(x)}</span>`).join(' ')}</span>` : ''}</div>
+      ${CH_TEXT.filter(k => c[k]).map(k => `<h3 class="facts-h">${esc(t('ch_' + k))}</h3><div class="story-text">${rich(c[k])}</div>`).join('')}
+      ${(c.gallery || []).length ? `<h3 class="facts-h">${esc(t('charGallery'))}</h3><div class="char-gallery">${c.gallery.map(g => `<figure><img src="${esc(g.src)}" alt="" data-zoom="${esc(g.src)}" data-cap="${esc(g.caption || '')}">${g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure>`).join('')}</div>` : ''}`;
+    $('#chBack').onclick = () => { charSel = null; renderChars(); };
+    const eb = $('#chEdit'); if (eb) eb.onclick = () => { charEdit = true; renderChars(true); };
+    box.querySelectorAll('[data-zoom]').forEach(im => im.onclick = () => zoomImg(im.dataset.zoom, im.dataset.cap));
+    box.querySelectorAll('[data-place]').forEach(a => a.onclick = ev => { ev.preventDefault(); const o = objMap[a.dataset.place] || placeByName(a.textContent.replace('📍', '').trim()); if (o) { centerOn(o, o.atlas ? 3 : 1.4); if (isMobile()) setSheet(false); } });
+    box.querySelectorAll('[data-cid]').forEach(a => a.onclick = ev => { ev.preventDefault(); charSel = a.dataset.cid; renderChars(); });
+  }
+  function charForm(box, c) {
+    box.innerHTML = `<div id="chForm">
+      <h3>✎ ${esc(c.name)}</h3>
+      <div class="char-head">${charImgBox(c.image, 'portrait')}<div class="col">
+        <button id="chImg">🖼 ${esc(t(c.image ? 'imgChange' : 'imgUpload'))}</button>${c.image ? `<button id="chImgDel" class="danger">✕ ${esc(t('charImgRemove'))}</button>` : ''}
+        <input type="file" id="chImgFile" accept="image/*" hidden></div></div>
+      <label class="field"><span>${esc(t('name'))}</span><input data-f="name" value="${esc(c.name)}"></label>
+      <label class="field"><span>${esc(t('ch_title'))}</span><input data-f="title" value="${esc(c.title || '')}"></label>
+      <label class="field"><span>${esc(t('ch_faction'))}</span><select data-f="faction"><option value="">–</option>${state.tl.factions.map(f => `<option value="${esc(f.id)}" ${f.id === c.faction ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}
+        ${c.faction && !facById(c.faction) ? `<option value="${esc(c.faction)}" selected>${esc(c.faction)}</option>` : ''}</select></label>
+      <div class="row">${['species', 'gender'].map(k => `<label class="field"><span>${esc(t('ch_' + k))}</span><input data-f="${k}" value="${esc(c[k] || '')}"></label>`).join('')}</div>
+      <div class="row">${['age', 'status'].map(k => `<label class="field"><span>${esc(t('ch_' + k))}</span><input data-f="${k}" value="${esc(c[k] || '')}"></label>`).join('')}</div>
+      <div class="row">${['homeworld', 'location'].map(k => `<label class="field"><span>${esc(t('ch_' + k))}</span><input data-f="${k}" list="searchList" value="${esc(c[k] || '')}"></label>`).join('')}</div>
+      ${CH_TEXT.map(k => `<label class="field"><span>${esc(t('ch_' + k))}</span><textarea data-f="${k}" rows="${k === 'bio' ? 6 : 3}">${esc(c[k] || '')}</textarea></label>`).join('')}
+      <label class="field"><span>${esc(t('ch_relations'))} <span class="dim">(${esc(t('charRelHint'))})</span></span><textarea data-f="relations" rows="3">${esc((c.relations || []).map(r => r.name + (r.relation ? ': ' + r.relation : '')).join('\n'))}</textarea></label>
+      <label class="field"><span>Tags <span class="dim">(${esc(t('commaSep'))})</span></span><input data-f="tags" value="${esc((c.tags || []).join(', '))}"></label>
+      <h3 class="facts-h">${esc(t('charGallery'))}</h3>
+      <div class="char-gallery edit">${(c.gallery || []).map((g, i) => `<figure><img src="${esc(g.src)}" alt=""><input class="gcap" data-i="${i}" placeholder="${esc(t('charCaption'))}" value="${esc(g.caption || '')}">
+        <div class="row"><button class="gport fixed" data-i="${i}" title="${esc(t('charAsPortrait'))}">👤</button><button class="gdel fixed danger" data-i="${i}">✕</button></div></figure>`).join('')}</div>
+      <div class="row" style="margin:6px 0 10px"><button id="chGalAdd">＋ ${esc(t('charAddImage'))}</button><input type="file" id="chGalFile" accept="image/*" multiple hidden></div>
+      <p class="hint">${esc(t('storyFmt'))}</p>
+      <div class="row"><button id="chDone" class="primary">${esc(t('ok'))}</button><button id="chDel" class="danger">${esc(t('delete'))}</button></div></div>`;
+    let pushed = false; const mark = () => { if (!pushed) { pushUndo(); pushed = true; } };
+    const touch = () => { c.updated = new Date().toISOString(); saveSoon(); };
+    box.querySelectorAll('[data-f]').forEach(el => el.addEventListener('change', () => {
+      mark(); const k = el.dataset.f, v = el.value;
+      if (k === 'tags') c.tags = v.split(',').map(x => x.trim()).filter(Boolean);
+      else if (k === 'relations') c.relations = v.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const i = l.indexOf(':'); return i > 0 ? { name: l.slice(0, i).trim(), relation: l.slice(i + 1).trim() } : { name: l, relation: '' }; });
+      else if (k === 'name') { if (v.trim()) c.name = v.trim(); }
+      else c[k] = v;
+      touch();
+    }));
+    $('#chImg').onclick = () => $('#chImgFile').click();
+    $('#chImgFile').onchange = async ev => { const f = ev.target.files[0]; if (!f) return; try { const d = await resizeImage(f, 768); mark(); c.image = d; touch(); renderChars(true); } catch (e) { alert(e.message); } };
+    const idl = $('#chImgDel'); if (idl) idl.onclick = () => { mark(); delete c.image; touch(); renderChars(true); };
+    $('#chGalAdd').onclick = () => $('#chGalFile').click();
+    $('#chGalFile').onchange = async ev => { const fs = [...ev.target.files]; if (!fs.length) return; mark(); for (const f of fs) { try { (c.gallery ||= []).push({ src: await resizeImage(f, 1280), caption: '' }); } catch (e) { alert(e.message); } } touch(); renderChars(true); };
+    box.querySelectorAll('.gcap').forEach(el => el.onchange = () => { mark(); c.gallery[+el.dataset.i].caption = el.value; touch(); });
+    box.querySelectorAll('.gdel').forEach(b => b.onclick = () => { mark(); c.gallery.splice(+b.dataset.i, 1); touch(); renderChars(true); });
+    box.querySelectorAll('.gport').forEach(b => b.onclick = () => { mark(); c.image = c.gallery[+b.dataset.i].src; touch(); renderChars(true); });
+    $('#chDone').onclick = () => { if (document.activeElement && document.activeElement.dispatchEvent) document.activeElement.dispatchEvent(new Event('change')); charEdit = false; afterEdit(); renderChars(true); };
+    $('#chDel').onclick = () => { if (!confirm(t('charDelQ', c.name))) return; pushUndo(); state.tl.characters = state.tl.characters.filter(x => x !== c); charSel = null; charEdit = false; afterEdit(); renderChars(true); };
+  }
+
   function renderAll() {
     editVersion++;
     rebuildTree();
     document.body.classList.toggle('is-sw', isSW());
-    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory();
+    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory(); renderChars();
     lastEraId = era() ? era().id : null; renderYear(); updateToolHint(); draw();
   }
 

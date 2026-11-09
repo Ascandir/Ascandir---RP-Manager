@@ -85,6 +85,16 @@ Im Reiter *Story* gibt es pro Zeitalter beliebig viele **Abschnitte** (Titel, Ja
 
 Die Abschnitte werden in der Zeitlinien-Datei unter `"story"` gespeichert.
 
+### Charaktere
+
+Der Reiter *Charaktere* verwaltet die Figuren einer Zeitlinie. Jede Figur hat einen Steckbrief (Rolle, Fraktion, Spezies, Alter, Heimatwelt, Aufenthaltsort, Status), Textfelder (Aussehen, Persönlichkeit, Fähigkeiten, Hintergrund, Notizen), Beziehungen, Tags, ein Porträt und eine Bildergalerie.
+
+- Aufenthaltsort und Heimatwelt sind mit der Karte verknüpft: Klick springt zum Ort, und im Infofeld eines Ortes stehen die Charaktere, die dort sind.
+- **MCP (ChatGPT/Claude):** `list_characters`, `get_character`, `upsert_character` (nur angegebene Felder werden geändert, `append` hängt an), `add_character_image` (Bild per Link – wird heruntergeladen und dauerhaft im Datenordner unter `images/` gespeichert – oder Base64; `portrait: true` setzt es als Porträt), `delete_character`.
+- **REST:** `GET /api/v1/characters`, `GET /api/v1/character?name=…`, `POST/DELETE /api/v1/character`, `POST /api/v1/character/image`.
+- Bilder, die du selbst im Editor hochlädst, werden verkleinert direkt in der Zeitlinien-Datei gespeichert.
+- `get_summary` nennt die Charaktere mit Rolle und Aufenthaltsort.
+
 ## Daten per JSON / GeoJSON bearbeiten
 
 Welten und Zeitlinien sind lesbare JSON-Dateien im Datenordner (*Datei → Datenordner öffnen*). Wenn du sie im Texteditor änderst, lädt die App die Änderungen automatisch neu. *Datei → Als JSON bearbeiten* öffnet einen Editor direkt in der App.
