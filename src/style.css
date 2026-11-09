@@ -406,3 +406,21 @@ body[data-theme="fantasy"] .story-text { font-size: 15px; }
 .rk { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gc); margin-right: 5px; }
 #chars .k.sub { font-size: 11.5px; opacity: .7; margin-top: 6px; }
 #chForm h4 { margin: 12px 0 4px; color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+
+.story-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 18px; }
+.story-bar h3 { margin: 0; }
+.seg.small button { padding: 3px 9px; font-size: 12px; }
+.chap-head { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 2px; padding-bottom: 4px; border-bottom: 1px solid var(--accent); }
+.chap-head.none { border-bottom-color: var(--border, #2a3446); }
+.chap-head .chap-nr { color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: .7px; font-weight: 700; white-space: nowrap; }
+.chap-head b { flex: 1; font-size: 15px; }
+.chap-head .chap-btns button { padding: 1px 7px; }
+.chap-sum { font-size: 13px; opacity: .8; margin: 2px 0 6px; font-style: italic; }
+.chap-edit { display: flex; flex-direction: column; gap: 6px; margin: 12px 0 4px; padding: 8px; border: 1px solid var(--accent); border-radius: 8px; }
+.chap-edit #chapTitle { font-weight: 600; }
+.sec-add { align-self: flex-start; }
+
+.story-sec .sec-head { flex-wrap: wrap; }
+.story-sec .sec-head b { min-width: 7em; overflow-wrap: anywhere; }
+.story-sec .sec-btns { display: inline-flex; gap: 3px; margin-left: auto; }
+.story-sec .sec-btns button { padding: 1px 6px; }

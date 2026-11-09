@@ -255,7 +255,7 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
       L.push(`- ${fa.name}: ${parts.join('; ') || (de ? 'eigene Einflussgebiete' : 'own spheres of influence')}`);
     }
   }
-  const st = (tl.story || []).filter(e => e.year <= year).sort(storySort);
+  const st = (tl.story || []).filter(e => e.year <= year).sort(storySortT(tl));
   const chs = tl.characters || [];
   if (chs.length) L.push((de ? 'Charaktere: ' : 'Characters: ') + chs.slice(0, 20).map(c => `${c.name}${c.title ? ' (' + c.title + ')' : ''}${c.location ? ' @ ' + c.location : ''}`).join(' · ') + (chs.length > 20 ? ' …' : ''));
   if (st.length) L.push((de ? `Story bisher (${st.length} Abschnitte, neueste zuletzt): ` : `Story so far (${st.length} sections, latest last): `) + st.slice(-5).map(e => `${e.title} (${fmtYear(e.year, f)})`).join(' · '));
@@ -283,10 +283,24 @@ const uid = p => p + crypto.randomBytes(5).toString('hex');
 function slug(n) { return (String(n || 'zeitlinie').normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'zeitlinie').slice(0, 60); }
 // ---------------------------------------------------------------- Story-Abschnitte (tl.story)
 // Reihenfolge: Jahr, dann Position innerhalb des Jahres (order), dann Anlagezeit
+// Kapitel (tl.chapters) kommen zuerst: Abschnitte ohne Kapitel vorne, dann Kapitel in ihrer Reihenfolge
 const storySort = (a, b) => a.year - b.year || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.created || '').localeCompare(String(b.created || ''));
+const chapSorted = t => (t.chapters || []).slice().sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
+function storySortT(t) {
+  const rk = new Map(chapSorted(t).map((c, i) => [c.id, i]));
+  const r = e => (e.chapter && rk.has(e.chapter) ? rk.get(e.chapter) : -1);
+  return (a, b) => r(a) - r(b) || storySort(a, b);
+}
+function chapterFor(t, v, create) {
+  const q = String(v || '').trim().replace(/^(kapitel|chapter)\s*\d+\s*[:.\-–]\s*/i, '').trim(); if (!q) return null;
+  t.chapters = t.chapters || [];
+  let c = t.chapters.find(x => x.id === q || x.title.toLowerCase() === q.toLowerCase());
+  if (!c && create) { c = { id: uid('kap'), title: q, summary: '', order: Math.max(-1, ...t.chapters.map(x => x.order ?? -1)) + 1 }; t.chapters.push(c); }
+  return c || null;
+}
 // Abschnitt e innerhalb seines Jahres hinter "after" (oder an Index pos) einordnen und Positionen neu durchzählen
 function storyPlace(t, e, after) {
-  const same = t.story.filter(x => x.year === e.year && x !== e).sort(storySort);
+  const same = t.story.filter(x => x.year === e.year && x !== e && (x.chapter || '') === (e.chapter || '')).sort(storySort);
   let i = same.length;
   if (after === 'start') i = 0; else if (after) { const k = same.findIndex(x => x.id === after); if (k >= 0) i = k + 1; }
   same.splice(i, 0, e); same.forEach((x, n) => { x.order = n; });
@@ -294,17 +308,25 @@ function storyPlace(t, e, after) {
 function storyList(t, lang, o = {}) {
   const f = yearFmt(t, lang), from = o.from != null ? parseYear(o.from, f) : null, to = o.to != null ? parseYear(o.to, f) : null;
   const q = String(o.q || '').toLowerCase().trim();
-  let list = (t.story || []).slice().sort(storySort);
+  let list = (t.story || []).slice().sort(storySortT(t));
+  if (o.chapter) { const c = chapterFor(t, o.chapter); list = list.filter(e => c ? e.chapter === c.id : false); }
   if (from != null) list = list.filter(e => e.year >= from);
   if (to != null) list = list.filter(e => e.year <= to);
   if (o.era) { const er = t.eras.find(x => x.name.toLowerCase() === String(o.era).toLowerCase() || x.id === o.era); if (er) { const s2 = t.eras.slice().sort((a, b) => a.year - b.year), nx = s2[s2.indexOf(er) + 1]; list = list.filter(e => e.year >= er.year && (!nx || e.year < nx.year)); } }
   if (q) list = list.filter(e => (e.title + ' ' + e.text + ' ' + (e.places || []).join(' ')).toLowerCase().includes(q));
-  return list.map((e, i) => ({ id: e.id, nr: i + 1, year: e.year, yearLabel: fmtYear(e.year, f), era: (eraAt(t, e.year) || {}).name || null, title: e.title, text: e.text, places: e.places || [], created: e.created, updated: e.updated }));
+  const cm = new Map(chapSorted(t).map((c, i) => [c.id, { nr: i + 1, title: c.title }]));
+  return list.map((e, i) => ({ id: e.id, nr: i + 1, chapter: cm.get(e.chapter) ? cm.get(e.chapter).title : null, chapterNr: cm.get(e.chapter) ? cm.get(e.chapter).nr : null, year: e.year, yearLabel: fmtYear(e.year, f), era: (eraAt(t, e.year) || {}).name || null, title: e.title, text: e.text, places: e.places || [], created: e.created, updated: e.updated }));
 }
 function storyText(t, lang, list) {
   const de = lang !== 'en';
   if (!list.length) return de ? `Noch keine Story-Abschnitte in „${t.name}“.` : `No story sections in "${t.name}" yet.`;
-  return list.map(e => `## ${e.title} (${e.yearLabel}${e.era ? ' · ' + e.era : ''}) [id: ${e.id}]\n${e.places.length ? (de ? 'Orte: ' : 'Places: ') + e.places.join(', ') + '\n' : ''}${e.text}`).join('\n\n');
+  let cur; const out = [];
+  for (const e of list) {
+    if (e.chapter !== cur) { cur = e.chapter; out.push(e.chapter ? `# ${de ? 'Kapitel' : 'Chapter'} ${e.chapterNr}: ${e.chapter}` + (() => { const c = chapterFor(t, e.chapter); return c && c.summary ? '\n' + c.summary : ''; })() : `# ${de ? 'Ohne Kapitel' : 'No chapter'}`); }
+    out.push(`## ${e.title} (${e.yearLabel}${e.era ? ' · ' + e.era : ''}) [id: ${e.id}]\n${e.places.length ? (de ? 'Orte: ' : 'Places: ') + e.places.join(', ') + '\n' : ''}${e.text}`);
+  }
+  const chs = chapSorted(t); if (chs.length) out.unshift((de ? 'Kapitel: ' : 'Chapters: ') + chs.map((c, i) => `${i + 1}. ${c.title} [id: ${c.id}]`).join(' · '));
+  return out.join('\n\n');
 }
 // ---------------------------------------------------------------- Charaktere (tl.characters)
 const CHAR_TEXT = ['title', 'species', 'gender', 'age', 'homeworld', 'organization', 'master', 'location', 'status', 'appearance', 'personality', 'bio', 'abilities', 'knowledge', 'threads', 'notes'];
@@ -516,11 +538,14 @@ async function apiWrite(req, res, url, parts) {
     if (!e) {
       if (!b.title && !b.text) return send(res, 400, { error: 'title or text required' });
       const aft = b.after && b.after !== 'start' ? t.story.find(x => x.id === b.after) : null;
-      const last = aft || t.story.slice().sort(storySort)[t.story.length - 1];
+      const last = aft || t.story.slice().sort(storySortT(t))[t.story.length - 1];
       const s2 = t.eras.slice().sort((a, c) => a.year - c.year);
       e = { id: uid('st'), year: y != null ? y : last ? last.year : s2.length ? s2[s2.length - 1].year : 0, title: String(b.title || '').trim() || (lang === 'en' ? 'Section' : 'Abschnitt') + ' ' + (t.story.length + 1), text: String(b.text || ''), places: [], created: now };
+      // Kapitel: angegeben (wird bei Bedarf angelegt), sonst das des Vorgängers
+      const ch = b.chapter ? chapterFor(t, b.chapter, true) : null; e.chapter = ch ? ch.id : (last && last.chapter) || '';
       t.story.push(e); storyPlace(t, e, b.after);
     } else {
+      if (b.chapter !== undefined) { const ch = b.chapter ? chapterFor(t, b.chapter, true) : null; const nid = ch ? ch.id : ''; if (nid !== (e.chapter || '')) { e.chapter = nid; if (y != null) e.year = y; storyPlace(t, e, b.after); } }
       if (y != null && y !== e.year) { e.year = y; storyPlace(t, e, b.after); }
       else if (b.after) storyPlace(t, e, b.after);
       if (b.title !== undefined) e.title = String(b.title);
@@ -530,6 +555,26 @@ async function apiWrite(req, res, url, parts) {
     if (Array.isArray(b.places)) e.places = b.places.map(String).filter(Boolean);
     saveTimeline(t); return send(res, req.method === 'POST' && !b.id ? 201 : 200, { ok: true, section: storyList(t, lang).find(x => x.id === e.id) });
   }
+  if (ep === 'chapter' && (req.method === 'POST' || req.method === 'PATCH')) {
+    t.chapters = t.chapters || [];
+    let c = chapterFor(t, b.id || b.title);
+    const created = !c; if (!c) { if (!b.title) return send(res, 400, { error: 'title required' }); c = chapterFor(t, b.title, true); }
+    if (b.newTitle) c.title = String(b.newTitle).trim().replace(/^(kapitel|chapter)\s*\d+\s*[:.\-–]\s*/i, '').trim() || c.title;
+    if (b.summary !== undefined) c.summary = String(b.summary);
+    if (b.after !== undefined) { const list = chapSorted(t).filter(x => x !== c); let i = list.length; if (b.after === 'start') i = 0; else { const k = list.findIndex(x => x.id === b.after || x.title.toLowerCase() === String(b.after).toLowerCase()); if (k >= 0) i = k + 1; } list.splice(i, 0, c); list.forEach((x, n) => { x.order = n; }); }
+    if (Array.isArray(b.sections)) for (const id of b.sections) { const e = (t.story || []).find(x => x.id === id); if (e) { e.chapter = c.id; storyPlace(t, e); } }
+    saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, chapter: { id: c.id, nr: chapSorted(t).indexOf(c) + 1, title: c.title, summary: c.summary || '' } });
+  }
+  if (ep === 'chapter' && req.method === 'DELETE') {
+    const c = chapterFor(t, b.id || b.title || q.get('title')); if (!c) return send(res, 404, { error: 'chapter not found' });
+    t.chapters = t.chapters.filter(x => x !== c); for (const e of t.story || []) if (e.chapter === c.id) e.chapter = '';
+    chapSorted(t).forEach((x, n) => { x.order = n; }); saveTimeline(t); return send(res, 200, { ok: true, note: 'sections kept without chapter' });
+  }
+  if (ep === 'chapter/order' && req.method === 'POST') {
+    const ids = Array.isArray(b.ids) ? b.ids : []; const cs = ids.map(id => chapterFor(t, id)).filter(Boolean);
+    const rest = chapSorted(t).filter(x => !cs.includes(x)); cs.concat(rest).forEach((x, n) => { x.order = n; });
+    saveTimeline(t); return send(res, 200, { ok: true, order: chapSorted(t).map((c, i) => `${i + 1}. ${c.title}`) });
+  }
   if (ep === 'story/order' && req.method === 'POST') {
     const ids = Array.isArray(b.ids) ? b.ids.map(String) : []; if (!ids.length) return send(res, 400, { error: 'ids required (story section ids in chronological order)' });
     t.story = t.story || []; const rank = new Map(ids.map((id, i) => [id, i])), unknown = ids.filter(id => !t.story.some(x => x.id === id));
@@ -537,15 +582,15 @@ async function apiWrite(req, res, url, parts) {
     if (b.adjustYears) { // Jahre absteigender Einträge an den Vorgänger angleichen
       let prev = null; for (const id of ids) { const e = t.story.find(x => x.id === id); if (!e) continue; if (prev && e.year < prev.year) { warn.push(`${e.title}: ${fmtYear(e.year, f)} → ${fmtYear(prev.year, f)}`); e.year = prev.year; } prev = e; }
     }
-    const years = [...new Set(t.story.map(x => x.year))];
-    for (const y of years) {
-      const grp = t.story.filter(x => x.year === y).sort((a, c) => (rank.has(a.id) ? rank.get(a.id) : 1e6 + (a.order ?? 1e5)) - (rank.has(c.id) ? rank.get(c.id) : 1e6 + (c.order ?? 1e5)) || storySort(a, c));
+    const keys = [...new Set(t.story.map(x => x.year + '|' + (x.chapter || '')))];
+    for (const ky of keys) {
+      const grp = t.story.filter(x => x.year + '|' + (x.chapter || '') === ky).sort((a, c) => (rank.has(a.id) ? rank.get(a.id) : 1e6 + (a.order ?? 1e5)) - (rank.has(c.id) ? rank.get(c.id) : 1e6 + (c.order ?? 1e5)) || storySort(a, c));
       grp.forEach((x, n) => { x.order = n; });
     }
     const conflicts = []; let prev = null;
     if (!b.adjustYears) for (const id of ids) { const e = t.story.find(x => x.id === id); if (!e) continue; if (prev && e.year < prev.year) conflicts.push(`„${e.title}“ (${fmtYear(e.year, f)}) soll nach „${prev.title}“ (${fmtYear(prev.year, f)}) kommen – Jahr passt nicht; mit adjustYears=true angleichen oder per update_story_entry ändern`); prev = e; }
     saveTimeline(t);
-    return send(res, 200, { ok: true, unknownIds: unknown, yearChanges: warn, conflicts, order: storyList(t, lang).map(e => `${e.nr}. ${e.title} (${e.yearLabel})`) });
+    return send(res, 200, { ok: true, unknownIds: unknown, yearChanges: warn, conflicts, order: storyList(t, lang).map(e => `${e.nr}. ${e.chapter ? '[' + e.chapter + '] ' : ''}${e.title} (${e.yearLabel})`) });
   }
   if (ep === 'story' && req.method === 'DELETE') {
     const id = b.id || q.get('id'); const n = (t.story || []).length;
@@ -630,6 +675,7 @@ async function apiV1(req, res, url) {
       'POST /api/v1/control': 'Kontrolle über einen Ort setzen',
       'POST /api/v1/character | DELETE /api/v1/character': 'Charakter anlegen/ändern (name + Felder, append) / löschen',
       'POST /api/v1/character/image': 'Bild hinzufügen (name, url oder data, caption, portrait)',
+      'POST /api/v1/chapter | DELETE /api/v1/chapter | POST /api/v1/chapter/order': 'Kapitel anlegen/ändern (title, newTitle, summary, after, sections) / löschen / sortieren',
       'POST /api/v1/story/order': 'Story-Abschnitte sortieren (ids, adjustYears)',
       'POST /api/v1/story | PATCH /api/v1/story | DELETE /api/v1/story': 'Story-Abschnitt anlegen (title, text, year, places) / ändern (id, append) / löschen (id)',
       'PUT /api/v1/timeline?timeline=': 'Komplette Zeitlinie ersetzen'
@@ -667,7 +713,7 @@ async function apiV1(req, res, url) {
     return send(res, 200, charOut(t, c, true));
   }
   if (ep === 'story') {
-    const t = tl(), list = storyList(t, lang, { from: q.get('from'), to: q.get('to'), era: q.get('era'), q: q.get('q') });
+    const t = tl(), list = storyList(t, lang, { chapter: q.get('chapter'), from: q.get('from'), to: q.get('to'), era: q.get('era'), q: q.get('q') });
     const lim = +q.get('last') || 0, out = lim > 0 ? list.slice(-lim) : list;
     if (q.get('format') === 'text') return send(res, 200, storyText(t, lang, out), 'text/plain; charset=utf-8');
     return send(res, 200, { timeline: t.name, count: list.length, sections: out });
@@ -742,12 +788,18 @@ const MCP_TOOLS = [
   { name: 'delete_place', title: 'Ort löschen', description: 'Löscht einen Ort aus einer eigenen Zeitlinie.', destructive: true, inputSchema: S({ timeline: TL, name: str('Name') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/place', {}, a) },
   { name: 'upsert_faction', title: 'Fraktion anlegen/ändern', description: 'Legt eine Fraktion an oder ändert Name, Farbe (#rrggbb) oder Reichweite.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), color: str('Farbe #rrggbb'), reach: { type: 'number' } }, ['timeline', 'name']), run: a => internalCall('POST', '/api/v1/faction', {}, a) },
   { name: 'list_story', title: 'Story lesen', description: 'Story-Abschnitte einer Zeitlinie lesen (chronologisch). Vor dem Weiterschreiben aufrufen. Filter: Jahresbereich, Zeitalter, Suchtext oder nur die letzten N Abschnitte.', ro: true,
-    inputSchema: S({ timeline: TL, from: str('ab Jahr, z.B. "3641 BBY"'), to: str('bis Jahr'), era: str('nur dieses Zeitalter (Name)'), query: str('Suchtext'), last: { type: 'number', description: 'nur die letzten N Abschnitte' }, lang: LG }, ['timeline']),
-    run: (a, v) => internalCall('GET', '/api/v1/story', { timeline: a.timeline, from: a.from, to: a.to, era: a.era, q: a.query, last: a.last, lang: a.lang, format: 'text' }, null, v) },
+    inputSchema: S({ timeline: TL, chapter: str('nur dieses Kapitel (Titel/id)'), from: str('ab Jahr, z.B. "3641 BBY"'), to: str('bis Jahr'), era: str('nur dieses Zeitalter (Name)'), query: str('Suchtext'), last: { type: 'number', description: 'nur die letzten N Abschnitte' }, lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/story', { timeline: a.timeline, chapter: a.chapter, from: a.from, to: a.to, era: a.era, q: a.query, last: a.last, lang: a.lang, format: 'text' }, null, v) },
   { name: 'add_story_entry', title: 'Story-Abschnitt anlegen', description: 'Neuen Story-Abschnitt anlegen (erscheint im Story-Reiter). Ein Abschnitt pro Szene/Ereignis. Ohne Jahr wird das Jahr des letzten Abschnitts verwendet.',
-    inputSchema: S({ timeline: TL, title: str('kurzer Titel'), text: str('Text (Leerzeile = Absatz, **fett**, *kursiv*)'), year: YR, after: str('optional: id des Abschnitts, hinter dem eingefügt wird ("start" = an den Anfang des Jahres)'), places: { type: 'array', items: { type: 'string' }, description: 'beteiligte Orte' } }, ['timeline', 'title', 'text']), run: a => internalCall('POST', '/api/v1/story', {}, a) },
+    inputSchema: S({ timeline: TL, title: str('kurzer Titel'), text: str('Text (Leerzeile = Absatz, **fett**, *kursiv*)'), year: YR, after: str('optional: id des Abschnitts, hinter dem eingefügt wird ("start" = an den Anfang des Jahres)'), chapter: str('Kapitel (Titel oder id; wird bei Bedarf angelegt). Ohne Angabe: Kapitel des vorherigen Abschnitts'), places: { type: 'array', items: { type: 'string' }, description: 'beteiligte Orte' } }, ['timeline', 'title', 'text']), run: a => internalCall('POST', '/api/v1/story', {}, a) },
   { name: 'update_story_entry', title: 'Story-Abschnitt ändern', description: 'Abschnitt per id ändern. append=true hängt den Text an statt ihn zu ersetzen.',
-    inputSchema: S({ timeline: TL, id: str('id aus list_story'), title: str('neuer Titel'), text: str('Text'), append: { type: 'boolean', description: 'Text anhängen' }, year: YR, after: str('optional: hinter diesen Abschnitt verschieben (id oder "start")'), places: { type: 'array', items: { type: 'string' } } }, ['timeline', 'id']), run: a => internalCall('PATCH', '/api/v1/story', {}, a) },
+    inputSchema: S({ timeline: TL, id: str('id aus list_story'), title: str('neuer Titel'), text: str('Text'), append: { type: 'boolean', description: 'Text anhängen' }, year: YR, after: str('optional: hinter diesen Abschnitt verschieben (id oder "start")'), chapter: str('in dieses Kapitel verschieben (Titel/id, "" = ohne Kapitel)'), places: { type: 'array', items: { type: 'string' } } }, ['timeline', 'id']), run: a => internalCall('PATCH', '/api/v1/story', {}, a) },
+  { name: 'upsert_chapter', title: 'Kapitel anlegen/ändern', description: 'Story-Kapitel anlegen oder ändern: Titel, Kurzbeschreibung (summary), Position (after = Kapitel-id/-titel oder "start"), sections = Abschnitts-ids, die in dieses Kapitel gehören. Umbenennen über newTitle.',
+    inputSchema: S({ timeline: TL, title: str('Kapiteltitel (Schlüssel)'), id: str('alternativ: Kapitel-id'), newTitle: str('neuer Titel'), summary: str('kurze Zusammenfassung des Kapitels'), after: str('hinter dieses Kapitel setzen oder "start"'), sections: { type: 'array', items: { type: 'string' }, description: 'Abschnitts-ids, die diesem Kapitel zugeordnet werden' } }, ['timeline']),
+    run: a => internalCall('POST', '/api/v1/chapter', {}, a) },
+  { name: 'reorder_chapters', title: 'Kapitel sortieren', description: 'Kapitel in die gewünschte Reihenfolge bringen (ids oder Titel).',
+    inputSchema: S({ timeline: TL, ids: { type: 'array', items: { type: 'string' } } }, ['timeline', 'ids']), run: a => internalCall('POST', '/api/v1/chapter/order', {}, a) },
+  { name: 'delete_chapter', title: 'Kapitel löschen', description: 'Kapitel löschen; die Abschnitte bleiben erhalten (ohne Kapitel).', inputSchema: S({ timeline: TL, title: str('Titel oder id') }, ['timeline', 'title']), run: a => internalCall('DELETE', '/api/v1/chapter', {}, a) },
   { name: 'reorder_story', title: 'Story sortieren', description: 'Story-Abschnitte in chronologische Reihenfolge bringen: ids in der gewünschten Reihenfolge übergeben (alle oder ein Teil). Sortiert wird nach Jahr und innerhalb eines Jahres nach dieser Reihenfolge. adjustYears=true setzt Abschnitte, die laut Reihenfolge später kommen, aber ein früheres Jahr haben, auf das Jahr ihres Vorgängers.',
     inputSchema: S({ timeline: TL, ids: { type: 'array', items: { type: 'string' }, description: 'Abschnitts-ids in chronologischer Reihenfolge' }, adjustYears: { type: 'boolean' } }, ['timeline', 'ids']), run: a => internalCall('POST', '/api/v1/story/order', {}, a) },
   { name: 'delete_story_entry', title: 'Story-Abschnitt löschen', description: 'Abschnitt per id löschen.', inputSchema: S({ timeline: TL, id: str('id aus list_story') }, ['timeline', 'id']), run: a => internalCall('DELETE', '/api/v1/story', {}, a) },
@@ -779,7 +831,7 @@ const MCP_INSTRUCTIONS = 'Ascandir InteractiveMap: interaktive Karte (Star Wars 
   'Der Kanon ist schreibgeschützt – Änderungen nur in eigenen Zeitlinien (vorher list_timelines oder copy_timeline). Jahre als "3640 BBY"/"4 ABY". ' +
   'Vor Änderungen den Stand mit get_place/get_state lesen. Beschreibungen kurz und ohne Präfixe. ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
-  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse.';
+  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse.';
 async function handleMcp(req, res, url, writeAllowed) {
   if (req.method === 'GET') {
     if ((req.headers.accept || '').includes('text/event-stream')) return send(res, 405, { error: 'Use POST (Streamable HTTP)' }, 'application/json', { Allow: 'POST' });
