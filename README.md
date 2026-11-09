@@ -26,13 +26,14 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
 | Karte zoomen | Mausrad (bis 120-fach; ab einer gewissen Stufe „fliegst“ du in Systeme mit Sonnen und Monden hinein) |
 | Karte verschieben | Ziehen mit linker, mittlerer oder rechter Maustaste |
 | Jahr wählen | auf die Zeitleiste klicken oder darauf ziehen, Jahr eintippen (z. B. `22 VSY`, `3 NSY`, `-500`), ◀ ▶ oder Pfeiltasten (Umschalt = 10 Jahre), Mausrad auf dem Jahresfeld |
-| Zeitleiste zoomen / verschieben | Mausrad auf der Zeitleiste oder 🔍＋ / 🔍－, Umschalt + Mausrad verschiebt; *Zeitalter* zoomt auf das aktuelle Zeitalter, *Alles* (oder Doppelklick) zeigt die ganze Zeitlinie |
+| Zeitleiste zoomen / verschieben | Mausrad auf der Zeitleiste oder 🔍＋ / 🔍－; **Ziehen** verschiebt die Leiste, Klick setzt das Jahr, den gelben Marker kann man ziehen; *Zeitalter* zoomt auf das aktuelle Zeitalter, *Alles* (oder Doppelklick) zeigt die ganze Zeitlinie |
 | Zeitalter springen | ⏮ ⏭ oder Bild↑ / Bild↓ |
 | Vollbild | F11 |
 | Rückgängig (Editor) | Strg+Z |
 
 **Reiter oben rechts:**
 - **Ansicht:** Filter für Objekte (Sonnen, Planeten, Monde, Stationen bzw. Hauptstädte, Städte, Dörfer, Festungen, Wahrzeichen), Einflussbereiche, Hyperraumrouten bzw. Routen, Regionen, Sektoren, Raster, Namen und einzelne Fraktionen
+- **Story:** zeigt den Story-Text (RP-Stand) des aktuellen Zeitalters in voller Länge und alle Kapitel/Zeitalter zum Anklicken; mit Bearbeitungsrechten direkt editierbar (Leerzeile = Absatz, `**fett**`, `*kursiv*`)
 - **Editor:** Zeitalter, Fraktionen, Routen und Werkzeuge (Zuweisen, Region, Einfluss malen, Radieren, Objekt anlegen, Route zeichnen)
 - **Sprache:** Umschalter DE / EN oben rechts, gilt pro Betrachter (im Browser gespeichert)
 - **Einstellungen:** Design (automatisch, Sci-Fi oder Fantasy), Updates, Einstellungen der aktuellen Welt (Name, Jahres-Kürzel wie „v. Z.“/„n. Z.“, Löschen), Datenordner

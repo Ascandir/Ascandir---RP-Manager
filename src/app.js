@@ -497,7 +497,8 @@
     $('#btnPlanner').textContent = '🧭 ' + t('planner');
     $('#btnPlanner').classList.toggle('active', state.plannerOpen);
     box.hidden = !state.plannerOpen;
-    $('#info').hidden = state.plannerOpen;
+    $('#info').hidden = state.plannerOpen || state.mode === 'story';
+    $('#story').hidden = state.plannerOpen || state.mode !== 'story';
     if (!state.plannerOpen) return;
     const P = settings.planner, fan = state.world.type === 'fantasy';
     computePlan();
@@ -522,7 +523,7 @@
         <label class="field"><span>${esc(t('plClass'))}</span><select id="plCls">${TR.HYPER_CLASSES.map(c => `<option value="${c}" ${+c === +P.cls ? 'selected' : ''}>${esc(t('plClassN', String(c).replace('.', settings.lang === 'en' ? '.' : ',')))}${esc(classHint(c))}</option>`).join('')}</select></label>`}
       <label class="field"><span>${esc(t('plStay'))}</span><input id="plStay" type="number" min="0" step="1" value="${P.stay}"></label>
       <div id="plResult">${planResultHtml(r)}</div>`;
-    $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); draw(); };
+    $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); renderStory(); draw(); };
     $$('.pl-in').forEach(inp => inp.addEventListener('change', () => { P.stops[+inp.dataset.i] = inp.value; saveSoon(); renderPlanner(); draw(); }));
     $$('.pl-pick').forEach(b => b.addEventListener('click', () => { state.pick = state.pick === +b.dataset.i ? null : +b.dataset.i; renderPlanner(); if (state.pick != null) { toast(t('plPickHint')); if (isMobile()) setSheet(false); } }));
     $$('.pl-del').forEach(b => b.addEventListener('click', () => { P.stops.splice(+b.dataset.i, 1); saveSoon(); renderPlanner(); draw(); }));
@@ -1206,12 +1207,27 @@
     }
   }
   track.style.touchAction = 'none';
+  // Klick = Jahr setzen · Ziehen = Zeitleiste verschieben · Marker ziehen = Jahr scrubben
   track.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 && e.button !== 1) return;
     trackDrag = true; try { track.setPointerCapture(e.pointerId); } catch { }
-    const r = track.getBoundingClientRect(); setYear(Math.round(tyear(e.clientX - r.left)), true);
-    const move = ev => { if (!trackDrag) return; const rr = track.getBoundingClientRect(); setYear(Math.round(tyear(Math.max(0, Math.min(TW, ev.clientX - rr.left)))), true); };
-    const up = () => { trackDrag = false; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); };
+    const r = track.getBoundingClientRect(), x0 = e.clientX - r.left;
+    const scrub = e.button === 0 && Math.abs(x0 - tx(state.year)) <= (e.pointerType === 'touch' ? 18 : 10);
+    const start = { x: e.clientX, a: state.track.a, b: state.track.b }; let moved = false;
+    track.style.cursor = scrub ? 'ew-resize' : 'grabbing';
+    const move = ev => {
+      if (!trackDrag) return;
+      const rr = track.getBoundingClientRect(), dx = ev.clientX - start.x;
+      if (Math.abs(dx) > 4) moved = true;
+      if (scrub) { setYear(Math.round(tyear(Math.max(0, Math.min(TW, ev.clientX - rr.left)))), true); return; }
+      if (!moved) return;
+      const dy = dx / TW * (start.b - start.a); state.track = { a: start.a - dy, b: start.b - dy }; drawTrack();
+    };
+    const up = ev => {
+      trackDrag = false; track.style.cursor = '';
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+      if (!scrub && !moved && ev.type === 'pointerup' && e.button === 0) { const rr = track.getBoundingClientRect(); setYear(Math.round(tyear(ev.clientX - rr.left)), true); }
+    };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
   });
   track.addEventListener('dblclick', () => fitTrack(true));
@@ -1233,7 +1249,8 @@
     drawTrack();
   }, { passive: false });
   track.addEventListener('mousemove', e => {
-    const r = track.getBoundingClientRect(); track.title = `${fmtYear(Math.round(tyear(e.clientX - r.left)))} — ${t('trackHint')}`;
+    const r = track.getBoundingClientRect(), x = e.clientX - r.left; track.title = `${fmtYear(Math.round(tyear(x)))} — ${t('trackHint')}`;
+    if (!trackDrag) track.style.cursor = Math.abs(x - tx(state.year)) <= 10 ? 'ew-resize' : 'grab';
   });
 
   let lastEraId = null;
@@ -1245,6 +1262,7 @@
     renderYear();
     if (eid !== lastEraId) { lastEraId = eid; renderFactionFilter(); if (state.mode === 'edit') renderEditor(); }
     if (state.plannerOpen) renderPlanner();
+    if (state.mode === 'story' && !storyEditing) renderStory();
     renderInfo(); saveSoon(); draw();
   }
   function jumpEra(dir) {
@@ -1258,7 +1276,7 @@
     $('#eraName').textContent = e ? e.name : t('noEra');
     const end = e ? eraEnd(e) : null;
     $('#eraYear').textContent = e ? `${fmtYear(e.year)}${end != null ? ' – ' + fmtYear(end) : ''}` : '';
-    $('#eraDesc').textContent = e ? (e.desc || '') : t('beforeFirstEra');
+    $('#eraDesc').textContent = e ? (e.desc || '').replace(/\*\*|\*/g, '').replace(/\s*\n+\s*/g, ' · ') : t('beforeFirstEra');
     drawTrack();
   }
   $('#yearInput').addEventListener('keydown', e => { if (e.key === 'Enter') { const y = parseYear(e.target.value); if (y != null) { setYear(y); fitTrack(); } e.target.blur(); } else if (e.key === 'Escape') e.target.blur(); });
@@ -1618,6 +1636,7 @@
     $('#tabView').classList.toggle('active', state.mode === 'view');
     $('#tabEdit').classList.toggle('active', state.mode === 'edit');
     $('#tabSettings').classList.toggle('active', state.mode === 'settings');
+    $('#tabStory').classList.toggle('active', state.mode === 'story');
     $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
     const guest = isGuest(), si = srvInfo();
     for (const id of ['#tabEdit', '#tabSettings']) $(id).hidden = guest;
@@ -1806,9 +1825,9 @@
 
   // ------------------------------------------------------------- Modus & Einstellungen
   function setMode(m) {
-    if (m !== 'view' && isGuest()) { loginDialog(); return; }
+    if (m !== 'view' && m !== 'story' && isGuest()) { loginDialog(); return; }
     state.mode = m;
-    if (isMobile()) setSheet(m === 'edit');
+    if (isMobile()) setSheet(m === 'edit' || m === 'story');
     $('#settingsView').hidden = m !== 'settings';
     if (m === 'settings') renderSettings();
     renderAll(true);
@@ -1816,6 +1835,9 @@
   }
   $('#tabView').addEventListener('click', () => setMode('view'));
   $('#tabEdit').addEventListener('click', () => setMode('edit'));
+  $('#tabStory').addEventListener('click', () => setMode(state.mode === 'story' ? 'view' : 'story'));
+  $('#eraDesc').addEventListener('click', () => setMode('story'));
+  $('#eraName').addEventListener('click', () => setMode('story'));
   $('#tabSettings').addEventListener('click', () => setMode(state.mode === 'settings' ? 'view' : 'settings'));
 
   function renderSettings() {
@@ -2017,11 +2039,38 @@
 
   // ------------------------------------------------------------- Gesamt-Render
   function afterEdit(full) { editVersion++; rebuildTree(); if (full) renderAll(true); else { renderFactionFilter(); renderInfo(); renderYear(); updateToolHint(); draw(); } saveSoon(); }
+  let storyEditing = false;
+  function renderStory() {
+    const box = $('#story');
+    const show = state.mode === 'story' && !state.plannerOpen;
+    box.hidden = !show; if (state.mode === 'story' && !state.plannerOpen) $('#info').hidden = true;
+    if (!show) { storyEditing = false; return; }
+    const e = era(), eras = sortedEras(), can = canEditTl() && e;
+    const end = e ? eraEnd(e) : null;
+    box.innerHTML = `
+      <div class="story-head">
+        <div class="story-kicker">📖 ${esc(t('tabStory'))} · ${esc(state.tl.name)}</div>
+        <h2>${esc(e ? e.name : t('noEra'))}</h2>
+        ${e ? `<div class="story-years">${esc(fmtYear(e.year))}${end != null ? ' – ' + esc(fmtYear(end)) : ''} · ${esc(t('storyNow'))} ${esc(fmtYear(state.year))}</div>` : ''}
+      </div>
+      ${storyEditing ? `<textarea id="storyText" class="story-edit">${esc(e.desc || '')}</textarea>
+        <div class="row"><button id="storySave" class="primary">${esc(t('ok'))}</button><button id="storyCancel">${esc(t('cancel'))}</button></div>
+        <p class="hint">${esc(t('storyFmt'))}</p>`
+      : `<div class="story-text">${e && e.desc ? rich(e.desc) : `<p class="hint">${esc(e ? t('storyEmpty') : t('beforeFirstEra'))}</p>`}</div>
+        ${can ? `<button id="storyEditBtn">✎ ${esc(t('storyEdit'))}</button>` : ''}`}
+      <h3 style="margin-top:18px">${esc(t('storyChapters'))}</h3>
+      <ol class="story-chapters">${eras.map(x => `<li data-id="${esc(x.id)}" class="${x === e ? 'cur' : ''}"><span class="y">${esc(fmtYear(x.year))}</span> ${esc(x.name)}</li>`).join('')}</ol>`;
+    const eb = $('#storyEditBtn'); if (eb) eb.onclick = () => { storyEditing = true; renderStory(); $('#storyText').focus(); };
+    const sv = $('#storySave'); if (sv) sv.onclick = () => { pushUndo(); e.desc = $('#storyText').value; storyEditing = false; afterEdit(); renderStory(); };
+    const sc = $('#storyCancel'); if (sc) sc.onclick = () => { storyEditing = false; renderStory(); };
+    box.querySelectorAll('.story-chapters li').forEach(li => li.onclick = () => { const x = state.tl.eras.find(q => q.id === li.dataset.id); if (x) { setYear(x.year); fitTrack(); } });
+  }
+
   function renderAll() {
     editVersion++;
     rebuildTree();
     document.body.classList.toggle('is-sw', isSW());
-    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner();
+    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory();
     lastEraId = era() ? era().id : null; renderYear(); updateToolHint(); draw();
   }
 
