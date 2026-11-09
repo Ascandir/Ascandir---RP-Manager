@@ -549,7 +549,8 @@
     $('#btnPlanner').textContent = '🧭 ' + t('planner');
     $('#btnPlanner').classList.toggle('active', state.plannerOpen);
     box.hidden = !state.plannerOpen;
-    $('#info').hidden = state.plannerOpen || state.mode === 'story' || state.mode === 'chars';
+    $('#info').hidden = state.plannerOpen || state.mode === 'story' || state.mode === 'chars' || state.mode === 'world';
+    $('#wnotes').hidden = state.plannerOpen || state.mode !== 'world';
     $('#chars').hidden = state.plannerOpen || state.mode !== 'chars';
     $('#story').hidden = state.plannerOpen || state.mode !== 'story';
     if (!state.plannerOpen) return;
@@ -576,7 +577,7 @@
         <label class="field"><span>${esc(t('plClass'))}</span><select id="plCls">${TR.HYPER_CLASSES.map(c => `<option value="${c}" ${+c === +P.cls ? 'selected' : ''}>${esc(t('plClassN', String(c).replace('.', settings.lang === 'en' ? '.' : ',')))}${esc(classHint(c))}</option>`).join('')}</select></label>`}
       <label class="field"><span>${esc(t('plStay'))}</span><input id="plStay" type="number" min="0" step="1" value="${P.stay}"></label>
       <div id="plResult">${planResultHtml(r)}</div>`;
-    $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); renderStory(); renderChars(); draw(); };
+    $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); renderStory(); renderChars(); renderWorldNotes(); draw(); };
     $$('.pl-in').forEach(inp => inp.addEventListener('change', () => { P.stops[+inp.dataset.i] = inp.value; saveSoon(); renderPlanner(); draw(); }));
     $$('.pl-pick').forEach(b => b.addEventListener('click', () => { state.pick = state.pick === +b.dataset.i ? null : +b.dataset.i; renderPlanner(); if (state.pick != null) { toast(t('plPickHint')); if (isMobile()) setSheet(false); } }));
     $$('.pl-del').forEach(b => b.addEventListener('click', () => { P.stops.splice(+b.dataset.i, 1); saveSoon(); renderPlanner(); draw(); }));
@@ -1841,6 +1842,7 @@
     $('#tabSettings').classList.toggle('active', state.mode === 'settings');
     $('#tabStory').classList.toggle('active', state.mode === 'story');
     $('#tabChars').classList.toggle('active', state.mode === 'chars');
+    $('#tabWorld').classList.toggle('active', state.mode === 'world');
     $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
     const guest = isGuest(), si = srvInfo();
     for (const id of ['#tabEdit', '#tabSettings']) $(id).hidden = guest;
@@ -2026,9 +2028,9 @@
 
   // ------------------------------------------------------------- Modus & Einstellungen
   function setMode(m) {
-    if (m !== 'view' && m !== 'story' && m !== 'chars' && isGuest()) { loginDialog(); return; }
+    if (m !== 'view' && m !== 'story' && m !== 'chars' && m !== 'world' && isGuest()) { loginDialog(); return; }
     state.mode = m;
-    if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars');
+    if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars' || m === 'world');
     $('#settingsView').hidden = m !== 'settings';
     if (m === 'settings') renderSettings();
     renderAll(true);
@@ -2038,6 +2040,7 @@
   $('#tabEdit').addEventListener('click', () => setMode('edit'));
   $('#tabStory').addEventListener('click', () => setMode(state.mode === 'story' ? 'view' : 'story'));
   $('#tabChars').addEventListener('click', () => setMode(state.mode === 'chars' ? 'view' : 'chars'));
+  $('#tabWorld').addEventListener('click', () => setMode(state.mode === 'world' ? 'view' : 'world'));
   $('#eraDesc').addEventListener('click', () => setMode('story'));
   $('#eraName').addEventListener('click', () => setMode('story'));
   $('#tabSettings').addEventListener('click', () => setMode(state.mode === 'settings' ? 'view' : 'settings'));
@@ -2392,6 +2395,71 @@
     box.querySelectorAll('.story-chapters li').forEach(li => li.onclick = () => { const x = state.tl.eras.find(q => q.id === li.dataset.id); if (x) { setYear(x.year); fitTrack(); } });
   }
 
+  // ------------------------------------------------------------- Weltnotizen (Zustand der Welt, unabhängig von der Spieler-Story)
+  const WN_CATS_DE = ['Galaktische Lage', 'Sith-Imperium', 'Galaktische Republik', 'Planeten & Regionen', 'Organisationen', 'Offene Handlungsstränge', 'Gesicherte Erkenntnisse'];
+  const WN_CERT = { confirmed: '#81c784', suspected: '#ffb74d', rumor: '#ba68c8' };
+  let wnEdit = null, wnQ = '';
+  const wnRank = c => { const i = WN_CATS_DE.findIndex(x => x.toLowerCase() === String(c || '').toLowerCase()); return i < 0 ? 100 : i; };
+  const wnSort = (a, b) => wnRank(a.category) - wnRank(b.category) || String(a.category || '').localeCompare(String(b.category || '')) || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.title).localeCompare(String(b.title));
+  function renderWorldNotes() {
+    const box = $('#wnotes'), show = state.mode === 'world' && !state.plannerOpen;
+    box.hidden = !show; if (show) $('#info').hidden = true;
+    if (!show) { wnEdit = null; return; }
+    if (wnEdit && $('#wnForm') && !renderWorldNotes.force) return;
+    renderWorldNotes.force = false;
+    const can = canEditTl(), list = (state.tl.worldNotes ||= []), q = wnQ.toLowerCase();
+    const shown = list.filter(n => !q || (n.title + ' ' + n.text + ' ' + n.category + ' ' + (n.places || []).join(' ')).toLowerCase().includes(q)).sort(wnSort);
+    const cats = [...new Set(shown.map(n => n.category || ''))];
+    const allCats = [...new Set(WN_CATS_DE.concat(list.map(n => n.category).filter(Boolean)))];
+    const form = n => `<div class="story-sec editing" id="wnForm">
+      <input id="wnTitle" placeholder="${esc(t('wnTitle'))}" value="${esc(n ? n.title : '')}">
+      <div class="row"><label class="field"><span>${esc(t('wnCategory'))}</span><input id="wnCat" list="wnCatList" value="${esc(n ? n.category : (wnEdit && wnEdit.startsWith('new:') ? wnEdit.slice(4) : WN_CATS_DE[0]))}"></label>
+        <label class="field"><span>${esc(t('wnCertainty'))}</span><select id="wnCert">${Object.keys(WN_CERT).map(k => `<option value="${k}" ${(n ? n.certainty || 'confirmed' : 'confirmed') === k ? 'selected' : ''}>${esc(t('wn_' + k))}</option>`).join('')}</select></label></div>
+      <datalist id="wnCatList">${allCats.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+      <label class="field"><span>${esc(t('storySecPlaces'))}</span><input id="wnPlaces" value="${esc(n ? (n.places || []).join(', ') : '')}"></label>
+      <textarea id="wnText" class="story-edit" placeholder="${esc(t('storyFmt'))}">${esc(n ? n.text : '')}</textarea>
+      <div class="row"><button id="wnSave" class="primary">${esc(t('ok'))}</button><button id="wnCancel">${esc(t('cancel'))}</button>${n ? `<button id="wnDel" class="danger">${esc(t('delete'))}</button>` : ''}</div></div>`;
+    const note = n => wnEdit === n.id ? form(n) : `
+      <article class="story-sec${fold.has(n.id) ? ' folded' : ''}" data-nid="${esc(n.id)}">
+        <div class="sec-head"><span class="fold-tg fold-ar">${fold.has(n.id) ? '▸' : '▾'}</span><b class="fold-tg">${esc(n.title)}</b>
+          <span class="cert" style="--gc:${WN_CERT[n.certainty] || WN_CERT.confirmed}">${esc(t('wn_' + (n.certainty || 'confirmed')))}</span>
+          ${can && !fold.has(n.id) ? `<span class="sec-btns"><button class="fixed wn-ed" title="${esc(t('storyEdit'))}">✎</button></span>` : ''}</div>
+        ${fold.has(n.id) ? '' : `${(n.places || []).length ? `<div class="dim sec-pl">📍 ${n.places.map(p => { const o = placeByName(p); return o ? `<a href="#" data-place="${esc(o.id)}">${esc(p)}</a>` : esc(p); }).join(', ')}</div>` : ''}
+          <div class="story-text">${rich(n.text || '')}</div>${n.updated ? `<div class="dim upd">${esc(t('wnUpdated'))} ${esc(new Date(n.updated).toLocaleDateString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</div>` : ''}`}
+      </article>`;
+    box.innerHTML = `
+      <div class="story-kicker">🌌 ${esc(t('tabWorld'))} · ${esc(state.tl.name)}</div>
+      <p class="hint">${esc(t('wnIntro'))}</p>
+      <div class="row" style="margin:8px 0"><input id="wnSearch" placeholder="${esc(t('wnSearch'))}" value="${esc(wnQ)}">
+        <button class="fixed small-btn" id="wnFoldAll" title="${esc(t('foldAll'))}">▸▸</button><button class="fixed small-btn" id="wnUnfoldAll" title="${esc(t('unfoldAll'))}">▾▾</button></div>
+      <div class="story-secs">
+        ${cats.map(c => `<div class="chap-head" data-cat="${esc(c)}"><span class="fold-tg fold-ar wn-cat">${fold.has('wncat:' + c) ? '▸' : '▾'}</span><b class="fold-tg wn-cat">${esc(c || t('wnGeneral'))}</b><span class="dim">${shown.filter(n => (n.category || '') === c).length}</span>
+          ${can ? `<span class="chap-btns"><button class="fixed wn-add" title="${esc(t('wnAdd'))}">＋</button></span>` : ''}</div>
+          ${fold.has('wncat:' + c) ? '' : shown.filter(n => (n.category || '') === c).map(note).join('')}${wnEdit === 'new:' + c ? form(null) : ''}`).join('')}
+        ${!shown.length ? `<p class="hint">${esc(list.length ? t('charNoMatch') : t('wnEmpty'))}</p>` : ''}
+        ${wnEdit === 'new:' && !cats.includes('') ? form(null) : ''}
+        ${can && wnEdit !== 'new:' ? `<button id="wnNew">＋ ${esc(t('wnAdd'))}</button>` : ''}</div>`;
+    $('#wnSearch').addEventListener('input', e => { wnQ = e.target.value; const pos = e.target.selectionStart; renderWorldNotes(); const el = $('#wnSearch'); el.focus(); el.setSelectionRange(pos, pos); });
+    box.querySelectorAll('[data-nid] .fold-tg').forEach(el => el.onclick = () => { const id = el.closest('[data-nid]').dataset.nid; fold.has(id) ? fold.delete(id) : fold.add(id); saveFold(); renderWorldNotes(); });
+    box.querySelectorAll('.wn-cat').forEach(el => el.onclick = () => { const k = 'wncat:' + el.closest('[data-cat]').dataset.cat; fold.has(k) ? fold.delete(k) : fold.add(k); saveFold(); renderWorldNotes(); });
+    $('#wnFoldAll').onclick = () => { for (const n of shown) fold.add(n.id); saveFold(); renderWorldNotes(); };
+    $('#wnUnfoldAll').onclick = () => { for (const n of shown) fold.delete(n.id); for (const c of cats) fold.delete('wncat:' + c); saveFold(); renderWorldNotes(); };
+    box.querySelectorAll('.wn-ed').forEach(b => b.onclick = () => { wnEdit = b.closest('[data-nid]').dataset.nid; renderWorldNotes.force = true; renderWorldNotes(); });
+    box.querySelectorAll('.wn-add').forEach(b => b.onclick = () => { wnEdit = 'new:' + b.closest('[data-cat]').dataset.cat; renderWorldNotes.force = true; renderWorldNotes(); $('#wnTitle').focus(); });
+    const nb = $('#wnNew'); if (nb) nb.onclick = () => { wnEdit = 'new:'; renderWorldNotes.force = true; renderWorldNotes(); $('#wnTitle').focus(); };
+    box.querySelectorAll('[data-place]').forEach(a => a.onclick = ev => { ev.preventDefault(); const o = objMap[a.dataset.place]; if (o) { centerOn(o, o.atlas ? 3 : 1.4); if (isMobile()) setSheet(false); } });
+    const sv = $('#wnSave'); if (sv) sv.onclick = () => {
+      const title = $('#wnTitle').value.trim(); if (!title) { $('#wnTitle').focus(); return; }
+      pushUndo(); let n = list.find(x => x.id === wnEdit);
+      if (!n) { n = { id: uid('wn'), created: new Date().toISOString() }; list.push(n); }
+      n.title = title; n.category = $('#wnCat').value.trim() || WN_CATS_DE[0]; n.certainty = $('#wnCert').value; n.text = $('#wnText').value;
+      n.places = $('#wnPlaces').value.split(',').map(v => v.trim()).filter(Boolean); n.updated = new Date().toISOString();
+      wnEdit = null; afterEdit(); renderWorldNotes.force = true; renderWorldNotes();
+    };
+    const cc = $('#wnCancel'); if (cc) cc.onclick = () => { wnEdit = null; renderWorldNotes.force = true; renderWorldNotes(); };
+    const dl = $('#wnDel'); if (dl) dl.onclick = () => { const n = list.find(x => x.id === wnEdit); if (!n || !confirm(t('wnDelQ', n.title))) return; pushUndo(); state.tl.worldNotes = list.filter(x => x !== n); wnEdit = null; afterEdit(); renderWorldNotes.force = true; renderWorldNotes(); };
+  }
+
   // ------------------------------------------------------------- Charaktere
   let charSel = null, charEdit = false, charQ = '', charGroupF = '', groupsEdit = false;
   const GROUP_COLORS = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4dd0e1', '#f06292', '#aed581', '#ffd54f', '#90a4ae'];
@@ -2553,7 +2621,7 @@
     editVersion++;
     rebuildTree();
     document.body.classList.toggle('is-sw', isSW());
-    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory(); renderChars();
+    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory(); renderChars(); renderWorldNotes();
     lastEraId = era() ? era().id : null; renderYear(); updateToolHint(); draw();
   }
 

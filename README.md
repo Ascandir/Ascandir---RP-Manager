@@ -88,6 +88,21 @@ Im Reiter *Story* gibt es beliebig viele **Abschnitte**, gruppiert in **Kapitel 
 
 Die Abschnitte werden in der Zeitlinien-Datei unter `"story"` gespeichert.
 
+### Welt (Weltnotizen)
+
+Der Reiter *Welt* beschreibt den **aktuellen Zustand der Welt** – unabhängig von deiner eigenen Story. Drei getrennte Quellen ergänzen sich:
+
+- **Story-Chronik:** Was ist passiert? (chronologisch, wird fortgeschrieben)
+- **Charakterakten:** Wer ist wer, wo ist die Person, was weiß sie?
+- **Weltnotizen:** Wie sieht die Welt gerade aus? (werden aktualisiert statt ständig neu angelegt)
+
+Notizen sind nach Kategorien gegliedert (empfohlen: Galaktische Lage, Sith-Imperium, Galaktische Republik, Planeten & Regionen, Organisationen, Offene Handlungsstränge, Gesicherte Erkenntnisse – eigene Kategorien sind möglich). Jede Notiz hat eine Einstufung *gesichert*, *Vermutung* oder *Gerücht*, betroffene Orte (mit der Karte verknüpft) und das Datum der letzten Aktualisierung. Notizen und Kategorien lassen sich zuklappen.
+
+Wichtig: Was in den Weltnotizen steht, weiß **nicht** automatisch jeder Charakter – dafür ist das Feld *Wissen* in den Charakterakten da.
+
+- **MCP:** `list_world_notes` (Filter: Kategorie, Suchtext, Ort), `upsert_world_note` (per Titel oder id aktualisieren, `append` hängt an, `certainty`), `delete_world_note`.
+- **REST:** `GET /api/v1/worldnotes`, `POST/DELETE /api/v1/worldnote`.
+
 ### Charaktere
 
 Der Reiter *Charaktere* verwaltet die Figuren einer Zeitlinie. Der Steckbrief ist so gegliedert:

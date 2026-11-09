@@ -430,3 +430,7 @@ span.fold-ar { opacity: .7; font-size: 12px; width: 12px; flex: none; display: i
 .story-sec.folded { padding-top: 5px; padding-bottom: 5px; }
 .story-sec.folded .sec-head b { font-weight: 600; }
 .small-btn { padding: 2px 7px; font-size: 11px; letter-spacing: -2px; }
+
+#wnotes { padding: 14px 16px 30px; }
+.cert { font-size: 10.5px; padding: 0 7px; border-radius: 9px; line-height: 17px; color: var(--gc); border: 1px solid color-mix(in srgb, var(--gc) 55%, transparent); background: color-mix(in srgb, var(--gc) 15%, transparent); white-space: nowrap; }
+.story-sec .upd { font-size: 11px; margin-top: 4px; }

@@ -256,6 +256,8 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
     }
   }
   const st = (tl.story || []).filter(e => e.year <= year).sort(storySortT(tl));
+  const wns = tl.worldNotes || [];
+  if (wns.length) L.push((de ? `Weltnotizen (${wns.length}): ` : `World notes (${wns.length}): `) + [...new Set(wns.slice().sort(wnSort).map(n => n.category))].join(' · ') + (de ? ' – Details mit list_world_notes' : ' – details via list_world_notes'));
   const chs = tl.characters || [];
   if (chs.length) L.push((de ? 'Charaktere: ' : 'Characters: ') + chs.slice(0, 20).map(c => `${c.name}${c.title ? ' (' + c.title + ')' : ''}${c.location ? ' @ ' + c.location : ''}`).join(' · ') + (chs.length > 20 ? ' …' : ''));
   if (st.length) L.push((de ? `Story bisher (${st.length} Abschnitte, neueste zuletzt): ` : `Story so far (${st.length} sections, latest last): `) + st.slice(-5).map(e => `${e.title} (${fmtYear(e.year, f)})`).join(' · '));
@@ -327,6 +329,27 @@ function storyText(t, lang, list) {
   }
   const chs = chapSorted(t); if (chs.length) out.unshift((de ? 'Kapitel: ' : 'Chapters: ') + chs.map((c, i) => `${i + 1}. ${c.title} [id: ${c.id}]`).join(' · '));
   return out.join('\n\n');
+}
+// ---------------------------------------------------------------- Weltnotizen (tl.worldNotes): aktueller Zustand der Welt
+const WN_CATS = ['Galaktische Lage', 'Sith-Imperium', 'Galaktische Republik', 'Planeten & Regionen', 'Organisationen', 'Offene Handlungsstränge', 'Gesicherte Erkenntnisse'];
+const WN_CERT = ['confirmed', 'suspected', 'rumor'];
+const wnCatRank = c => { const i = WN_CATS.findIndex(x => x.toLowerCase() === String(c || '').toLowerCase()); return i < 0 ? 100 : i; };
+const wnSort = (a, b) => wnCatRank(a.category) - wnCatRank(b.category) || String(a.category || '').localeCompare(String(b.category || '')) || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.title).localeCompare(String(b.title));
+function wnFind(t, b) {
+  const L = t.worldNotes || []; if (b.id) return L.find(x => x.id === b.id) || null;
+  const q = String(b.title || '').toLowerCase().trim(); if (!q) return null;
+  return L.find(x => x.title.toLowerCase() === q && (!b.category || String(x.category).toLowerCase() === String(b.category).toLowerCase())) || L.find(x => x.title.toLowerCase() === q) || null;
+}
+function wnText(t, lang, list) {
+  const de = lang !== 'en', C = { confirmed: de ? 'gesichert' : 'confirmed', suspected: de ? 'Vermutung' : 'suspected', rumor: de ? 'Gerücht' : 'rumour' };
+  if (!list.length) return de ? `Noch keine Weltnotizen in „${t.name}“.` : `No world notes in "${t.name}" yet.`;
+  const out = [de ? 'Hinweis: Weltnotizen beschreiben den Zustand der Welt – nicht, was einzelne Charaktere wissen (dafür: Wissen in den Charakterakten).' : 'Note: world notes describe the state of the world – not what individual characters know (see character knowledge).'];
+  let cur;
+  for (const n of list) {
+    if (n.category !== cur) { cur = n.category; out.push(`\n# ${cur || (de ? 'Allgemein' : 'General')}`); }
+    out.push(`## ${n.title} [${C[n.certainty] || C.confirmed}] [id: ${n.id}]${n.updated ? ` (${de ? 'aktualisiert' : 'updated'} ${String(n.updated).slice(0, 10)})` : ''}\n${(n.places || []).length ? (de ? 'Orte: ' : 'Places: ') + n.places.join(', ') + '\n' : ''}${n.text || ''}`);
+  }
+  return out.join('\n');
 }
 // ---------------------------------------------------------------- Charaktere (tl.characters)
 const CHAR_TEXT = ['title', 'species', 'gender', 'age', 'homeworld', 'organization', 'master', 'location', 'status', 'appearance', 'personality', 'bio', 'abilities', 'knowledge', 'threads', 'notes'];
@@ -500,6 +523,22 @@ async function apiWrite(req, res, url, parts) {
     t.eras.sort((a, c) => a.year - c.year);
     saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, era: { id: e.id, name: e.name, year: e.year, label: fmtYear(e.year, f) } });
   }
+  if (ep === 'worldnote' && (req.method === 'POST' || req.method === 'PATCH')) {
+    t.worldNotes = t.worldNotes || [];
+    let n = wnFind(t, b); const created = !n;
+    if (!n) { if (req.method === 'PATCH' || !b.title) return send(res, b.title ? 404 : 400, { error: b.title ? 'note not found' : 'title required' }); n = { id: uid('wn'), title: String(b.title).trim(), category: String(b.category || WN_CATS[0]), text: '', certainty: 'confirmed', places: [], created: new Date().toISOString() }; t.worldNotes.push(n); }
+    if (b.newTitle) n.title = String(b.newTitle);
+    if (b.category !== undefined && !created) n.category = String(b.category);
+    if (b.text !== undefined) n.text = b.append && n.text ? n.text + '\n\n' + String(b.text) : String(b.text);
+    if (b.certainty !== undefined) n.certainty = WN_CERT.includes(b.certainty) ? b.certainty : 'confirmed';
+    if (Array.isArray(b.places)) n.places = b.places.map(String).filter(Boolean);
+    n.updated = new Date().toISOString();
+    saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, note: n });
+  }
+  if (ep === 'worldnote' && req.method === 'DELETE') {
+    const n = wnFind(t, b); if (!n) return send(res, 404, { error: 'note not found (id or exact title)' });
+    t.worldNotes = t.worldNotes.filter(x => x !== n); saveTimeline(t); return send(res, 200, { ok: true });
+  }
   if (ep === 'character/image' && req.method === 'POST') {
     const c = findChar(t, b.id || b.name); if (!c) return send(res, 404, { error: 'character not found' });
     const src = await storeImage(b);
@@ -662,6 +701,8 @@ async function apiV1(req, res, url) {
       'GET /api/v1/state?timeline=&year=&lang=': 'Zeitalter + Fraktionen mit Gebieten im Jahr',
       'GET /api/v1/place?name=&timeline=&year=&lang=': 'Eckdaten und Kontrolle eines Ortes im Jahr',
       'GET /api/v1/search?q=&timeline=': 'Orte suchen',
+      'GET /api/v1/worldnotes?timeline=&category=&q=&place=&format=text': 'Weltnotizen lesen',
+      'POST /api/v1/worldnote | DELETE /api/v1/worldnote': 'Weltnotiz anlegen/aktualisieren (title/id, category, text, append, certainty, places) / löschen',
       'GET /api/v1/characters?timeline=&q=&faction=&place=&format=text': 'Charaktere auflisten',
       'GET /api/v1/character?timeline=&name=&format=text': 'Charakter mit allen Details',
       'GET /api/v1/story?timeline=&from=&to=&era=&q=&last=&format=text': 'Story-Abschnitte lesen',
@@ -696,6 +737,15 @@ async function apiV1(req, res, url) {
     const t = tl(), y = year(t), o = findPlace(t, q.get('name'));
     if (!o) return send(res, 404, { error: 'place not found' });
     return send(res, 200, Object.assign({ year: y, yearLabel: fmtYear(y, yearFmt(t, lang)) }, placeInfo(t, o, y, lang)));
+  }
+  if (ep === 'worldnotes') {
+    const t = tl(), cq = (q.get('category') || '').toLowerCase(), qq = (q.get('q') || '').toLowerCase(), pq = (q.get('place') || '').toLowerCase();
+    let list = (t.worldNotes || []).slice().sort(wnSort);
+    if (cq) list = list.filter(n => String(n.category || '').toLowerCase().includes(cq));
+    if (qq) list = list.filter(n => (n.title + ' ' + n.text).toLowerCase().includes(qq));
+    if (pq) list = list.filter(n => (n.places || []).some(p => p.toLowerCase().includes(pq)) || (n.title + ' ' + n.text).toLowerCase().includes(pq));
+    if (q.get('format') === 'text') return send(res, 200, wnText(t, lang, list), 'text/plain; charset=utf-8');
+    return send(res, 200, { timeline: t.name, count: list.length, categories: [...new Set(list.map(n => n.category))], notes: list });
   }
   if (ep === 'characters') {
     const t = tl(), qq = (q.get('q') || '').toLowerCase(), fq = (q.get('faction') || '').toLowerCase(), pq = (q.get('place') || '').toLowerCase();
@@ -803,6 +853,14 @@ const MCP_TOOLS = [
   { name: 'reorder_story', title: 'Story sortieren', description: 'Story-Abschnitte in chronologische Reihenfolge bringen: ids in der gewünschten Reihenfolge übergeben (alle oder ein Teil). Sortiert wird nach Jahr und innerhalb eines Jahres nach dieser Reihenfolge. adjustYears=true setzt Abschnitte, die laut Reihenfolge später kommen, aber ein früheres Jahr haben, auf das Jahr ihres Vorgängers.',
     inputSchema: S({ timeline: TL, ids: { type: 'array', items: { type: 'string' }, description: 'Abschnitts-ids in chronologischer Reihenfolge' }, adjustYears: { type: 'boolean' } }, ['timeline', 'ids']), run: a => internalCall('POST', '/api/v1/story/order', {}, a) },
   { name: 'delete_story_entry', title: 'Story-Abschnitt löschen', description: 'Abschnitt per id löschen.', inputSchema: S({ timeline: TL, id: str('id aus list_story') }, ['timeline', 'id']), run: a => internalCall('DELETE', '/api/v1/story', {}, a) },
+  { name: 'list_world_notes', title: 'Weltnotizen lesen', description: 'Aktueller Zustand der Welt (unabhängig von der Spieler-Story): Galaktische Lage, Fraktionen, Planeten & Regionen, Organisationen, offene Handlungsstränge, gesicherte Erkenntnisse. Weltnotizen sind NICHT das Wissen aller Charaktere – das steht in den Charakterakten.', ro: true,
+    inputSchema: S({ timeline: TL, category: str('nur diese Kategorie'), query: str('Suchtext'), place: str('Ort'), lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/worldnotes', { timeline: a.timeline, category: a.category, q: a.query, place: a.place, lang: a.lang, format: 'text' }, null, v) },
+  { name: 'upsert_world_note', title: 'Weltnotiz anlegen/aktualisieren', description: 'Weltnotiz anlegen oder aktualisieren. Bestehende Notizen bevorzugt aktualisieren (per id oder Titel) statt für jede Kleinigkeit eine neue anzulegen. Kategorien (frei, empfohlen): ' + WN_CATS.join(', ') + '. certainty: confirmed (gesichert), suspected (Vermutung), rumor (Gerücht). append=true hängt Text an.',
+    inputSchema: S({ timeline: TL, title: str('Titel (Schlüssel)'), id: str('alternativ: id'), category: str('Kategorie'), newTitle: str('neuer Titel'), text: str('Inhalt (Markdown: **fett**, *kursiv*, Leerzeile = Absatz)'),
+      append: { type: 'boolean' }, certainty: { type: 'string', enum: WN_CERT }, places: { type: 'array', items: { type: 'string' }, description: 'betroffene Orte' } }, ['timeline']),
+    run: a => internalCall('POST', '/api/v1/worldnote', {}, a) },
+  { name: 'delete_world_note', title: 'Weltnotiz löschen', description: 'Weltnotiz löschen (id oder exakter Titel).', inputSchema: S({ timeline: TL, title: str('Titel'), id: str('id') }, ['timeline']), run: a => internalCall('DELETE', '/api/v1/worldnote', {}, a) },
   { name: 'list_characters', title: 'Charaktere auflisten', description: 'Charaktere einer Zeitlinie (Name, Rolle, Fraktion, Ort, Status). Filter: Suchtext, Fraktion, Ort.', ro: true,
     inputSchema: S({ timeline: TL, query: str('Suchtext'), faction: str('Fraktion'), place: str('Ort/Heimatwelt'), group: str('Gruppe'), lang: LG }, ['timeline']),
     run: (a, v) => internalCall('GET', '/api/v1/characters', { timeline: a.timeline, q: a.query, faction: a.faction, place: a.place, group: a.group, lang: a.lang, format: 'text' }, null, v) },
@@ -830,6 +888,7 @@ const MCP_TOOLS = [
 const MCP_INSTRUCTIONS = 'Ascandir InteractiveMap: interaktive Karte (Star Wars u. eigene Welten) mit Zeitlinien, Zeitaltern, Fraktionen und Orten. ' +
   'Der Kanon ist schreibgeschützt – Änderungen nur in eigenen Zeitlinien (vorher list_timelines oder copy_timeline). Jahre als "3640 BBY"/"4 ABY". ' +
   'Vor Änderungen den Stand mit get_place/get_state lesen. Beschreibungen kurz und ohne Präfixe. ' +
+  'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
   'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse.';
 async function handleMcp(req, res, url, writeAllowed) {
