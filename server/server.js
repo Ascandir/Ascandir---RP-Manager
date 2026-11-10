@@ -23,9 +23,11 @@ const READONLY = /^(1|true|yes)$/i.test(process.env.IAM_READONLY || '');
 // Selbst-Update per Webhook, z.B. Watchtower-HTTP-API (http://<updater>:8080/v1/update) oder ein Portainer-Webhook
 const UPDATE_HOOK = process.env.IAM_UPDATE_WEBHOOK || '';
 const UPDATE_HOOK_TOKEN = process.env.IAM_UPDATE_WEBHOOK_TOKEN || '';
+const PUBLIC_URL = (process.env.IAM_PUBLIC_URL || '').replace(/\/+$/, ''); // optional, z.B. https://rp.ascandir.com (für Export-Links)
 const PUBLIC_VIEW = !/^(0|false|no)$/i.test(process.env.IAM_PUBLIC_VIEW || 'true'); // Gäste dürfen ansehen
 const VERSION = (() => { try { return require(path.join(__dirname, '..', 'package.json')).version; } catch { return 'docker'; } })();
-const DIRS = ['worlds', 'timelines'];
+const DIRS = ['worlds', 'timelines', 'maps'];
+const FMAP = require(path.join(SRC_DIR, 'fantasymap.js'));
 for (const d of DIRS) fs.mkdirSync(path.join(DATA_DIR, d), { recursive: true });
 
 // ---------------------------------------------------------------- Benutzer & Rechte
@@ -519,6 +521,163 @@ function saveTimeline(t) {
   const p = safeFile('timelines', file), tmp = p + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(c, null, 2), 'utf8'); fs.renameSync(tmp, p);
 }
+// ---------------------------------------------------------------- Fantasy-Karten (Vektor, eigener Ordner data/maps)
+// Eine Datei pro Karte (<id>.json). Karten gehören zu einer eigenen Welt (world) und optional zu einer Zeitlinie (timeline).
+// Rechte: Ansehen wie Welt/Zeitlinie, Bearbeiten = Schreibrecht auf Welt bzw. Zeitlinie, Löschen = Admin.
+// Jede Speicherung erhöht "rev"; wer mit veralteter rev speichert, bekommt 409 (kein stilles Überschreiben).
+const mapErr = (msg, code) => Object.assign(new Error(msg), { code });
+function customWorld(id) { return listJson('worlds').find(w => w.id === id) || null; }
+function mapViewOk(who, m) {
+  if (!m || !m.world) return false;
+  if (m.timeline) { const t = listJson('timelines').find(x => x.id === m.timeline); return !!t && canView(who, m.world, m.timeline, !!t.readonly); }
+  return who.admin || canView(who, m.world, null) || listJson('timelines').some(t => (t.world || 'starwars') === m.world && canView(who, m.world, t.id));
+}
+function mapEditOk(who, m) {
+  if (!m || !m.world || !customWorld(m.world)) return false;
+  if (m.timeline) { const t = listJson('timelines').find(x => x.id === m.timeline); return !!t && !t.readonly && (t.world || 'starwars') === m.world && canEdit(who, m.world, m.timeline); }
+  return canEdit(who, m.world, null);
+}
+const mapAdminOk = (who, m) => !!m && (m.timeline ? canAdmin(who, m.world, m.timeline) : canAdmin(who, m.world, null));
+function loadMaps(who) { return listJson('maps').filter(m => m.format === FMAP.FORMAT && mapViewOk(who, m)); }
+function findWorldQ(q, lang) {
+  if (!q) return null; const ql = String(q).toLowerCase();
+  const ws = allWorlds(lang); return ws.find(w => w.id === q) || ws.find(w => String(w.name || '').toLowerCase() === ql) || null;
+}
+// Karte finden: map = id oder Name; world/timeline grenzen ein. Ohne map: Karte der Zeitlinie, sonst Hauptkarte der Welt.
+function resolveMap(q, lang, who) {
+  let maps = loadMaps(who);
+  const t = q.timeline ? findTimeline(q.timeline, lang) : null;
+  if (q.timeline && !t) throw mapErr('timeline not found', 404);
+  const w = q.world ? findWorldQ(q.world, lang) : null;
+  if (q.world && !w) throw mapErr('world not found', 404);
+  if (q.map) {
+    const byId = maps.find(m => m.id === q.map); if (byId) return byId;
+    const ql = String(q.map).toLowerCase();
+    let c = maps.filter(m => String(m.name).toLowerCase() === ql);
+    if (w) c = c.filter(m => m.world === w.id); if (t) c = c.filter(m => m.timeline === t.id);
+    if (c.length === 1) return c[0];
+    if (c.length > 1) throw mapErr('Mehrere Karten heißen so – bitte die Karten-id angeben: ' + c.map(m => m.id).join(', '), 409);
+    throw mapErr('map not found', 404);
+  }
+  if (t) { const m = maps.find(x => x.timeline === t.id); if (m) return m; maps = maps.filter(x => x.world === t.world && !x.timeline); }
+  else if (w) maps = maps.filter(x => x.world === w.id && !x.timeline);
+  else throw mapErr('map, world oder timeline angeben', 400);
+  const m = maps.find(x => x.primary) || maps[0];
+  if (!m) throw mapErr('Für diese Welt/Zeitlinie gibt es noch keine Karte (create_map)', 404);
+  return m;
+}
+function saveMapFile(m) {
+  const c = Object.assign({}, m); delete c._file;
+  const p = safeFile('maps', m.id + '.json'), tmp = p + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(c), 'utf8'); fs.renameSync(tmp, p);
+}
+function mapListItem(m) { return { id: m.id, name: m.name, world: m.world, timeline: m.timeline || null, primary: !!m.primary, width: m.width, height: m.height, style: m.style, features: (m.features || []).length, rev: m.rev, updated: m.updated }; }
+// Verknüpfungen zu Orten: placeId darf id oder Name eines Ortes aus den Zeitlinien der Welt sein (wird zur id aufgelöst)
+function worldPlaces(world) { const out = []; for (const t of listJson('timelines')) if ((t.world || 'starwars') === world) for (const o of t.objects || []) out.push(o); return out; }
+function resolvePlaceIds(map, ops) {
+  const places = worldPlaces(map.world), warnings = [];
+  const fix = (o, where) => {
+    if (!o || o.placeId == null || o.placeId === '') return;
+    if (places.some(p => p.id === o.placeId)) return;
+    const ql = String(o.placeId).toLowerCase(), p = places.find(x => String(x.name || '').toLowerCase() === ql);
+    if (p) o.placeId = p.id; else warnings.push(`${where}: Ort "${o.placeId}" ist in den Zeitlinien dieser Welt unbekannt (Verknüpfung trotzdem gespeichert)`);
+  };
+  ops.forEach((o, i) => { if (o && o.op === 'add') fix(o.feature, `ops[${i}]`); else if (o && o.op === 'update') fix(o, `ops[${i}]`); });
+  return warnings;
+}
+function mapOverview(m, lang, detail) {
+  const s = FMAP.summarize(m);
+  if (detail === 'full') return Object.assign(s, { map: (() => { const c = Object.assign({}, m); delete c._file; return c; })() });
+  const lim = Math.min(400, m.features.length);
+  return Object.assign(s, { features: m.features.slice(0, lim).map(f => FMAP.brief(f, m)), featuresTruncated: m.features.length > lim,
+    coordinateSystem: `x 0…${m.width} (links→rechts), y 0…${m.height} (oben→unten)`,
+    hint: lang === 'en' ? 'Use find_map_features for geometry; change objects by id.' : 'Geometrie mit find_map_features (geometry=true) holen; Objekte immer per id ändern.' });
+}
+function mapText(m, lang) {
+  const s = FMAP.summarize(m), de = lang !== 'en';
+  const L = [`${de ? 'Karte' : 'Map'}: ${m.name} [id: ${m.id}] · ${m.width}×${m.height} · ${de ? 'Stil' : 'style'} ${m.style} · rev ${m.rev}`,
+    `${de ? 'Objekte' : 'Features'}: ${s.featureCount} – ` + Object.entries(s.byType).map(([k, v]) => `${k} ${v}`).join(', ')];
+  for (const f of m.features.slice(0, 300)) { const b = FMAP.featureBBox(f, m).map(v => Math.round(v)); L.push(`- ${f.id} · ${f.type}${f.name || (f.label && f.label.text) ? ' „' + (f.name || f.label.text) + '“' : ''} · ${f.layer} · bbox ${b.join(',')}`); }
+  if (m.features.length > 300) L.push(`… (${m.features.length - 300} ${de ? 'weitere' : 'more'})`);
+  return L.join('\n');
+}
+function parseBBox(v) {
+  if (v == null || v === '') return undefined;
+  const a = (Array.isArray(v) ? v : String(v).split(',')).map(Number);
+  if (a.length !== 4 || a.some(x => !isFinite(x))) throw mapErr('bbox: x1,y1,x2,y2', 400);
+  return a;
+}
+const listParam = v => v == null || v === '' ? undefined : (Array.isArray(v) ? v : String(v).split(',')).map(s => String(s).trim()).filter(Boolean);
+function mapRead(req, res, url, parts, lang) {
+  const q = url.searchParams, p = { map: q.get('map'), world: q.get('world'), timeline: q.get('timeline') };
+  if (parts[0] === 'maps') {
+    const w = p.world ? findWorldQ(p.world, lang) : null, t = p.timeline ? findTimeline(p.timeline, lang) : null;
+    return send(res, 200, { maps: loadMaps(VIEWER).filter(m => (!w || m.world === w.id) && (!t || m.timeline === t.id || (!m.timeline && m.world === t.world))).map(mapListItem) });
+  }
+  const m = FMAP.normalizeMap(resolveMap(p, lang, VIEWER));
+  const sub = parts[1] || '';
+  if (!sub) {
+    if (q.get('format') === 'text') return send(res, 200, mapText(m, lang), 'text/plain; charset=utf-8');
+    return send(res, 200, mapOverview(m, lang, q.get('detail')));
+  }
+  if (sub === 'features') {
+    const near = q.get('near') ? String(q.get('near')).split(',').map(Number) : undefined;
+    const r = FMAP.query(m, { ids: listParam(q.getAll('id').length > 1 ? q.getAll('id') : q.get('ids') || q.get('id')), bbox: parseBBox(q.get('bbox')), type: listParam(q.get('type')), layer: listParam(q.get('layer')), text: q.get('q') || undefined, placeId: q.get('placeId') || undefined, near, limit: +q.get('limit') || 100 });
+    const geo = q.get('geometry') === '1' || q.get('geometry') === 'true';
+    return send(res, 200, { map: m.id, rev: m.rev, total: r.total, truncated: r.truncated, features: geo ? r.features : r.features.map(f => FMAP.brief(f, m)) });
+  }
+  if (sub === 'svg') {
+    const svg = FMAP.toSVG(m);
+    return send(res, 200, svg, 'image/svg+xml; charset=utf-8', q.get('download') ? { 'Content-Disposition': `attachment; filename="${slug(m.name)}.svg"` } : {});
+  }
+  return send(res, 404, { error: 'unknown endpoint' });
+}
+async function mapWrite(req, res, url, parts, b, lang) {
+  const sub = parts[1] || '', who = VIEWER;
+  const scope = { map: b.map, world: b.world, timeline: b.timeline };
+  const checkRev = m => { if (b.expectRev != null && +b.expectRev !== m.rev) throw mapErr(`Die Karte wurde inzwischen geändert (rev ${m.rev}, erwartet ${b.expectRev}). Bitte neu laden.`, 409); };
+  if (!sub && req.method === 'POST') { // Karte anlegen
+    const w = findWorldQ(b.world, lang);
+    if (!w) throw mapErr('world not found (eigene Welt angeben)', 404);
+    if (w.builtin) throw mapErr('Karten können nur für eigene Welten angelegt werden (nicht für die eingebaute Star-Wars-Galaxie)', 409);
+    let tl = null;
+    if (b.timeline) { const t = findTimeline(b.timeline, lang); if (!t) throw mapErr('timeline not found', 404); if (t.world !== w.id) throw mapErr('Zeitlinie gehört nicht zu dieser Welt', 400); if (t.readonly) throw mapErr('Zeitlinie ist schreibgeschützt', 409); tl = t.id; }
+    const name = String(b.name || '').trim(); if (!name) throw mapErr('name required', 400);
+    const all = listJson('maps');
+    if (all.some(m => m.world === w.id && (m.timeline || null) === tl && String(m.name).toLowerCase() === name.toLowerCase())) throw mapErr(`Es gibt hier schon eine Karte „${name}“ – vorhandene Karte mit update_map ändern oder anderen Namen wählen`, 409);
+    const m = FMAP.createMap({ name, world: w.id, timeline: tl, width: b.width, height: b.height, style: b.style, background: b.background, border: b.border,
+      primary: b.primary != null ? !!b.primary : !all.some(x => x.world === w.id && !x.timeline) && !tl });
+    if (!mapEditOk(who, m)) throw mapErr('Keine Bearbeitungsrechte für diese Welt/Zeitlinie / no edit permission', 403);
+    if (m.primary && !tl) for (const o of all.filter(x => x.world === w.id && !x.timeline && x.primary)) { o.primary = false; saveMapFile(o); }
+    saveMapFile(m);
+    return send(res, 201, { ok: true, id: m.id, name: m.name, rev: m.rev, width: m.width, height: m.height });
+  }
+  const m0 = resolveMap(scope, lang, who);
+  if (!mapEditOk(who, m0)) throw mapErr('Keine Bearbeitungsrechte für diese Karte / no edit permission', 403);
+  const m = FMAP.normalizeMap(m0); checkRev(m);
+  if (!sub && req.method === 'PATCH') { // Metadaten ändern
+    if (b.name != null && String(b.name).trim().toLowerCase() !== m.name.toLowerCase() && listJson('maps').some(x => x.id !== m.id && x.world === m.world && (x.timeline || null) === (m.timeline || null) && String(x.name).toLowerCase() === String(b.name).trim().toLowerCase())) throw mapErr('Name schon vergeben', 409);
+    const n = FMAP.normMeta(m, b); n.rev = m.rev + 1; n.updated = new Date().toISOString();
+    if (n.primary && !n.timeline && !m.primary) for (const o of listJson('maps').filter(x => x.world === n.world && !x.timeline && x.primary && x.id !== n.id)) { o.primary = false; saveMapFile(o); }
+    saveMapFile(n); return send(res, 200, { ok: true, id: n.id, rev: n.rev });
+  }
+  if (sub === 'features') {
+    let ops;
+    if (req.method === 'POST') ops = Array.isArray(b.ops) ? b.ops : Array.isArray(b.features) ? b.features.map(f => ({ op: 'add', feature: f })) : null;
+    else if (req.method === 'PATCH') ops = Array.isArray(b.updates) ? b.updates.map(u => Object.assign({}, u, { op: 'update' })) : null;
+    else if (req.method === 'DELETE') {
+      const ids = Array.isArray(b.ids) ? b.ids : null;
+      if (!ids || !ids.length) throw mapErr('ids (Liste von Objekt-ids) required – es wird nie „alles“ gelöscht', 400);
+      ops = ids.map(id => ({ op: 'delete', id: String(id) }));
+    }
+    if (!ops) throw mapErr(req.method === 'POST' ? 'features oder ops required' : 'updates required', 400);
+    const warnings = resolvePlaceIds(m, ops);
+    const r = FMAP.applyOps(m, ops);
+    saveMapFile(r.map);
+    return send(res, 200, Object.assign({ ok: true, map: m.id, rev: r.map.rev, featureCount: r.map.features.length }, r.result, warnings.length ? { warnings } : {}));
+  }
+  return send(res, 404, { error: 'unknown endpoint' });
+}
 const findFaction = (t, n) => { const q = String(n || '').toLowerCase().trim(); return t.factions.find(f => f.id === n || f.name.toLowerCase() === q) || null; };
 function eraForWrite(t, b, lang) {
   if (b.era) { const q = String(b.era).toLowerCase(); const e = t.eras.find(x => x.id === b.era || x.name.toLowerCase() === q); if (e) return e; }
@@ -538,6 +697,7 @@ async function apiWrite(req, res, url, parts) {
   const q = url.searchParams, lang = (b.lang || q.get('lang')) === 'en' ? 'en' : 'de';
   const tlName = b.timeline || q.get('timeline');
   const ep = parts.join('/');
+  if (parts[0] === 'map') return mapWrite(req, res, url, parts, b, lang);
 
   if (ep === 'timeline/copy' && req.method === 'POST') {
     const src = findTimeline(b.from || 'canon', lang); if (!src) return send(res, 404, { error: 'source timeline not found' });
@@ -848,11 +1008,18 @@ async function apiV1(req, res, url) {
       'POST /api/v1/chapter | DELETE /api/v1/chapter | POST /api/v1/chapter/order': 'Kapitel anlegen/ändern (title, newTitle, summary, after, sections) / löschen / sortieren',
       'POST /api/v1/story/order': 'Story-Abschnitte sortieren (ids, adjustYears)',
       'POST /api/v1/story | PATCH /api/v1/story | DELETE /api/v1/story': 'Story-Abschnitt anlegen (title, text, year, places) / ändern (id, append) / löschen (id)',
-      'PUT /api/v1/timeline?timeline=': 'Komplette Zeitlinie ersetzen'
+      'PUT /api/v1/timeline?timeline=': 'Komplette Zeitlinie ersetzen',
+      'GET /api/v1/maps?world=&timeline=': 'Gezeichnete Karten eigener Welten',
+      'GET /api/v1/map?map=&world=&timeline=&detail=full&format=text': 'Karte: Überblick bzw. komplett',
+      'GET /api/v1/map/features?map=&ids=&bbox=x1,y1,x2,y2&type=&layer=&q=&near=x,y,r&geometry=1&limit=': 'Kartenobjekte suchen',
+      'GET /api/v1/map/svg?map=&download=1': 'Karte als SVG',
+      'POST /api/v1/map | PATCH /api/v1/map': 'Karte anlegen (world, timeline, name, width, height, style) / Metadaten ändern (expectRev)',
+      'POST /api/v1/map/features | PATCH /api/v1/map/features | DELETE /api/v1/map/features': 'Objekte hinzufügen (features oder ops, atomar) / ändern (updates per id) / löschen (ids)'
     },
     hints: { year: 'z.B. "3640 VSY", "3640 BBY", "-3640", "4 NSY"', timeline: 'ID, Name oder Dateiname; leer = Kanon' }
   });
   const ep = parts[0];
+  if (ep === 'maps' || ep === 'map') return mapRead(req, res, url, parts, lang);
   if (ep === 'worlds') return send(res, 200, allWorlds(lang));
   if (ep === 'timelines') return send(res, 200, allTimelines(lang).filter(t => !q.get('world') || t.world === q.get('world'))
     .map(t => ({ id: t.id, name: t.name, world: t.world, readonly: !!t.readonly, file: t._file || null, eras: t.eras.map(e => ({ name: e.name, year: e.year, label: fmtYear(e.year, yearFmt(t, lang)) })) })));
@@ -948,7 +1115,7 @@ function internalCall(method, pathname, params, body, viewer) {
     req.method = method; req.headers = { host: 'internal' };
     req.iamViewer = viewer || MCP_VIEWER || { guest: true, perms: { worlds: {}, timelines: {} } };
     const res = { code: 200, writeHead(c) { this.code = c; }, end(d) { resolve({ code: this.code, body: d == null ? '' : d.toString() }); }, write() { } };
-    Promise.resolve(apiV1(req, res, u)).catch(e => resolve({ code: 500, body: JSON.stringify({ error: e.message }) }));
+    Promise.resolve(apiV1(req, res, u)).catch(e => resolve({ code: Number.isInteger(e.code) ? e.code : (e instanceof SyntaxError ? 400 : 500), body: JSON.stringify(Object.assign({ error: e.message }, e.path ? { path: e.path } : {})) }));
   });
 }
 const S = (props, required = []) => ({ type: 'object', properties: props, required });
@@ -957,6 +1124,12 @@ const TL = str('Zeitlinie (Name oder ID). Leer = Kanon (schreibgeschützt).'), Y
 const ITEM = { type: 'object', properties: { name: { type: 'string' }, newName: { type: 'string' }, qty: { type: 'number' }, qtyDelta: { type: 'number' }, type: { type: 'string', enum: ['gear', 'property'], description: 'gear = Ausrüstung/trägt bei sich, property = Eigentum (Schiff, Wohnung …)' },
   location: { type: 'string', description: 'wo, z.B. "am Gürtel", "auf der Trailblazer"' }, important: { type: 'boolean', description: 'storyrelevant' }, note: { type: 'string' } }, required: ['name'] };
 const REL = { type: 'object', properties: { name: { type: 'string' }, relation: { type: 'string', description: 'z.B. Schwester, Rivale, Informant' }, kind: { type: 'string', enum: ['ally', 'enemy', 'family', 'contact', 'other'] } }, required: ['name'] };
+const MAPQ = { map: str('Karten-id oder Name (leer = Karte der Zeitlinie bzw. Hauptkarte der Welt)'), world: str('Welt (id oder Name)'), timeline: str('Zeitlinie (Name oder id)') };
+const GEOM = { type: 'object', properties: { type: { type: 'string', enum: ['point', 'line', 'polygon', 'group'] }, coordinates: { type: 'array', items: {}, description: 'point: [x,y] · line/group: [[x,y],…] · polygon: [[[x,y],…]]' }, sizes: { type: 'array', items: { type: 'number' }, description: 'nur group: Größe je Symbol' } }, required: ['type', 'coordinates'] };
+const MSTYLE = { type: 'object', description: 'fill, stroke (#rrggbb/rgba()/none), width, dash (solid|dashed|dotted|dashdot|long), opacity 0–1, size (Symbolgröße), symbol, density, smooth, coast', properties: { fill: { type: 'string' }, stroke: { type: 'string' }, width: { type: 'number' }, dash: { type: 'string', enum: Object.keys(FMAP.DASHES) }, opacity: { type: 'number' }, size: { type: 'number' }, symbol: { type: 'string', enum: FMAP.SYMBOLS }, density: { type: 'number' }, smooth: { type: 'boolean' }, coast: { type: 'boolean' } } };
+const MLABEL = { type: 'object', description: 'Beschriftung', properties: { text: { type: 'string' }, size: { type: 'number' }, color: { type: 'string' }, halo: { type: 'string' }, align: { type: 'string', enum: ['left', 'center', 'right'] }, angle: { type: 'number' }, font: { type: 'string', enum: Object.keys(FMAP.FONTS) }, italic: { type: 'boolean' }, bold: { type: 'boolean' }, caps: { type: 'boolean' }, spacing: { type: 'number' }, dx: { type: 'number' }, dy: { type: 'number' } } };
+const FEATURE = { type: 'object', properties: { id: str('optional eigene id (A–Z, 0–9, _ -)'), type: { type: 'string', enum: Object.keys(FMAP.TYPES) }, layer: { type: 'string', enum: FMAP.LAYERS, description: 'Standard je nach Typ' }, geometry: GEOM, style: MSTYLE, label: MLABEL, name: { type: 'string' }, placeId: str('Ort der Welt (id oder Name)'), meta: { type: 'object' } }, required: ['type', 'geometry'] };
+const UPDATE = { type: 'object', properties: { id: { type: 'string' }, geometry: GEOM, translate: { type: 'array', items: { type: 'number' }, description: '[dx, dy]' }, scale: { description: 'Faktor oder {factor, origin:[x,y]}' }, rotate: { type: 'number' }, style: MSTYLE, label: MLABEL, name: { type: 'string' }, type: { type: 'string', enum: Object.keys(FMAP.TYPES) }, layer: { type: 'string', enum: FMAP.LAYERS }, placeId: { type: 'string' }, meta: { type: 'object' }, order: { type: 'string', enum: ['front', 'back'], description: 'nach vorne/hinten in der Zeichenreihenfolge' } }, required: ['id'] };
 const MCP_TOOLS = [
   { name: 'list_timelines', title: 'Zeitlinien auflisten', description: 'Alle Welten-Zeitlinien mit ihren Zeitaltern.', ro: true, inputSchema: S({ lang: LG }), run: (a, v) => internalCall('GET', '/api/v1/timelines', a, null, v) },
   { name: 'get_summary', title: 'Lage der Galaxis', description: 'Kurzer Text zum Stand in einem Jahr: Zeitalter, Mächte und ihre Gebiete, optional Eckdaten zu Orten. Ideal als Kontext für Geschichten.', ro: true,
@@ -1036,7 +1209,43 @@ const MCP_TOOLS = [
     run: a => internalCall('POST', '/api/v1/character/image', {}, a) },
   { name: 'delete_character', title: 'Charakter löschen', description: 'Charakter löschen (exakter Name oder id).', inputSchema: S({ timeline: TL, name: str('exakter Name oder id') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/character', {}, Object.assign({}, a, { id: a.name })) },
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
-  { name: 'set_control', title: 'Kontrolle setzen', description: 'Legt fest, welche Fraktion einen Ort ab dem Zeitalter des angegebenen Jahres kontrolliert (faction leer = neutral).', inputSchema: S({ timeline: TL, place: str('Ort'), faction: str('Fraktion'), year: YR, era: str('oder Name des Zeitalters') }, ['timeline', 'place']), run: a => internalCall('POST', '/api/v1/control', {}, a) }
+  { name: 'set_control', title: 'Kontrolle setzen', description: 'Legt fest, welche Fraktion einen Ort ab dem Zeitalter des angegebenen Jahres kontrolliert (faction leer = neutral).', inputSchema: S({ timeline: TL, place: str('Ort'), faction: str('Fraktion'), year: YR, era: str('oder Name des Zeitalters') }, ['timeline', 'place']), run: a => internalCall('POST', '/api/v1/control', {}, a) },
+  // Fantasy-Karten
+  { name: 'list_maps', title: 'Karten auflisten', description: 'Gezeichnete Vektor-Karten eigener Welten (id, Name, Welt, Zeitlinie, Größe, Anzahl Objekte, rev).', ro: true,
+    inputSchema: S({ world: str('Welt (id oder Name)'), timeline: str('Zeitlinie (Name oder id)') }), run: (a, v) => internalCall('GET', '/api/v1/maps', a, null, v) },
+  { name: 'get_map', title: 'Karte lesen', description: 'Überblick einer Karte: Größe, Koordinatensystem, Ebenen, Objekte je Typ und eine Liste aller Objekte mit id, Typ, Name und Begrenzungsrahmen (bbox). detail="full" liefert die komplette Karte inkl. Geometrie (kann groß sein). Ohne map wird die Karte der Zeitlinie bzw. die Hauptkarte der Welt genommen.', ro: true,
+    inputSchema: S(Object.assign({}, MAPQ, { detail: { type: 'string', enum: ['overview', 'full'] } })), run: (a, v) => internalCall('GET', '/api/v1/map', { map: a.map, world: a.world, timeline: a.timeline, detail: a.detail }, null, v) },
+  { name: 'find_map_features', title: 'Kartenobjekte suchen', description: 'Objekte einer Karte finden: per ids, Bereich (bbox = [x1,y1,x2,y2]), Typ, Ebene, Text (Name/Beschriftung), placeId oder Nähe (near = [x,y,radius]). geometry=true liefert die vollständigen Koordinaten.', ro: true,
+    inputSchema: S(Object.assign({}, MAPQ, { ids: { type: 'array', items: { type: 'string' } }, bbox: { type: 'array', items: { type: 'number' }, description: '[x1, y1, x2, y2]' }, type: { type: 'array', items: { type: 'string', enum: Object.keys(FMAP.TYPES) } }, layer: { type: 'array', items: { type: 'string', enum: FMAP.LAYERS } }, query: str('Text in Name/Beschriftung'), placeId: str('verknüpfter Ort (id)'), near: { type: 'array', items: { type: 'number' }, description: '[x, y, radius]' }, geometry: { type: 'boolean' }, limit: { type: 'number', description: 'max. 500, Standard 100' } })),
+    run: (a, v) => internalCall('GET', '/api/v1/map/features', { map: a.map, world: a.world, timeline: a.timeline, ids: (a.ids || []).join(','), bbox: a.bbox ? a.bbox.join(',') : '', type: (a.type || []).join(','), layer: (a.layer || []).join(','), q: a.query, placeId: a.placeId, near: a.near ? a.near.join(',') : '', geometry: a.geometry ? '1' : '', limit: a.limit }, null, v) },
+  { name: 'export_map', title: 'Karte exportieren (SVG)', description: 'Exportiert die Karte als SVG-Vektorgrafik. Liefert einen Link (für angemeldete Nutzer im Browser abrufbar); inline=true liefert zusätzlich den SVG-Text (bis 300 KB). PNG-Export gibt es in der App (Zeichnen → Export).', ro: true,
+    inputSchema: S(Object.assign({}, MAPQ, { inline: { type: 'boolean' } })),
+    run: async (a, v) => {
+      const r = await internalCall('GET', '/api/v1/map', { map: a.map, world: a.world, timeline: a.timeline }, null, v); if (r.code >= 400) return r;
+      const o = JSON.parse(r.body), svg = await internalCall('GET', '/api/v1/map/svg', { map: o.id }, null, v);
+      const out = { map: o.id, name: o.name, rev: o.rev, format: 'svg', bytes: Buffer.byteLength(svg.body), url: `${PUBLIC_URL || ''}/api/v1/map/svg?map=${encodeURIComponent(o.id)}&download=1`, png: 'In der App unter Zeichnen → Export → PNG' };
+      if (a.inline) { if (out.bytes <= 300000) out.svg = svg.body; else out.inlineError = 'SVG zu groß für inline (über 300 KB) – bitte den Link verwenden'; }
+      return { code: 200, body: JSON.stringify(out, null, 2) };
+    } },
+  { name: 'create_map', title: 'Karte anlegen', description: 'Neue, leere Vektor-Karte für eine eigene Welt anlegen (optional nur für eine Zeitlinie). Standardgröße 2300×1700 (passt zur Weltkarte der App), Koordinaten: x nach rechts, y nach unten. Gibt es den Namen schon, wird abgelehnt (nichts wird überschrieben).',
+    inputSchema: S({ world: str('Welt (id oder Name)'), timeline: str('optional: nur für diese Zeitlinie'), name: str('Name der Karte'), width: { type: 'number' }, height: { type: 'number' }, style: { type: 'string', enum: Object.keys(FMAP.PRESETS), description: 'parchment = Pergament (farbig), ink = Tusche' }, background: str('Meeresfarbe #rrggbb'), border: { type: 'boolean', description: 'Zierrahmen' }, primary: { type: 'boolean', description: 'Hauptkarte der Welt (wird in der Kartenansicht gezeigt)' } }, ['world', 'name']),
+    run: a => internalCall('POST', '/api/v1/map', {}, a) },
+  { name: 'update_map', title: 'Kartendaten ändern', description: 'Metadaten einer Karte ändern: Name, Größe, Stil, Hintergrund, Rahmen, Hauptkarte, Ebenen (sichtbar) und Typ-Paletten (palette = {Typ: Stil}, gilt für alle Objekte dieses Typs ohne eigenen Stil).',
+    inputSchema: S(Object.assign({}, MAPQ, { name: str('neuer Name'), width: { type: 'number' }, height: { type: 'number' }, style: { type: 'string', enum: Object.keys(FMAP.PRESETS) }, background: str('#rrggbb'), border: { type: 'boolean' }, primary: { type: 'boolean' },
+      layers: { type: 'object', description: '{ebene: {visible: true|false}}' }, palette: { type: 'object', description: '{typ: {fill, stroke, width, …}}; null entfernt' }, expectRev: { type: 'number', description: 'optional: nur ändern, wenn die Karte noch diese rev hat' } })),
+    run: a => internalCall('PATCH', '/api/v1/map', {}, a) },
+  { name: 'add_map_features', title: 'Kartenobjekte hinzufügen', description: 'Fügt mehrere Objekte in EINEM atomaren Schritt hinzu (alles oder nichts, max. 500). Gibt die neuen ids zurück. Geometrie: point [x,y] · line [[x,y],…] · polygon [[[x,y],…]] (Ring, ohne Wiederholung des Startpunkts) · group [[x,y],…] (mehrere Symbole, z.B. einzelne Gipfel; optional sizes). ' +
+      'Typen: land/island (Küste), lake, river (line, geglättet), mountains (group = Gebirgskette aus Gipfeln, line = Symbole entlang einer Linie, polygon = Fläche), mountain (point), hills, forest, swamp, desert, road, path, border, region, city, town, village, fortress, tower, ruin, label, compass, ship, serpent, cartouche, symbol. ' +
+      'Beispiel Fluss: {type:"river", geometry:{type:"line", coordinates:[[820,410],[900,520],[1010,690]]}, label:{text:"Silberlauf"}}. placeId darf id oder Name eines Ortes der Welt sein.',
+    inputSchema: S(Object.assign({}, MAPQ, { features: { type: 'array', items: FEATURE }, expectRev: { type: 'number' } }), ['features']),
+    run: a => internalCall('POST', '/api/v1/map/features', {}, a) },
+  { name: 'update_map_features', title: 'Kartenobjekte ändern', description: 'Ändert Objekte per id in EINEM atomaren Schritt (max. 500): style/label werden zusammengeführt (null entfernt eine Eigenschaft), geometry ersetzt die Form, translate [dx,dy] verschiebt, scale (Faktor oder {factor, origin:[x,y]}) skaliert, rotate (Grad) dreht, außerdem name, type, layer, placeId, meta. Nicht genannte Objekte bleiben unverändert.',
+    inputSchema: S(Object.assign({}, MAPQ, { updates: { type: 'array', items: UPDATE }, expectRev: { type: 'number' } }), ['updates']),
+    run: a => internalCall('PATCH', '/api/v1/map/features', {}, a) },
+  { name: 'delete_map_features', title: 'Kartenobjekte löschen', description: 'Löscht die genannten Objekte (nur per id, max. 500, atomar). Unbekannte ids brechen den ganzen Vorgang ab. Ganze Karten werden über den Connector nie gelöscht.', destructive: true,
+    inputSchema: S(Object.assign({}, MAPQ, { ids: { type: 'array', items: { type: 'string' } }, expectRev: { type: 'number' } }), ['ids']),
+    run: a => internalCall('DELETE', '/api/v1/map/features', {}, a) }
+
 ];
 const MCP_INSTRUCTIONS = 'Ascandir RP-Manager: interaktive Karte (Star Wars u. eigene Welten) mit Zeitlinien, Zeitaltern, Fraktionen und Orten. ' +
   'Der Kanon ist schreibgeschützt – Änderungen nur in eigenen Zeitlinien (vorher list_timelines oder copy_timeline). Jahre als "3640 BBY"/"4 ABY". ' +
@@ -1044,7 +1253,8 @@ const MCP_INSTRUCTIONS = 'Ascandir RP-Manager: interaktive Karte (Star Wars u. e
   'WICHTIG: Jede Zeitlinie kann feste Weltregeln haben (list_rules). Sie gelten immer, haben Vorrang vor allem anderen und werden zu Beginn mit list_rules oder get_summary gelesen; ändern nur auf ausdrücklichen Wunsch des Nutzers. ' +
   'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
-  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse.';
+  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. ' +
+  'Eigene Welten können gezeichnete Vektor-Karten haben (list_maps, get_map, find_map_features lesen; create_map, add_map_features, update_map_features, delete_map_features ändern; export_map für SVG). Objekte werden IMMER per id geändert, nie per Name; vor Änderungen get_map oder find_map_features aufrufen. Mehrere Objekte in einem Aufruf bündeln.';
 async function handleMcp(req, res, url, tv) {
   // tv = Betrachter aus dem Token (null = Gast). Sichtbar ist nur, was dieser Benutzer sehen darf.
   const viewerOf = () => tv || whoIs({ headers: {} }, null);
@@ -1060,7 +1270,7 @@ async function handleMcp(req, res, url, tv) {
   }
   if (req.method === 'DELETE') return send(res, 200, { ok: true });
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
-  let msg; try { msg = JSON.parse(await readBody(req, 2e6)); } catch { return send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
+  let msg; try { msg = JSON.parse(await readBody(req, 8e6)); } catch { return send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
   const tools = MCP_TOOLS.filter(t => t.ro || (writeAllowed && !READONLY));
   async function one(m) {
     const id = m.id, isNote = id === undefined;
@@ -1152,10 +1362,10 @@ const server = http.createServer(async (req, res) => {
     if (m) {
       const dir = m[1], file = m[2] ? decodeURIComponent(m[2]) : null, who = whoIs(req, url);
       if (!DIRS.includes(dir)) return send(res, 404, { error: 'unknown dir' });
-      const meta = content => { try { const j = JSON.parse(content); return dir === 'worlds' ? { world: j.id, tl: null } : { world: j.world || 'starwars', tl: j.id }; } catch { return null; } };
-      const viewOk = mt => mt && (dir === 'worlds' ? (who.admin || canView(who, mt.world, null) || listJson('timelines').some(t => (t.world || 'starwars') === mt.world && canView(who, t.world || 'starwars', t.id))) : canView(who, mt.world, mt.tl));
-      const editOk = mt => mt && (dir === 'worlds' ? who.admin || canAdmin(who, mt.world, null) : canEdit(who, mt.world, mt.tl));
-      const adminOk = mt => mt && (dir === 'worlds' ? who.admin || canAdmin(who, mt.world, null) : canAdmin(who, mt.world, mt.tl));
+      const meta = content => { try { const j = JSON.parse(content); return dir === 'worlds' ? { world: j.id, tl: null } : dir === 'maps' ? { world: j.world, timeline: j.timeline || null, map: true } : { world: j.world || 'starwars', tl: j.id }; } catch { return null; } };
+      const viewOk = mt => mt && (dir === 'maps' ? mapViewOk(who, mt) : dir === 'worlds' ? (who.admin || canView(who, mt.world, null) || listJson('timelines').some(t => (t.world || 'starwars') === mt.world && canView(who, t.world || 'starwars', t.id))) : canView(who, mt.world, mt.tl));
+      const editOk = mt => mt && (dir === 'maps' ? mapEditOk(who, mt) : dir === 'worlds' ? who.admin || canAdmin(who, mt.world, null) : canEdit(who, mt.world, mt.tl));
+      const adminOk = mt => mt && (dir === 'maps' ? mapAdminOk(who, mt) : dir === 'worlds' ? who.admin || canAdmin(who, mt.world, null) : canAdmin(who, mt.world, mt.tl));
       if (!file && req.method === 'GET') {
         const out = [];
         for (const f of fs.readdirSync(path.join(DATA_DIR, dir)).filter(f => f.toLowerCase().endsWith('.json'))) {
@@ -1171,6 +1381,23 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET') return existing != null && viewOk(meta(existing)) ? send(res, 200, existing) : send(res, 404, { error: 'not found' });
       if (READONLY) return send(res, 403, { error: 'read-only' });
       if (who.guest) return send(res, 401, { error: 'login required' });
+      if (req.method === 'PUT' && dir === 'maps') {
+        // Karten werden vollständig geprüft; rev schützt vor dem Überschreiben fremder Änderungen
+        let m; try { m = FMAP.normalizeMap(JSON.parse(await readBody(req))); } catch (e) { return send(res, e.code === 409 ? 409 : 400, Object.assign({ error: e.message }, e.path ? { path: e.path } : {})); }
+        if (file !== m.id + '.json') return send(res, 400, { error: 'Dateiname muss <id>.json sein' });
+        if (!mapEditOk(who, m)) return send(res, 403, { error: 'Keine Bearbeitungsrechte für diese Karte / no edit permission' });
+        const now = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null; // nach dem Einlesen erneut lesen
+        if (now != null) {
+          let cur; try { cur = JSON.parse(now); } catch { cur = null; }
+          if (cur && !mapEditOk(who, meta(now))) return send(res, 403, { error: 'Keine Bearbeitungsrechte / no edit permission' });
+          if (cur && (cur.world !== m.world || (cur.timeline || null) !== (m.timeline || null))) return send(res, 409, { error: 'Welt/Zeitlinie einer Karte kann nicht geändert werden' });
+          if (cur && (cur.rev || 1) !== m.rev) return send(res, 409, { error: 'Die Karte wurde inzwischen an anderer Stelle geändert', rev: cur.rev || 1, conflict: true });
+          m.rev = ((cur && cur.rev) || 1) + 1;
+        } else m.rev = 1;
+        m.updated = new Date().toISOString();
+        saveMapFile(m);
+        return send(res, 200, { ok: true, rev: m.rev });
+      }
       if (req.method === 'PUT') {
         const body = await readBody(req); const mt = meta(body); if (!mt) return send(res, 400, { error: 'invalid JSON' });
         if (existing != null) { if (!editOk(meta(existing)) || !editOk(mt)) return send(res, 403, { error: 'Keine Bearbeitungsrechte / no edit permission' }); }
@@ -1237,7 +1464,8 @@ const server = http.createServer(async (req, res) => {
           const imgs = new Set([...raw.matchAll(imgRe)].map(m => m[1])); let ib = 0; for (const i of imgs) ib += fsize(path.join(IMG_DIR, i));
           tls.push({ id: t.id, name: t.name, bytes: Buffer.byteLength(raw), images: imgs.size, imageBytes: ib });
         }
-        out.push({ id: w.id, name: w.name, bytes: w.file ? fsize(path.join(DATA_DIR, 'worlds', w.file)) : 0, timelines: tls.sort((a, b) => (b.bytes + b.imageBytes) - (a.bytes + a.imageBytes)) });
+        const mapBytes = loadMaps(who).filter(m => m.world === w.id).reduce((n, m) => n + fsize(path.join(DATA_DIR, 'maps', m._file)), 0);
+        out.push({ id: w.id, name: w.name, bytes: (w.file ? fsize(path.join(DATA_DIR, 'worlds', w.file)) : 0) + mapBytes, mapBytes, timelines: tls.sort((a, b) => (b.bytes + b.imageBytes) - (a.bytes + a.imageBytes)) });
       }
       const res2 = { worlds: out };
       if (who.admin && !who.api) {
@@ -1325,7 +1553,7 @@ const server = http.createServer(async (req, res) => {
     }
     return send(res, 200, fs.readFileSync(fp), MIME[path.extname(fp).toLowerCase()] || 'application/octet-stream', noCache);
   } catch (err) {
-    return send(res, err.code && Number.isInteger(err.code) ? err.code : (err instanceof SyntaxError ? 400 : 500), { error: err.message });
+    return send(res, err.code && Number.isInteger(err.code) ? err.code : (err instanceof SyntaxError ? 400 : 500), Object.assign({ error: err.message }, err.path ? { path: err.path } : {}));
   }
 });
 server.listen(PORT, () => {

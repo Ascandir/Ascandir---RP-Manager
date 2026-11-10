@@ -142,6 +142,68 @@ Dazu kommen Tags, Notizen, ein Porträt und eine Bildergalerie.
 - **REST:** `GET /api/v1/characters`, `GET /api/v1/character?name=…`, `POST/DELETE /api/v1/character`, `POST /api/v1/character/image`.
 - Selbst hochgeladene Bilder werden verkleinert direkt in der Zeitlinien-Datei gespeichert.
 
+### Karten zeichnen (eigene Welten)
+
+Im Reiter **✎ Zeichnen** zeichnest du für eigene Welten (nicht für die Star-Wars-Galaxie) eine echte Vektor-Karte. Sie bleibt bei jedem Zoom scharf und erscheint danach in allen Reitern als Kartenhintergrund. Orte, Fraktionen und Routen der Zeitlinie liegen weiter darüber.
+
+- **Karte anlegen:** ＋ bzw. „Karte anlegen“. Eine Karte gilt für die ganze Welt (★ = Hauptkarte) oder nur für eine Zeitlinie, z. B. für eine veränderte Welt nach einem Krieg. Eine Zeitlinien-Karte hat in dieser Zeitlinie Vorrang. Über ⚙ stellst du Name, Größe (Standard 2300×1700), Stil (Pergament oder Tusche), Meeresfarbe, Rahmen und Hauptkarte ein. Mit „durchsichtig“ bleibt das Weltbild darunter sichtbar, zum Abpausen.
+- **Werkzeuge:**
+  - Formen zeichnen: in der Symbolpalette einen Typ wählen, z. B. Land/Küste, Insel, See, Fluss, Gebirge, Wald, Sumpf, Wüste, Straße, Grenze oder Reich.
+  - Flächen und Linien: Punkte klicken, Doppelklick oder Enter beendet. Mit **Freihand** zeichnest du mit gedrückter Maustaste.
+  - Gebirge, Hügel und Wälder gibt es als Fläche, als Linie oder als **Symbolkette**: einfach darüberziehen.
+  - Orte (Stadt, Dorf, Festung, Turm, Ruine) und Deko (Windrose, Schiff, Seeschlange, Titelkartusche) setzt du mit einem Klick.
+  - **Text** setzt eine Beschriftung.
+- **Bearbeiten:**
+  - Mit **Auswählen** ein Objekt anklicken (Umschalt = mehrere, Ziehen auf leerer Fläche = Rahmen).
+  - Ziehen verschiebt. Eckpunkte ziehen ändert die Form, Alt+Klick löscht einen Eckpunkt. Der Griff unten rechts oder ＋/－ skaliert. Pfeiltasten verschieben, Entf löscht.
+  - Im Bereich *Auswahl*: Typ, Ebene, Name, Beschriftung (Größe, Farbe, Ausrichtung, Winkel, kursiv, Versalien) und Stil (Füllung, Linie, Stärke, Strich, Deckkraft, Symbolgröße, Dichte, Glättung) ändern.
+  - Objekte nach vorne oder hinten holen und mit einem **Ort der Zeitlinie verknüpfen**.
+- **Ebenen:** Gelände, Wasser, Vegetation, Wege, Grenzen, Orte, Beschriftungen, Dekoration. Jede Ebene lässt sich ein- und ausblenden und sperren. Die **Legende** zeigt die verwendeten Symbole.
+- **Rückgängig/Wiederholen:** ↶/↷ oder Strg+Z / Strg+Y. Optional gibt es ein Raster und Ausrichten am Raster. ⌂ zeigt die ganze Karte.
+- **Export:** **SVG** (Vektor, beliebig skalierbar) und **PNG** (1×, 2× oder 4×).
+- **Speichern** passiert automatisch etwa 1,5 Sekunden nach der letzten Änderung, nicht bei jeder Mausbewegung. Ändert jemand anderes (oder ChatGPT) die Karte gleichzeitig, fragt die App, ob neu geladen oder die eigene Version behalten werden soll. Nichts wird still überschrieben.
+- **Rechte:**
+  - Ansehen: wer die Welt bzw. Zeitlinie sehen darf.
+  - Zeichnen: wer Schreibrecht auf die Welt hat (Weltkarte) bzw. auf die Zeitlinie (Zeitlinien-Karte).
+  - Karte löschen: nur Admins der Welt bzw. Zeitlinie, mit Bestätigung durch Eintippen des Namens.
+  - Wird eine Welt gelöscht, verschwinden ihre Karten mit.
+
+**Speicherung:**
+- Jede Karte ist eine eigene JSON-Datei `maps/<karten-id>.json` im Datenordner (App: Benutzerordner, Docker: Volume). Ohne Datenordner liegt sie im Browser-Speicher.
+- Format (`format: "ascandir-map"`, `version: 1`):
+  - Metadaten: `id`, `name`, `world`, `timeline` (oder `null`), `width`, `height`, `style`, `palette`, `background`, `border`, `primary`, `layers`, `created`, `updated`, `rev`
+  - `features`: Objekte mit stabiler `id`, `type`, `layer`, `geometry` (`point` | `line` | `polygon` | `group`, Koordinaten verlustfrei in Kartenkoordinaten, x nach rechts, y nach unten), `style`, `label`, `name`, `placeId` und `meta`
+- Ältere Formate werden beim Laden automatisch migriert.
+- Zeitlinien, Orte, Story und Charaktere bleiben unberührt.
+
+**ChatGPT/Claude (MCP):**
+
+| Werkzeug | Zweck |
+|---|---|
+| `list_maps` | Karten einer Welt/Zeitlinie |
+| `get_map` | Überblick: Größe, Koordinatensystem, Ebenen, alle Objekte mit id/Typ/Name/bbox. `detail: "full"` liefert alles inklusive Geometrie |
+| `find_map_features` | Suche per `ids`, `bbox`, `type`, `layer`, Text, `placeId` oder `near` (`geometry: true` liefert die Koordinaten) |
+| `export_map` | SVG-Link, mit `inline: true` auch den SVG-Text. PNG gibt es in der App |
+| `create_map` | Neue Karte. Ein vorhandener Name wird abgelehnt |
+| `update_map` | Name, Größe, Stil, Hintergrund, Rahmen, Hauptkarte, Ebenen, Typ-Paletten |
+| `add_map_features` | Bis zu 500 Objekte atomar hinzufügen, gibt die neuen ids zurück. `placeId` darf auch ein Ortsname sein |
+| `update_map_features` | Per id ändern: Stil/Beschriftung zusammenführen, Geometrie ersetzen, `translate`, `scale`, `rotate`, `order`, Typ, Ebene, Ort |
+| `delete_map_features` | Per id löschen |
+
+- Alle Änderungen sind **atomar**: Ein fehlerhaftes Objekt verwirft den ganzen Aufruf, und die Fehlermeldung nennt die Stelle (z. B. `ops[1].feature.style.fill`).
+- Grenzen: 500 Änderungen pro Aufruf, 20 000 Objekte bzw. 250 000 Punkte pro Karte, 5 000 Punkte pro Objekt, Texte bis 200 Zeichen.
+- Mit `expectRev` schützt man sich vor parallelen Änderungen.
+- Ganze Karten lassen sich über den Connector bewusst **nicht** löschen.
+
+Beispiel im Chat: *„Zeichne in Eldoria eine Gebirgskette von 600/400 nach 800/410 und einen Fluss von dort bis zur Küste bei 880/1380. Mach den Fluss danach dunkelblau.“* ChatGPT legt beides mit `add_map_features` an und ändert danach nur den Fluss per id mit `update_map_features` (`style.stroke`).
+
+**REST:**
+- `GET /api/v1/maps`, `GET /api/v1/map`, `GET /api/v1/map/features`, `GET /api/v1/map/svg`
+- `POST/PATCH /api/v1/map`
+- `POST/PATCH/DELETE /api/v1/map/features`
+
+Für absolute Links im SVG-Export kann `IAM_PUBLIC_URL` gesetzt werden (z. B. `https://rp.ascandir.com`).
+
 ## Daten per JSON / GeoJSON bearbeiten
 
 Welten und Zeitlinien sind lesbare JSON-Dateien im Datenordner (*Datei → Datenordner öffnen*). Wenn du sie im Texteditor änderst, lädt die App die Änderungen automatisch neu. *Datei → Als JSON bearbeiten* öffnet einen Editor direkt in der App.
@@ -222,6 +284,7 @@ volumes:
 | `IAM_API_TOKEN` | Optionaler **Master-Token** mit vollem Zugriff auf alles. Normalerweise reichen die persönlichen Tokens der Benutzer (siehe unten). |
 | `IAM_READONLY` | `true` = nur lesen |
 | `IAM_UPDATE_WEBHOOK` / `IAM_UPDATE_WEBHOOK_TOKEN` | Optional: Update per Knopfdruck in den Einstellungen (siehe unten) |
+| `IAM_PUBLIC_URL` | Optional: öffentliche Adresse (z. B. `https://rp.ascandir.com`) für absolute Export-Links |
 
 **Update:** In Portainer beim Stack *Update the stack* mit eingeschaltetem **„Re-pull image and redeploy“** ausführen. Jede neue Version auf GitHub erzeugt automatisch ein neues Image (ca. 1–2 Minuten nach dem Release). Ist ein neueres Image verfügbar, zeigt die App das angemeldeten Admins an (abschaltbar mit `IAM_UPDATE_CHECK=false`). Alternativ eine feste Version eintragen, z. B. `ghcr.io/ascandir/ascandir---swgm:0.8.1`.
 
@@ -343,6 +406,7 @@ npm install
 npm start          # App starten
 npm run dist       # Windows-Installer nach dist/ bauen
 node server/server.js   # Server-Version lokal starten (Port 8080, Daten in ./data)
+npm test           # Tests (Kartenmodul + Server/MCP), ohne zusätzliche Pakete
 ```
 
 **Neue Version veröffentlichen:** `version` in `package.json` erhöhen und auf `main` pushen. GitHub Actions baut den Installer und legt automatisch den Tag `vX.Y.Z` und ein Release an, inklusive `latest.yml` für den Updater. Parallel entsteht das Docker-Image `ghcr.io/ascandir/ascandir---swgm` (`latest` und Versionsnummer).

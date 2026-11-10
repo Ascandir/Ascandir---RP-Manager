@@ -1,7 +1,7 @@
 {
   "name": "ascandir-rp-manager",
   "productName": "Ascandir RP-Manager",
-  "version": "0.25.2",
+  "version": "0.26.0",
   "description": "Interaktive Karte für Star Wars und eigene Welten – mit Zeitaltern, Fraktionen und eigenen Zeitlinien",
   "main": "main.js",
   "author": "Ascandir",
@@ -9,7 +9,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis --x64 --publish never"
+    "dist": "electron-builder --win nsis --x64 --publish never",
+    "test": "node --test test/*.test.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",

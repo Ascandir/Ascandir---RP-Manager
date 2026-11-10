@@ -15,7 +15,11 @@
     appInfo: async () => info,
     list: dir => fetch(`api/files/${dir}`).then(ok).then(r => r.json()),
     read: (dir, file) => fetch(`api/files/${dir}/${enc(file)}`).then(r => r.status === 404 ? null : ok(r).text()),
-    save: (dir, file, content) => fetch(`api/files/${dir}/${enc(file)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: content }).then(ok).then(() => true),
+    save: (dir, file, content) => fetch(`api/files/${dir}/${enc(file)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: content }).then(async r => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw Object.assign(new Error(j.error || (r.status + ' ' + r.statusText)), { status: r.status, body: j });
+      return Object.assign({ ok: true }, j); // z.B. { ok, rev } bei Karten
+    }),
     remove: (dir, file) => fetch(`api/files/${dir}/${enc(file)}`, { method: 'DELETE' }).then(ok).then(() => true),
     openFolder: async () => { alert(info.dataDir ? 'Server-Datenordner: ' + info.dataDir : 'Server'); return true; },
     onChange: cb => {
