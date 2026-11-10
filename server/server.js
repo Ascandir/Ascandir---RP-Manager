@@ -442,7 +442,7 @@ function charOut(t, c, full) {
   const base = { id: c.id, name: c.name, group: grp ? grp.name : '', title: c.title || '', faction: fac ? fac.name : (c.faction || ''), location: c.location || '', status: c.status || '', image: c.image || null };
   if (!full) return base;
   return Object.assign(base, { species: c.species || '', gender: c.gender || '', age: c.age || '', homeworld: c.homeworld || '', appearance: c.appearance || '', personality: c.personality || '',
-    money: c.money ?? null, currency: c.currency || '', inventory: (c.inventory || []).map(i => ({ name: i.name, qty: i.qty ?? 1, type: i.type || 'gear', location: i.location || '', important: !!i.important, note: i.note || '' })),
+    money: c.money ?? null, currency: c.currency || '', moneyLog: (c.moneyLog || []).slice(-20), inventory: (c.inventory || []).map(i => ({ name: i.name, qty: i.qty ?? 1, type: i.type || 'gear', location: i.location || '', important: !!i.important, note: i.note || '' })),
     abilities: c.abilities || '', bio: c.bio || '', notes: c.notes || '', organization: c.organization || '', master: c.master || '', knowledge: c.knowledge || '', threads: c.threads || '', tags: c.tags || [], relations: c.relations || [], gallery: (c.gallery || []).map(g => ({ src: g.src && g.src.startsWith('data:') ? '(eingebettetes Bild)' : g.src, caption: g.caption || '' })), updated: c.updated || null });
 }
 function charText(t, c, lang) {
@@ -468,6 +468,7 @@ function charText(t, c, lang) {
     const cur = o.currency || defCurrency(t);
     L.push(`\n## ${de ? 'Besitz & Inventar' : 'Possessions & inventory'}`);
     if (o.money != null) L.push(`${de ? 'Geld' : 'Money'}: ${Number(o.money).toLocaleString(de ? 'de-DE' : 'en-GB')} ${cur}`);
+    const ml = (c.moneyLog || []).slice(-5); if (ml.length) L.push((de ? 'Letzte Geldbewegungen: ' : 'Recent transactions: ') + ml.map(m => `${m.delta != null ? (m.delta > 0 ? '+' : '') + m.delta : '–'}${m.reason ? ' (' + m.reason + ')' : ''}`).join(', '));
     for (const ty of ['gear', 'property']) { const it = o.inventory.filter(i => i.type === ty); if (!it.length) continue;
       L.push(ty === 'gear' ? (de ? 'Ausrüstung / trägt bei sich:' : 'Gear / carried:') : (de ? 'Eigentum:' : 'Property:'));
       for (const i of it) L.push(`- ${i.important ? '⭐ ' : ''}${i.name}${i.qty !== 1 ? ' ×' + i.qty : ''}${i.location ? ' (' + i.location + ')' : ''}${i.note ? ' – ' + i.note : ''}`); }
@@ -674,8 +675,14 @@ async function apiWrite(req, res, url, parts) {
     for (const k of CHAR_TEXT) if (b[k] !== undefined) c[k] = app.includes(k) && c[k] ? c[k] + '\n\n' + String(b[k]) : String(b[k] ?? '');
     if (b.faction !== undefined) { const f = b.faction ? findFaction(t, b.faction) : null; c.faction = f ? f.id : (b.faction || ''); }
     if (Array.isArray(b.tags)) c.tags = b.tags.map(String).filter(Boolean);
+    // Geld mit Verlauf (moneyLog): jede Änderung mit Zeitpunkt, RP-Jahr, Betrag, neuem Stand und Grund
+    const before = c.money ?? null;
     if (b.money !== undefined) c.money = b.money === null || b.money === '' ? null : Number(b.money);
     if (b.moneyDelta != null) c.money = (Number(c.money) || 0) + Number(b.moneyDelta);
+    if ((c.money ?? null) !== before) {
+      c.moneyLog = (c.moneyLog || []).concat([{ at: new Date().toISOString(), year: b.moneyYear != null && b.moneyYear !== '' ? parseYear(b.moneyYear, yearFmt(t, lang)) : rpYear(t),
+        delta: c.money == null ? null : (Number(c.money) || 0) - (Number(before) || 0), balance: c.money ?? null, reason: String(b.moneyReason || ''), by: VIEWER && VIEWER.api ? 'API' : (VIEWER && VIEWER.name) || '' }]).slice(-500);
+    }
     if (b.currency !== undefined) c.currency = String(b.currency);
     if (b.inventory || b.removeItems) applyInventory(c, { items: b.inventory, remove: b.removeItems });
     if (b.group !== undefined) { const g = groupFor(t, b.group, b.groupColor); c.group = g ? g.id : ''; }
@@ -1007,14 +1014,15 @@ const MCP_TOOLS = [
     run: (a, v) => internalCall('GET', '/api/v1/characters', { timeline: a.timeline, q: a.query, faction: a.faction, place: a.place, group: a.group, lang: a.lang, format: 'text' }, null, v) },
   { name: 'get_character', title: 'Charakter lesen', description: 'Alle Details eines Charakters (Steckbrief, Aussehen, Persönlichkeit, Hintergrund, Beziehungen).', ro: true,
     inputSchema: S({ timeline: TL, name: str('Name oder id'), lang: LG }, ['timeline', 'name']), run: (a, v) => internalCall('GET', '/api/v1/character', { timeline: a.timeline, name: a.name, lang: a.lang, format: 'text' }, null, v) },
-  { name: 'upsert_character', title: 'Charakter anlegen/ändern', description: 'Charakter anlegen oder Felder ändern (nur angegebene Felder werden geändert). Gliederung: Identität (species, age, gender, homeworld), Erscheinungsbild (appearance: Gesicht, Haare, Augen, Körperbau, Kleidung), Persönlichkeit (personality: Züge, Verhalten, Eigenheiten), Hintergrund (bio: Herkunft, Ausbildung, Vergangenheit), Zugehörigkeit (faction, title=Rang, organization, master), Fähigkeiten (abilities: Machtfähigkeiten, Kampfstil, Fachwissen), Besitz & Inventar (money/moneyDelta/currency, inventory mit type gear|property, important = storyrelevant, removeItems), Beziehungen (relations/addRelations mit kind ally|enemy|family|contact|other), Wissen (knowledge: was die Person über Tim und andere weiß), Aktueller Stand (location, status, threads = laufende Handlungsstränge). append: Liste von Textfeldern, an die angehängt statt ersetzt wird (z.B. ["knowledge","threads"]). Texte dürfen **fett**/*kursiv* und Leerzeilen enthalten.',
+  { name: 'upsert_character', title: 'Charakter anlegen/ändern', description: 'Charakter anlegen oder Felder ändern (nur angegebene Felder werden geändert). Gliederung: Identität (species, age, gender, homeworld), Erscheinungsbild (appearance: Gesicht, Haare, Augen, Körperbau, Kleidung), Persönlichkeit (personality: Züge, Verhalten, Eigenheiten), Hintergrund (bio: Herkunft, Ausbildung, Vergangenheit), Zugehörigkeit (faction, title=Rang, organization, master), Fähigkeiten (abilities: Machtfähigkeiten, Kampfstil, Fachwissen), Besitz & Inventar (money/moneyDelta mit moneyReason für den Geldverlauf, currency, inventory mit type gear|property, important = storyrelevant, removeItems), Beziehungen (relations/addRelations mit kind ally|enemy|family|contact|other), Wissen (knowledge: was die Person über Tim und andere weiß), Aktueller Stand (location, status, threads = laufende Handlungsstränge). append: Liste von Textfeldern, an die angehängt statt ersetzt wird (z.B. ["knowledge","threads"]). Texte dürfen **fett**/*kursiv* und Leerzeilen enthalten.',
     inputSchema: S({ timeline: TL, name: str('Name (Schlüssel)'), newName: str('neuer Name'),
       group: str('Gruppe, z.B. "Crew der Trailblazer" (wird bei Bedarf angelegt; leer = keine)'), groupColor: str('Farbe der Gruppe, z.B. "#e57373"'),
       species: str('Spezies'), age: str('Alter, z.B. "34" oder "geb. 3674 BBY"'), gender: str('Geschlecht'), homeworld: str('Herkunftswelt'),
       appearance: str('Erscheinungsbild: Gesicht, Haare, Augen, Körperbau, Kleidung'), personality: str('Charakterzüge, Verhalten, Eigenheiten'), bio: str('Herkunft, Ausbildung, Vergangenheit'),
       faction: str('Fraktion (Name)'), title: str('Rang/Rolle'), organization: str('Organisation/Orden/Einheit'), master: str('Meister oder Mentor'),
       abilities: str('Machtfähigkeiten, Kampfstil, Fachwissen'),
-      money: { type: 'number', description: 'Geld (setzt den Betrag)' }, moneyDelta: { type: 'number', description: 'Geld ändern, z.B. -500 oder 1200' }, currency: str('Währung (Standard: Credits bzw. Gold)'),
+      money: { type: 'number', description: 'Geld (setzt den Betrag)' }, moneyDelta: { type: 'number', description: 'Geld ändern, z.B. -500 oder 1200' },
+      moneyReason: str('Grund der Geldänderung für den Verlauf, z.B. "Treibstoff auf Nar Shaddaa"'), moneyYear: str('RP-Jahr der Geldänderung (Standard: Jahr des neuesten Story-Abschnitts)'), currency: str('Währung (Standard: Credits bzw. Gold)'),
       inventory: { type: 'array', items: ITEM, description: 'Gegenstände/Eigentum anlegen oder ändern (per Name); qtyDelta ändert die Menge, Menge 0 entfernt' },
       removeItems: { type: 'array', items: { type: 'string' }, description: 'Gegenstände entfernen (Namen)' },
       knowledge: str('Was weiß die Person über Tim und andere?'),

@@ -2381,7 +2381,7 @@
   function modal(title, html, onOk, opt = {}) {
     $('#modalTitle').textContent = title; $('#modalBody').innerHTML = html; $('#modal').hidden = false;
     $('#modal .modal-box').classList.toggle('wide', !!opt.wide);
-    $('#modalOk').textContent = opt.ok || t('ok'); $('#modalCancel').textContent = t('cancel');
+    $('#modalOk').textContent = opt.ok || t('ok'); $('#modalCancel').textContent = t('cancel'); $('#modalCancel').hidden = !!opt.noCancel;
     const close = () => { $('#modal').hidden = true; $('#modalOk').onclick = $('#modalCancel').onclick = null; };
     $('#modalCancel').onclick = close;
     $('#modalOk').onclick = () => { let r; try { r = onOk(); } catch (e) { alert(e.message); } if (r !== false) close(); };
@@ -2744,7 +2744,7 @@
         const grp = ty => inv.filter(i => (i.type || 'gear') === ty);
         const itHtml = i => `<li class="${i.important ? 'imp' : ''}">${i.important ? `<span title="${esc(t('invImportant'))}">⭐</span> ` : ''}<b>${esc(i.name)}</b>${(i.qty ?? 1) !== 1 ? ` <span class="qty">×${esc(i.qty)}</span>` : ''}${i.location ? ` <span class="dim">· ${esc(i.location)}</span>` : ''}${i.note ? `<div class="dim small">${rich(i.note)}</div>` : ''}</li>`;
         return `<h3 class="facts-h">${esc(t(key))}</h3>
-          ${c.money != null ? `<div class="money">💰 <b>${esc(Number(c.money).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</b> ${esc(c.currency || defCurrency())}</div>` : ''}
+          ${c.money != null ? `<div class="money"><a href="#" id="moneyHist" title="${esc(t('moneyHistory'))}">💰 <b>${esc(Number(c.money).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</b> ${esc(c.currency || defCurrency())} <span class="hist-ic">🕘${(c.moneyLog || []).length ? ` ${c.moneyLog.length}` : ''}</span></a></div>` : ''}
           ${['gear', 'property'].map(ty => grp(ty).length ? `<div class="k sub">${esc(t('inv_' + ty))}</div><ul class="inv">${grp(ty).sort((a, b) => (b.important ? 1 : 0) - (a.important ? 1 : 0)).map(itHtml).join('')}</ul>` : '').join('')}`;
       }
       const iv = info.filter(k => c[k]), tv = texts.filter(k => c[k]); if (!iv.length && !tv.length) return '';
@@ -2761,10 +2761,30 @@
       ${CH_SECTIONS.map(sec).join('')}
       ${(c.gallery || []).length ? `<h3 class="facts-h">${esc(t('charGallery'))}</h3><div class="char-gallery">${c.gallery.map(g => `<figure><img src="${esc(g.src)}" alt="" data-zoom="${esc(g.src)}" data-cap="${esc(g.caption || '')}">${g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure>`).join('')}</div>` : ''}`;
     $('#chBack').onclick = () => { charSel = null; renderChars(); };
+    const mh = $('#moneyHist'); if (mh) mh.onclick = ev => { ev.preventDefault(); moneyHistory(c); };
     const eb = $('#chEdit'); if (eb) eb.onclick = () => { charEdit = true; renderChars(true); };
     box.querySelectorAll('[data-zoom]').forEach(im => im.onclick = () => zoomImg(im.dataset.zoom, im.dataset.cap));
     box.querySelectorAll('[data-place]').forEach(a => a.onclick = ev => { ev.preventDefault(); const o = objMap[a.dataset.place] || placeByName(a.textContent.replace('📍', '').trim()); if (o) { centerOn(o, o.atlas ? 3 : 1.4); if (isMobile()) setSheet(false); } });
     box.querySelectorAll('[data-cid]').forEach(a => a.onclick = ev => { ev.preventDefault(); charSel = a.dataset.cid; renderChars(); });
+  }
+  // Geldverlauf eines Charakters
+  function moneyHistory(c) {
+    const cur = c.currency || defCurrency(), nf = v => Number(v).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE');
+    const log = (c.moneyLog || []).slice().reverse();
+    modal(t('moneyHistTitle', c.name), `<p class="hint" style="margin-top:0">${esc(t('moneyNow'))}: <b>${c.money != null ? esc(nf(c.money)) + ' ' + esc(cur) : '–'}</b></p>
+      ${log.length ? `<div class="perm-scroll"><table class="money-log"><tr><th>${esc(t('mlWhen'))}</th><th>${esc(t('mlYear'))}</th><th class="num">${esc(t('mlChange'))}</th><th class="num">${esc(t('mlBalance'))}</th><th>${esc(t('mlReason'))}</th></tr>
+        ${log.map(m => `<tr><td class="dim">${esc(new Date(m.at).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE', { dateStyle: 'short', timeStyle: 'short' }))}</td>
+          <td>${m.year != null ? esc(fmtYear(m.year)) : ''}</td>
+          <td class="num ${m.delta > 0 ? 'pos' : m.delta < 0 ? 'neg' : ''}">${m.delta != null ? (m.delta > 0 ? '+' : '') + esc(nf(m.delta)) : '–'}</td>
+          <td class="num">${m.balance != null ? esc(nf(m.balance)) : '–'}</td>
+          <td>${esc(m.reason || '')}${m.by ? ` <span class="dim">· ${esc(m.by)}</span>` : ''}</td></tr>`).join('')}</table></div>` : `<p class="hint">${esc(t('moneyNoLog'))}</p>`}`,
+      () => true, { wide: true, ok: t('close'), noCancel: true });
+  }
+  function logMoney(c, before, reason) {
+    if ((c.money ?? null) === (before ?? null)) return;
+    (c.moneyLog ||= []).push({ at: new Date().toISOString(), year: (state.tl.story || []).length ? storyOf(null, null).slice(-1)[0].year : state.year,
+      delta: c.money == null ? null : (Number(c.money) || 0) - (Number(before) || 0), balance: c.money ?? null, reason: reason || '', by: (srvInfo() && srvInfo().user && srvInfo().user.name) || '' });
+    if (c.moneyLog.length > 500) c.moneyLog.splice(0, c.moneyLog.length - 500);
   }
   function charForm(box, c) {
     const fld = k => `<label class="field"><span>${esc(t('ch_' + k))}</span><input data-f="${k}" ${k === 'location' || k === 'homeworld' ? 'list="searchList"' : ''} value="${esc(c[k] || '')}" placeholder="${esc(t('ph_' + k) === 'ph_' + k ? '' : t('ph_' + k))}"></label>`;
@@ -2787,6 +2807,8 @@
       <h4>${esc(t('secInventory'))}</h4>
       <div class="row"><label class="field"><span>${esc(t('invMoney'))}</span><input type="number" id="chMoney" value="${c.money ?? ''}" step="any"></label>
         <label class="field"><span>${esc(t('invCurrency'))}</span><input id="chCur" value="${esc(c.currency || '')}" placeholder="${esc(defCurrency())}"></label></div>
+      <div class="row"><label class="field"><span>${esc(t('moneyDeltaLbl'))}</span><input type="number" id="chMoneyDelta" step="any" placeholder="−500 / +1200"></label>
+        <label class="field"><span>${esc(t('mlReason'))}</span><input id="chMoneyReason" placeholder="${esc(t('moneyReasonPh'))}"></label><button id="chMoneyBook" class="fixed" style="align-self:flex-end">${esc(t('moneyBook'))}</button></div>
       <div class="inv-edit">${(c.inventory || []).map((i, n) => `<div class="inv-row" data-i="${n}">
         <input class="iv-name" value="${esc(i.name)}" placeholder="${esc(t('invItem'))}"><input class="iv-qty fixed" type="number" value="${esc(i.qty ?? 1)}" min="0" step="any" title="${esc(t('invQty'))}">
         <select class="iv-type fixed"><option value="gear" ${(i.type || 'gear') === 'gear' ? 'selected' : ''}>${esc(t('invGearShort'))}</option><option value="property" ${i.type === 'property' ? 'selected' : ''}>${esc(t('inv_property'))}</option></select>
@@ -2820,7 +2842,12 @@
       else c[k] = v;
       touch();
     }));
-    $('#chMoney').onchange = e => { mark(); c.money = e.target.value === '' ? null : Number(e.target.value); if (c.money == null) delete c.money; touch(); };
+    $('#chMoney').onchange = e => { mark(); const before = c.money; c.money = e.target.value === '' ? null : Number(e.target.value); if (c.money == null) delete c.money; logMoney(c, before, $('#chMoneyReason').value.trim() || t('moneyManual')); touch(); };
+    $('#chMoneyBook').onclick = () => {
+      const d = Number($('#chMoneyDelta').value); if (!d) { $('#chMoneyDelta').focus(); return; }
+      mark(); const before = c.money; c.money = (Number(c.money) || 0) + d; logMoney(c, before, $('#chMoneyReason').value.trim());
+      $('#chMoney').value = c.money; $('#chMoneyDelta').value = ''; $('#chMoneyReason').value = ''; touch(); toast(t('moneyBooked', (d > 0 ? '+' : '') + d));
+    };
     $('#chCur').onchange = e => { mark(); c.currency = e.target.value.trim(); if (!c.currency) delete c.currency; touch(); };
     box.querySelectorAll('.inv-row').forEach(row => {
       const it = c.inventory[+row.dataset.i];
