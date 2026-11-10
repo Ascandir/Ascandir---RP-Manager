@@ -554,6 +554,8 @@
     $('#btnPlanner').textContent = '🧭 ' + t('planner');
     $('#btnPlanner').classList.toggle('active', state.plannerOpen);
     box.hidden = !state.plannerOpen;
+    // rechte Seite: Infofeld nur, wenn kein Story-/Charakter-/Welt-Reiter offen ist
+    $('#info').hidden = state.mode === 'story' || state.mode === 'chars' || state.mode === 'world';
     if (!state.plannerOpen) return;
     const P = settings.planner, fan = state.world.type === 'fantasy';
     computePlan();
