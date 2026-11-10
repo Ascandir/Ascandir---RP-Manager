@@ -206,7 +206,7 @@ volumes:
 |---|---|
 | `IAM_USER` / `IAM_PASSWORD` | Anmeldung zum **Bearbeiten** und für die **Einstellungen** (leer = alles offen, nicht empfohlen bei Tunnel) |
 | `IAM_PUBLIC_VIEW` | `true` (Standard): Gäste können die Karte ohne Anmeldung ansehen, Welt/Zeitlinie/Jahr wählen und exportieren. `false`: auch zum Ansehen ist eine Anmeldung nötig. |
-| `IAM_API_TOKEN` | Schlüssel für Story-KI/ChatGPT. Ohne Token ist der Schreibzugriff der API abgeschaltet. |
+| `IAM_API_TOKEN` | Optionaler **Master-Token** mit vollem Zugriff auf alles. Normalerweise reichen die persönlichen Tokens der Benutzer (siehe unten). |
 | `IAM_READONLY` | `true` = nur lesen |
 
 **Update:** In Portainer beim Stack *Update the stack* mit eingeschaltetem **„Re-pull image and redeploy“** ausführen. Jede neue Version auf GitHub erzeugt automatisch ein neues Image (ca. 1–2 Minuten nach dem Release). Ist ein neueres Image verfügbar, zeigt die App das angemeldeten Nutzern an (abschaltbar mit `IAM_UPDATE_CHECK=false`). Alternativ eine feste Version eintragen, z. B. `ghcr.io/ascandir/ascandir---swgm:0.8.1`.
@@ -224,7 +224,16 @@ Nutzt du *Cloudflare Access*, setze für den Pfad `/api/v1/*` eine Bypass-Regel,
 
 ### 3. Story-KI anbinden (Lese-API)
 
-Lesende Aufrufe sind bei `IAM_PUBLIC_VIEW=true` ohne Schlüssel möglich, sonst mit `Authorization: Bearer <IAM_API_TOKEN>` oder `?token=<IAM_API_TOKEN>`. Schreibende Aufrufe brauchen immer den Token.
+Lesende Aufrufe sind bei `IAM_PUBLIC_VIEW=true` ohne Schlüssel möglich (mit den Gastrechten), sonst mit `Authorization: Bearer <Token>` oder `?token=<Token>`. Schreibende Aufrufe brauchen immer einen Token mit Bearbeitungsrechten.
+
+### Persönliche API-Tokens (pro Benutzer)
+
+Jeder angemeldete Benutzer erzeugt sich unter *Einstellungen → Mein API-Zugang* einen eigenen Token. Der Token **hängt an den Rechten des Benutzers**:
+
+- Sichtbar sind nur die Welten und Zeitlinien, die der Benutzer sehen darf; *Bearbeiten*-Rechte erlauben auch Schreiben, *Ansehen* nur Lesen.
+- Beispiel: Benutzer 1 hat Rechte auf Star Wars / „Sith Story RP“, Benutzer 2 auf DnD / „Nancy“, Benutzer 3 auf beides – jeder richtet in ChatGPT einen eigenen Connector `https://…/mcp/<sein-Token>` ein und sieht genau seine Zeitlinien.
+- Ändert der Admin die Rechte, gilt das sofort auch für den Token. Der Token wird nur einmal angezeigt (gespeichert ist nur ein Hash); „Neuen Token erzeugen“ macht den alten ungültig. Admins sehen in der Benutzerverwaltung, wer einen Token hat, und können ihn löschen.
+- Der Master-Token aus `IAM_API_TOKEN` hat weiterhin vollen Zugriff.
 
 | Aufruf | Liefert |
 |---|---|
@@ -243,7 +252,7 @@ Der Container enthält einen MCP-Server, wie ihn ChatGPT-Plugins und Claude-Conn
 | Adresse | Werkzeuge |
 |---|---|
 | `https://karte.deine-domain.de/mcp` | nur lesen: `get_summary`, `get_state`, `get_place`, `search_places`, `plan_travel`, `list_timelines` |
-| `https://karte.deine-domain.de/mcp/<IAM_API_TOKEN>` | zusätzlich schreiben: `copy_timeline`, `upsert_place`, `delete_place`, `upsert_faction`, `upsert_era`, `set_control` |
+| `https://karte.deine-domain.de/mcp/<Token>` | persönlicher Token (Rechte des Benutzers) oder Master-Token; zusätzlich schreiben: `copy_timeline`, `upsert_place`, `delete_place`, `upsert_faction`, `upsert_era`, `set_control` |
 
 **ChatGPT:** *Plugins* öffnen (chatgpt.com/plugins) → **＋** → **Add custom MCP server** → Name „InteractiveMap“ → bei *Connection* die Adresse mit Token eintragen → *Authentication*: **No authentication** → Warnhinweis bestätigen → **Create as a plugin** → das Plugin unter „Meine Plugins“ **installieren**. Im Chat das Plugin auswählen und loslegen. Schreibende Aktionen fragt ChatGPT vorher zur Bestätigung ab. Nach einem Update im Plugin auf *Refresh* klicken, damit neue Werkzeuge erscheinen.
 Der Token steckt geheim in der Adresse – die Adresse also nicht weitergeben. Bei Cloudflare Access braucht `/mcp*` eine Bypass-Regel.
@@ -256,7 +265,7 @@ Beispiele im Chat:
 - „Neu-Taris gehört ab 3639 BBY der Schwarzen Sonne“
 - „Wie lange brauche ich von Nar Shaddaa nach Dromund Kaas mit Hyperantrieb Klasse 2?“
 
-Die REST-API (`/api/v1/…`, OpenAPI unter `/api/v1/openapi.json`) bleibt für andere Werkzeuge erhalten (z. B. SillyTavern-Erweiterungen oder eigene Skripte; Schreiben mit `Authorization: Bearer <IAM_API_TOKEN>`).
+Die REST-API (`/api/v1/…`, OpenAPI unter `/api/v1/openapi.json`) bleibt für andere Werkzeuge erhalten (z. B. SillyTavern-Erweiterungen oder eigene Skripte; Schreiben mit `Authorization: Bearer <Token>`).
 
 Die Kanon-Zeitlinie bleibt schreibgeschützt; Änderungen landen immer in einer eigenen Zeitlinie und erscheinen sofort in allen offenen Browserfenstern.
 

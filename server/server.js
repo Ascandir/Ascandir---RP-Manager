@@ -64,7 +64,7 @@ function basicOk(req) {
 // Wer fragt an? -> { id, name, admin, perms }
 function whoIs(req, url) {
   if (!PASSWORD) return { id: 'open', name: 'admin', admin: true };
-  if (url && tokenOk(req, url)) return { id: 'token', name: 'api', admin: true };
+  if (url || req.headers.authorization) { const tv = viewerForToken(reqToken(req, url)); if (tv) return tv; }
   if (basicOk(req)) return { id: 'env', name: USER, admin: true };
   const uid = sessionUser(req);
   if (uid === 'env') return { id: 'env', name: USER, admin: true };
@@ -123,9 +123,26 @@ function tokenOk(req, url) {
   if (h.startsWith('Bearer ') && tsEqual(h.slice(7).trim(), API_TOKEN)) return true;
   return !!(url.searchParams.get('token') && tsEqual(url.searchParams.get('token'), API_TOKEN));
 }
+// Persönliche API-Tokens: jeder Benutzer kann sich einen Token erzeugen, der an seinen Rechten hängt.
+// Gespeichert wird nur ein SHA-256-Hash (Tokens sind lange Zufallswerte).
+const tokHash = tok => crypto.createHash('sha256').update(String(tok)).digest('hex');
+function viewerForToken(tok) {
+  if (!tok) return null;
+  if (API_TOKEN && tsEqual(tok, API_TOKEN)) return { id: 'token', name: 'api', admin: true, api: true };
+  const h = tokHash(tok), d = loadUsers();
+  if (d.env && d.env.apiToken && tsEqual(d.env.apiToken, h)) return { id: 'env', name: USER, admin: true, api: true };
+  const u = d.users.find(x => x.apiToken && tsEqual(x.apiToken, h));
+  return u ? { id: u.id, name: u.name, admin: u.role === 'admin', perms: u.perms || { worlds: {}, timelines: {} }, api: true } : null;
+}
+const reqToken = (req, url) => { const h = req.headers.authorization || ''; return h.startsWith('Bearer ') ? h.slice(7).trim() : (url && url.searchParams.get('token')) || null; };
+// Darf dieser Betrachter irgendwo schreiben?
+function canWriteAny(v) {
+  if (!v || v.guest) return false; if (v.admin) return true;
+  const p = v.perms || {}; return Object.values(p.worlds || {}).concat(Object.values(p.timelines || {})).includes('edit');
+}
 // Lesen: öffentlich (wenn IAM_PUBLIC_VIEW) – Schreiben: nur mit Anmeldung bzw. API-Token
 function canRead(req, url) {
-  if (!PASSWORD || tokenOk(req, url)) return true;
+  if (!PASSWORD || tokenOk(req, url) || viewerForToken(reqToken(req, url))) return true;
   const who = whoIs(req, url);
   if (!who.guest) return true;
   // Gast: nur wenn Gäste überhaupt etwas sehen dürfen (oder Anmeldeseite / statische Dateien)
@@ -442,6 +459,7 @@ async function storeImage(b) {
 function writableTimeline(q, lang) {
   const t = findTimeline(q, lang);
   if (!t) throw Object.assign(new Error('timeline not found'), { code: 404 });
+  if (!t.readonly && !canEdit(VIEWER, t.world || 'starwars', t.id)) throw Object.assign(new Error('Keine Bearbeitungsrechte für diese Zeitlinie / no edit permission for this timeline'), { code: 403 });
   if (t.readonly || !t._file) throw Object.assign(new Error('Die Kanon-Zeitlinie ist schreibgeschützt. Lege mit POST /api/v1/timeline/copy eine Kopie an. / The canon timeline is read-only, create a copy first.'), { code: 409 });
   return t;
 }
@@ -460,12 +478,11 @@ function eraForWrite(t, b, lang) {
 }
 const TYPES = ['sun', 'planet', 'moon', 'station', 'capital', 'city', 'village', 'fortress', 'landmark'];
 async function apiWrite(req, res, url, parts) {
-  if (!API_TOKEN) return send(res, 403, { error: 'Schreibzugriff deaktiviert: setze IAM_API_TOKEN im Container. / Write access disabled: set IAM_API_TOKEN.' });
   if (READONLY) return send(res, 403, { error: 'read-only' });
-  const h = req.headers.authorization || '';
-  const tok = h.startsWith('Bearer ') ? h.slice(7).trim() : url.searchParams.get('token');
-  if (!tok || !tsEqual(tok, API_TOKEN)) return send(res, 401, { error: 'API token required (Authorization: Bearer …)' });
-  const raw = await readBody(req); let b = {};
+  // Schreibrechte kommen vom Betrachter: Master-Token (IAM_API_TOKEN), persönlicher Token oder angemeldeter Benutzer
+  const viewer = VIEWER; // VIEWER ist global – nach dem asynchronen Lesen wieder herstellen
+  if (!canWriteAny(viewer)) return send(res, 401, { error: 'API token required (Authorization: Bearer …) – persönlichen Token in den Einstellungen erzeugen' });
+  const raw = await readBody(req); VIEWER = viewer; let b = {};
   if (raw.trim()) b = JSON.parse(raw);
   const q = url.searchParams, lang = (b.lang || q.get('lang')) === 'en' ? 'en' : 'de';
   const tlName = b.timeline || q.get('timeline');
@@ -473,6 +490,7 @@ async function apiWrite(req, res, url, parts) {
 
   if (ep === 'timeline/copy' && req.method === 'POST') {
     const src = findTimeline(b.from || 'canon', lang); if (!src) return send(res, 404, { error: 'source timeline not found' });
+    if (!canEdit(VIEWER, src.world || 'starwars', null)) return send(res, 403, { error: 'Keine Rechte, in dieser Welt Zeitlinien anzulegen / no permission to create timelines in this world' });
     const c = JSON.parse(JSON.stringify(src)); delete c._file; delete c.readonly;
     c.id = uid('tl'); c.name = b.name || (src.name + ' (Kopie)');
     let f = slug(c.name) + '.json', i = 2; while (fs.existsSync(path.join(DATA_DIR, 'timelines', f))) f = `${slug(c.name)}_${i++}.json`;
@@ -836,6 +854,7 @@ async function apiV1(req, res, url) {
 // POST /mcp            -> nur lesende Werkzeuge
 // POST /mcp/<API-Token> -> zusätzlich schreibende Werkzeuge
 const { Readable } = require('stream');
+let MCP_VIEWER = null; // Betrachter des laufenden MCP-Werkzeugaufrufs (wird synchron gesetzt)
 function internalCall(method, pathname, params, body, viewer) {
   return new Promise(resolve => {
     const u = new URL('http://internal' + pathname);
@@ -844,8 +863,8 @@ function internalCall(method, pathname, params, body, viewer) {
       if (Array.isArray(v)) v.forEach(x => u.searchParams.append(k, String(x))); else u.searchParams.set(k, String(v));
     }
     const req = Readable.from(body ? [Buffer.from(JSON.stringify(body))] : []);
-    req.method = method; req.headers = API_TOKEN ? { authorization: 'Bearer ' + API_TOKEN, host: 'internal' } : { host: 'internal' };
-    req.iamViewer = viewer || { admin: true };
+    req.method = method; req.headers = { host: 'internal' };
+    req.iamViewer = viewer || MCP_VIEWER || { guest: true, perms: { worlds: {}, timelines: {} } };
     const res = { code: 200, writeHead(c) { this.code = c; }, end(d) { resolve({ code: this.code, body: d == null ? '' : d.toString() }); }, write() { } };
     Promise.resolve(apiV1(req, res, u)).catch(e => resolve({ code: 500, body: JSON.stringify({ error: e.message }) }));
   });
@@ -929,13 +948,17 @@ const MCP_INSTRUCTIONS = 'Ascandir InteractiveMap: interaktive Karte (Star Wars 
   'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
   'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse.';
-async function handleMcp(req, res, url, writeAllowed) {
+async function handleMcp(req, res, url, tv) {
+  // tv = Betrachter aus dem Token (null = Gast). Sichtbar ist nur, was dieser Benutzer sehen darf.
+  const viewerOf = () => tv || whoIs({ headers: {} }, null);
+  const writeAllowed = canWriteAny(tv);
   if (req.method === 'GET') {
     if ((req.headers.accept || '').includes('text/event-stream')) return send(res, 405, { error: 'Use POST (Streamable HTTP)' }, 'application/json', { Allow: 'POST' });
     // Statusanzeige für den Browser (zur Fehlersuche)
     return send(res, 200, { status: 'ok', server: 'Ascandir InteractiveMap MCP', version: VERSION, transport: 'streamable-http (POST)',
-      access: writeAllowed ? 'lesen + schreiben (Token korrekt)' : 'nur lesen',
-      ...(writeAllowed ? {} : { hinweis: 'Hier ist kein Token angekommen (Adresse: ' + url.pathname + (url.search ? ' + Parameter' : '') + '). Enthält der Token Zeichen wie # ? & % / oder Leerzeichen, schneidet der Browser ihn ab – dann einen Token nur aus Buchstaben und Zahlen verwenden.' }),
+      access: writeAllowed ? 'lesen + schreiben (Token korrekt)' : tv ? 'nur lesen (Token korrekt, Benutzer hat nur Leserechte)' : 'nur lesen',
+      ...(tv ? { user: tv.name, timelines: allTimelines('de', tv).map(t => t.name) } : {}),
+      ...(tv ? {} : { hinweis: 'Hier ist kein Token angekommen (Adresse: ' + url.pathname + (url.search ? ' + Parameter' : '') + '). Enthält der Token Zeichen wie # ? & % / oder Leerzeichen, schneidet der Browser ihn ab – dann einen Token nur aus Buchstaben und Zahlen verwenden.' }),
       tools: MCP_TOOLS.filter(t => t.ro || (writeAllowed && !READONLY)).map(t => t.name) });
   }
   if (req.method === 'DELETE') return send(res, 200, { ok: true });
@@ -948,15 +971,17 @@ async function handleMcp(req, res, url, writeAllowed) {
     try {
       switch (m.method) {
         case 'initialize': return ok({ protocolVersion: (m.params && m.params.protocolVersion) || '2025-06-18', capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'ascandir-interactivemap', title: 'Ascandir InteractiveMap', version: VERSION }, instructions: MCP_INSTRUCTIONS });
+          serverInfo: { name: 'ascandir-interactivemap', title: 'Ascandir InteractiveMap', version: VERSION },
+          instructions: MCP_INSTRUCTIONS + (tv && !tv.admin ? ` Zugriff als Benutzer „${tv.name}“ – verfügbare Zeitlinien: ${allTimelines('de', tv).map(t => t.name).join(', ') || 'keine'}.` : '') });
         case 'ping': return ok({});
         case 'tools/list': return ok({ tools: tools.map(t => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema,
           annotations: { title: t.title, readOnlyHint: !!t.ro, destructiveHint: !!t.destructive, idempotentHint: !!t.ro, openWorldHint: false } })) });
         case 'tools/call': {
           const t = tools.find(x => x.name === (m.params || {}).name);
-          if (!t) return err(-32602, 'Unknown tool' + (writeAllowed ? '' : ' (schreibende Werkzeuge nur über /mcp/<token>)'));
-          const viewer = writeAllowed ? { admin: true } : whoIs({ headers: {} }, null);
-          const r = await t.run((m.params || {}).arguments || {}, viewer);
+          if (!t) return err(-32602, 'Unknown tool' + (writeAllowed ? '' : ' (schreibende Werkzeuge nur mit einem Token mit Schreibrechten: /mcp/<token>)'));
+          const viewer = viewerOf();
+          MCP_VIEWER = viewer; const pr = t.run((m.params || {}).arguments || {}, viewer); MCP_VIEWER = null;
+          const r = await pr;
           return ok({ content: [{ type: 'text', text: r.body }], isError: r.code >= 400 });
         }
         case 'resources/list': return ok({ resources: [] });
@@ -993,10 +1018,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/v1/openapi.json') return send(res, 200, openApi(req));
     const mm = url.pathname.match(/^\/mcp(?:\/([^/]+))?\/?$/);
     if (mm) {
-      const tokenGiven = mm[1] ? decodeURIComponent(mm[1]) : null;
-      if (tokenGiven && !(API_TOKEN && tsEqual(tokenGiven, API_TOKEN))) return send(res, 401, { error: 'invalid token' });
-      if (!tokenGiven && !PUBLIC_VIEW && !tokenOk(req, url)) return send(res, 401, { error: 'unauthorized' });
-      return await handleMcp(req, res, url, !!tokenGiven || tokenOk(req, url));
+      const tokenGiven = mm[1] ? decodeURIComponent(mm[1]) : reqToken(req, url);
+      const tv = tokenGiven ? viewerForToken(tokenGiven) : null;
+      if (tokenGiven && !tv) return send(res, 401, { error: 'invalid token' });
+      if (!tv && !PUBLIC_VIEW) return send(res, 401, { error: 'unauthorized' });
+      return await handleMcp(req, res, url, tv);
     }
     if (url.pathname === '/api/login' && req.method === 'POST') {
       const ip = (req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '?');
@@ -1059,11 +1085,26 @@ const server = http.createServer(async (req, res) => {
       }
       return send(res, 405, { error: 'method not allowed' });
     }
+    // Eigener API-Token (für angemeldete Benutzer)
+    if (url.pathname === '/api/me/token') {
+      const who = whoIs(req, url);
+      if (who.guest || who.api || who.id === 'open') return send(res, 401, { error: 'login required' });
+      const d = loadUsers(), rec = who.id === 'env' ? (d.env = d.env || {}) : d.users.find(u => u.id === who.id);
+      if (!rec) return send(res, 404, { error: 'user not found' });
+      if (req.method === 'GET') return send(res, 200, { hasToken: !!rec.apiToken, hint: rec.apiTokenHint || null, created: rec.apiTokenCreated || null });
+      if (req.method === 'POST') {
+        const tok = crypto.randomBytes(24).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, 32);
+        rec.apiToken = tokHash(tok); rec.apiTokenHint = tok.slice(-4); rec.apiTokenCreated = new Date().toISOString(); saveUsers(d);
+        return send(res, 201, { token: tok, hint: rec.apiTokenHint, created: rec.apiTokenCreated });
+      }
+      if (req.method === 'DELETE') { delete rec.apiToken; delete rec.apiTokenHint; delete rec.apiTokenCreated; saveUsers(d); return send(res, 200, { ok: true }); }
+      return send(res, 405, { error: 'method not allowed' });
+    }
     // Benutzerverwaltung (nur Admins)
     if (url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') || url.pathname === '/api/guest') {
       const who = whoIs(req, url);
-      if (!who.admin || who.id === 'token') return send(res, 403, { error: 'admin only' });
-      const d = loadUsers(), pub = u => ({ id: u.id, name: u.name, role: u.role, perms: u.perms || { worlds: {}, timelines: {} } });
+      if (!who.admin || who.api) return send(res, 403, { error: 'admin only' });
+      const d = loadUsers(), pub = u => ({ id: u.id, name: u.name, role: u.role, perms: u.perms || { worlds: {}, timelines: {} }, apiToken: u.apiToken ? { hint: u.apiTokenHint, created: u.apiTokenCreated } : null });
       const clean = p => { const o = { worlds: {}, timelines: {} }; for (const k of ['worlds', 'timelines']) for (const [id, l] of Object.entries((p || {})[k] || {})) if (LEVEL[l] != null) o[k][String(id)] = l; return o; };
       if (url.pathname === '/api/users' && req.method === 'GET') return send(res, 200, { env: USER, users: d.users.map(pub), guest: d.guest });
       if (url.pathname === '/api/guest' && req.method === 'PUT') { d.guest = clean(JSON.parse(await readBody(req, 1e6))); saveUsers(d); return send(res, 200, { ok: true }); }
@@ -1082,6 +1123,7 @@ const server = http.createServer(async (req, res) => {
         if (b.password) { if (String(b.password).length < 6) return send(res, 400, { error: 'Passwort mindestens 6 Zeichen' }); u.pass = hashPw(b.password); }
         if (b.role) u.role = b.role === 'admin' ? 'admin' : 'user';
         if (b.perms) u.perms = clean(b.perms);
+        if (b.revokeToken) { delete u.apiToken; delete u.apiTokenHint; delete u.apiTokenCreated; }
         saveUsers(d); return send(res, 200, pub(u));
       }
       if (u && req.method === 'DELETE') { d.users = d.users.filter(x => x !== u); saveUsers(d); return send(res, 200, { ok: true }); }

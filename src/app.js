@@ -2076,12 +2076,14 @@
         </div><p class="hint">${esc(t('yearSuffixHint'))}</p>
         <button id="setDelWorld" class="danger">${esc(t('deleteWorld'))}</button>`}
       </section>
+      ${FS && FS.server && srvInfo() && srvInfo().user ? `<section class="card"><h3>🔑 ${esc(t('myApiTitle'))}</h3>
+        <p class="hint">${esc(t('myApiHint'))}</p>
+        <div id="myTokenBox" class="hint">…</div></section>` : ''}
       ${FS && FS.server && isAdminUser() ? `<section class="card"><h3>${esc(t('apiTitle'))}</h3><p class="hint">${esc(t('apiHint'))}</p>
-        <code class="path">${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'api/v1/summary?year=' + state.year + (state.tl.readonly ? '' : '&timeline=' + encodeURIComponent(state.tl.name)) + '&lang=' + settings.lang)}</code>
+        <code class="path">${esc(baseUrl() + 'api/v1/summary?year=' + state.year + (state.tl.readonly ? '' : '&timeline=' + encodeURIComponent(state.tl.name)) + '&lang=' + settings.lang)}</code>
         <a href="api/v1" target="_blank">api/v1</a>
-        <h4>${esc(t('mcpTitle'))}</h4><p class="hint">${esc(t('mcpHint'))}</p>
-        <code class="path">${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'mcp/<IAM_API_TOKEN>')}</code>
-        <p class="hint">${esc(t('mcpRead'))}: <code>${esc(location.origin + location.pathname.replace(/index\.html$/, '') + 'mcp')}</code></p></section>` : ''}
+        <p class="hint">${esc(t('masterTokenHint'))}</p>
+        <p class="hint">${esc(t('mcpRead'))}: <code>${esc(baseUrl() + 'mcp')}</code></p></section>` : ''}
       ${isAdminUser() ? `<section class="card"><h3>${esc(t('dataFolder'))}</h3>
         <p class="hint">${esc(t('dataHint'))}</p>
         ${info.dataDir ? `<code class="path">${esc(info.dataDir)}</code>` : ''}
@@ -2111,6 +2113,7 @@
     $$('.seg [data-terr]').forEach(b => b.addEventListener('click', () => { settings.terrStyle = b.dataset.terr; saveSoon(); renderSettings(); draw(); }));
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
     if ($('#usersBox')) renderUsers();
+    if ($('#myTokenBox')) renderMyToken();
     if ($('#setAuto')) { $('#setAuto').addEventListener('change', e => { settings.autoUpdate = e.target.checked; saveSoon(); }); $('#setCheck').addEventListener('click', () => checkUpdates(true)); }
     const rl = $('#setReleases'); if (rl) rl.addEventListener('click', e => { e.preventDefault(); window.open(APP_REPO, '_blank'); });
     const fo = $('#setFolder'); if (fo) fo.addEventListener('click', () => FS ? FS.openFolder('', null) : alert(t('folderOnlyApp')));
@@ -2160,6 +2163,32 @@
   // ------------------------------------------------------------- Benutzerverwaltung (Server, nur Admins)
   const api = (path, method = 'GET', body) => fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })
     .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; });
+  const baseUrl = () => location.origin + location.pathname.replace(/index\.html$/, '');
+  // Eigener API-Token: hängt an den Rechten des angemeldeten Benutzers
+  async function renderMyToken(fresh) {
+    const box = $('#myTokenBox'); if (!box) return;
+    let d; try { d = await api('api/me/token'); } catch (e) { box.textContent = e.message; return; }
+    box.classList.remove('hint');
+    const mcp = tok => baseUrl() + 'mcp/' + tok;
+    box.innerHTML = fresh ? `
+        <p class="warn hint">${esc(t('myApiOnce'))}</p>
+        <h4>${esc(t('mcpTitle'))}</h4>
+        <div class="row"><code class="path grow" id="myMcpUrl">${esc(mcp(fresh.token))}</code><button class="fixed" id="cpMcp">📋</button></div>
+        <p class="hint">${esc(t('mcpHint2'))}</p>
+        <h4>REST</h4><div class="row"><code class="path grow">Authorization: Bearer ${esc(fresh.token)}</code><button class="fixed" id="cpTok">📋</button></div>
+        <div class="row" style="margin-top:8px"><button id="tokDone" class="primary">${esc(t('ok'))}</button></div>`
+      : d.hasToken ? `
+        <div class="kv"><span class="k">${esc(t('myApiState'))}</span><span>✅ ${esc(t('myApiActive'))} (…${esc(d.hint || '')})</span>
+          <span class="k">${esc(t('myApiCreated'))}</span><span>${esc(d.created ? new Date(d.created).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE') : '–')}</span>
+          <span class="k">MCP</span><span><code>${esc(mcp('…' + (d.hint || '')))}</code></span></div>
+        <p class="hint">${esc(t('myApiScope'))}</p>
+        <div class="row"><button id="tokNew">${esc(t('myApiRenew'))}</button><button id="tokDel" class="danger">${esc(t('myApiRevoke'))}</button></div>`
+      : `<p class="hint">${esc(t('myApiNone'))}</p><p class="hint">${esc(t('myApiScope'))}</p><button id="tokNew" class="primary">${esc(t('myApiCreate'))}</button>`;
+    const copy = txt => { try { navigator.clipboard.writeText(txt); toast(t('copied')); } catch (e) { /* egal */ } };
+    if (fresh) { $('#cpMcp').onclick = () => copy(mcp(fresh.token)); $('#cpTok').onclick = () => copy(fresh.token); $('#tokDone').onclick = () => renderMyToken(); return; }
+    const nb = $('#tokNew'); if (nb) nb.onclick = async () => { if (d.hasToken && !confirm(t('myApiRenewQ'))) return; try { renderMyToken(await api('api/me/token', 'POST')); } catch (e) { alert(e.message); } };
+    const db = $('#tokDel'); if (db) db.onclick = async () => { if (!confirm(t('myApiRevokeQ'))) return; await api('api/me/token', 'DELETE'); renderMyToken(); };
+  }
   async function renderUsers() {
     const box = $('#usersBox'); if (!box) return;
     let d; try { d = await api('api/users'); } catch (e) { box.textContent = e.message; return; }
@@ -2167,6 +2196,7 @@
     box.innerHTML = `
       <div class="user-row"><b>${esc(d.env)}</b><span class="badge">Admin</span><span class="dim">${esc(t('envAdmin'))}</span></div>
       ${d.users.map(u => `<div class="user-row" data-id="${esc(u.id)}"><b>${esc(u.name)}</b><span class="badge">${u.role === 'admin' ? 'Admin' : esc(t('roleUser'))}</span>
+        ${u.apiToken ? `<span class="badge" title="${esc(t('myApiActive'))}">🔑 …${esc(u.apiToken.hint || '')}</span><button class="uTok fixed" title="${esc(t('myApiRevoke'))}">🔑✕</button>` : ''}
         <span class="grow"></span>${u.role !== 'admin' ? `<button class="uPerm">${esc(t('perms'))}</button>` : ''}<button class="uRole">${esc(t(u.role === 'admin' ? 'makeUser' : 'makeAdmin'))}</button><button class="uPw">${esc(t('changePw'))}</button><button class="uDel danger">✕</button></div>`).join('')}
       <div class="user-row"><b>${esc(t('guests'))}</b><span class="dim">${esc(t('guestsDesc'))}</span><span class="grow"></span><button id="guestPerm">${esc(t('perms'))}</button></div>
       <h4>${esc(t('addUser'))}</h4>
@@ -2180,6 +2210,7 @@
       row.querySelector('.uRole').onclick = () => api('api/users/' + u.id, 'PUT', { role: u.role === 'admin' ? 'user' : 'admin' }).then(renderUsers).catch(e => alert(e.message));
       row.querySelector('.uPw').onclick = () => modal(t('changePw') + ': ' + u.name, `<label class="field"><span>${esc(t('newPw'))}</span><input id="mNewPw" type="password"></label><div id="mPwErr" class="hint warn"></div>`,
         () => { api('api/users/' + u.id, 'PUT', { password: $('#mNewPw').value }).then(() => { $('#modal').hidden = true; toast(t('saved')); }).catch(e => { $('#mPwErr').textContent = e.message; }); return false; });
+      const tb = row.querySelector('.uTok'); if (tb) tb.onclick = () => { if (confirm(t('myApiRevokeQ'))) api('api/users/' + u.id, 'PUT', { revokeToken: true }).then(renderUsers); };
       row.querySelector('.uDel').onclick = () => { if (confirm(t('deleteUserQ', u.name))) api('api/users/' + u.id, 'DELETE').then(renderUsers); };
     });
     $('#guestPerm').onclick = () => permsDialog(t('guests'), d.guest, perms => api('api/guest', 'PUT', perms).then(renderUsers));
