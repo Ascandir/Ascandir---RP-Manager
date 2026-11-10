@@ -59,8 +59,11 @@
   const srvInfo = () => (FS && FS.server && FS.info) ? FS.info() : null;
   const isGuest = () => { const i = srvInfo(); return !!(i && i.loginRequired && !i.user); };
   const isAdminUser = () => { const i = srvInfo(); return !i || !i.loginRequired || !!i.admin; };
-  const canCreate = (w = state.world) => { const i = srvInfo(); return !isGuest() && (isAdminUser() || ((i.worldAccess || {})[w.id] === 'edit')); };
+  // Rechte: kein Zugriff < Lesen < Schreiben < Admin (Admin einer Welt darf Zeitlinien anlegen und Rechte vergeben)
+  const isWorldAdmin = (w = state.world) => { const i = srvInfo(); return !isGuest() && (isAdminUser() || ((i && i.worldAccess) || {})[w.id] === 'admin'); };
+  const canCreate = (w = state.world) => isWorldAdmin(w);
   const canEditTl = (tl = state.tl) => !!tl && !tl.readonly && tl._editable !== false && !isGuest();
+  const canAdminTl = (tl = state.tl) => canEditTl(tl) && tl._admin !== false;
   const isSW = () => state.world.geometry === 'galaxy-sw';
   const worldName = w => w.builtin ? (w.name[window.I18N.lang] || w.name.de) : w.name;
   const editable = () => state.mode === 'edit' && canEditTl();
@@ -155,11 +158,12 @@
         try { if (error) throw new Error(error); const w = normalizeWorld(JSON.parse(content)); w._file = file; lastWritten['worlds/' + file] = content; state.worlds.push(w); }
         catch (e) { bad.push(`worlds/${file}: ${e.message}`); }
       }
-      for (const { file, content, error, editable } of await FS.list('timelines')) {
+      for (const { file, content, error, editable, admin } of await FS.list('timelines')) {
         try {
           if (error) throw new Error(error);
           const tl = parseTimeline(content); tl._file = file; lastWritten['timelines/' + file] = content;
           if (editable === false) tl._editable = false;
+          if (admin === false) tl._admin = false;
           if (state.timelines.some(x => x.id === tl.id)) tl.id = uid('tl');
           state.timelines.push(tl);
         } catch (e) { bad.push(`timelines/${file}: ${e.message}`); }
@@ -199,7 +203,7 @@
       }
       if (isGuest()) return;
       const customWorlds = state.worlds.filter(w => !w.builtin);
-      if (isAdminUser()) for (const w of customWorlds) await writeFile('worlds', fileFor(w, customWorlds), serialize(w));
+      for (const w of customWorlds) if (isWorldAdmin(w)) await writeFile('worlds', fileFor(w, customWorlds), serialize(w));
       const tls = state.timelines.filter(x => !x.readonly);
       for (const x of tls) { const f = fileFor(x, tls); if (x._editable === false) { lastWritten['timelines/' + f] ??= serialize(x); continue; } await writeFile('timelines', f, serialize(x)); }
     }, 300);
@@ -1863,9 +1867,9 @@
     const guest = isGuest(), si = srvInfo();
     for (const id of ['#tabEdit', '#tabSettings']) $(id).hidden = guest;
     $('#btnNewWorld').hidden = !isAdminUser() || guest;
-    $('#btnDelWorld').hidden = !isAdminUser() || guest || !!state.world.builtin;
+    $('#btnDelWorld').hidden = !isWorldAdmin() || guest || !!state.world.builtin;
     for (const id of ['#btnNewTl', '#btnDupTl', '#btnImport']) $(id).hidden = !canCreate();
-    $('#btnDelTl').hidden = guest; $('#btnDelTl').disabled = !canEditTl();
+    $('#btnDelTl').hidden = guest; $('#btnDelTl').disabled = !canAdminTl();
     $('#btnJson').hidden = !canEditTl();
     $('#btnFolder').hidden = guest || !isAdminUser();
     $('#btnLogin').hidden = !guest;
@@ -2095,7 +2099,7 @@
       ${FS && FS.server && srvInfo().loginRequired && isAdminUser() ? `<section class="card" id="usersCard"><h3>👥 ${esc(t('users'))}</h3><div id="usersBox" class="hint">…</div></section>` : ''}
       <section class="card"><h3>${esc(t('worldSettings'))}: ${esc(worldName(w))}</h3>
         ${w.builtin ? `<p class="hint">${esc(t('builtinWorld'))}</p>${isSW() && SW.atlasCount ? `<h4>🗺 ${esc(t('atlasTitle'))}</h4><p class="hint">${esc(t('atlasInfo', SW.atlasCount.toLocaleString()))}</p>
-          ${canEditTl() ? `<p class="hint">${esc(t('atlasSyncHint'))}</p><button id="setAtlasSync">${esc(t('atlasSync'))}: ${esc(state.tl.name)}</button>` : ''}` : ''}` : !isAdminUser() ? `<p class="hint">${esc(t('adminOnly'))}</p>` : `
+          ${canEditTl() ? `<p class="hint">${esc(t('atlasSyncHint'))}</p><button id="setAtlasSync">${esc(t('atlasSync'))}: ${esc(state.tl.name)}</button>` : ''}` : ''}` : !isWorldAdmin(w) ? `<p class="hint">${esc(t('worldAdminOnly'))}</p>` : `
         <label class="field"><span>${esc(t('worldName'))}</span><input id="setWName" value="${esc(w.name)}"></label>
         <div class="row">
           <label class="field"><span>${esc(t('yearSuffixNeg'))}</span><input id="setNeg" value="${esc(w.yearFmt.neg)}"></label>
@@ -2113,6 +2117,8 @@
         <h4 style="margin-top:14px">${esc(t('dangerZone'))}</h4>
         <button id="setDelWorld" class="danger">${esc(t('deleteWorld'))}</button>`}
       </section>
+      ${FS && FS.server && srvInfo() && srvInfo().loginRequired && (isWorldAdmin(w) || timelinesOfWorld(w).some(x => !x.readonly && canAdminTl(x))) ? `<section class="card"><h3>👥 ${esc(t('worldPerms', worldName(w)))}</h3>
+        <p class="hint">${esc(t('worldPermsHint'))}</p><div id="wpermBox" class="hint">…</div></section>` : ''}
       ${FS && FS.server && srvInfo() && srvInfo().user ? `<section class="card"><h3>🔑 ${esc(t('myApiTitle'))}</h3>
         <p class="hint">${esc(t('myApiHint'))}</p>
         <div id="myTokenBox" class="hint">…</div></section>` : ''}
@@ -2152,6 +2158,7 @@
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
     if ($('#usersBox')) renderUsers();
     if ($('#myTokenBox')) renderMyToken();
+    if ($('#wpermBox')) renderWorldPerms(w);
     if ($('#setAuto')) { $('#setAuto').addEventListener('change', e => { settings.autoUpdate = e.target.checked; saveSoon(); }); $('#setCheck').addEventListener('click', () => checkUpdates(true)); }
     const rl = $('#setReleases'); if (rl) rl.addEventListener('click', e => { e.preventDefault(); window.open(APP_REPO, '_blank'); });
     const fo = $('#setFolder'); if (fo) fo.addEventListener('click', () => FS ? FS.openFolder('', null) : alert(t('folderOnlyApp')));
@@ -2289,11 +2296,29 @@
     $('#nuAdd').onclick = () => api('api/users', 'POST', { name: $('#nuName').value, password: $('#nuPw').value, role: $('#nuRole').value, perms: { worlds: { '*': 'view' }, timelines: {} } })
       .then(u => { toast(t('saved')); renderUsers().then(() => { if (u.role !== 'admin') permsDialog(u.name, u.perms, perms => api('api/users/' + u.id, 'PUT', { perms }).then(renderUsers)); }); }).catch(e => alert(e.message));
   }
+  // Rechte einer Welt und ihrer Zeitlinien vergeben (für Welt- und Zeitlinien-Admins)
+  async function renderWorldPerms(w) {
+    const box = $('#wpermBox'); if (!box) return;
+    let d; try { d = await api('api/perms?world=' + encodeURIComponent(w.id)); } catch (e) { box.textContent = e.message; return; }
+    box.classList.remove('hint');
+    const LV = ['none', 'view', 'edit', 'admin'], lab = { none: t('noAccess'), view: t('viewAccess'), edit: t('editAccess'), admin: t('adminAccess') };
+    const sel = (user, kind, id, cur, inherit, enabled, guest) => `<select data-u="${esc(user)}" data-k="${kind}" data-id="${esc(id)}" ${enabled ? '' : 'disabled'}>
+      <option value="" ${cur === '' ? 'selected' : ''}>${esc(inherit)}</option>${LV.filter(l => !guest || l === 'none' || l === 'view').map(l => `<option value="${l}" ${cur === l ? 'selected' : ''}>${esc(lab[l])}</option>`).join('')}</select>`;
+    const row = (id, name, r, guest) => `<tr><td><b>${esc(name)}</b></td><td>${sel(id, 'world', w.id, r.world, t('inheritAll') + (r.all ? ` (${lab[r.all] || r.all})` : ''), d.canAdminWorld, guest)}</td>
+      ${d.timelines.map(x => `<td>${sel(id, 'tl', x.id, r.timelines[x.id] || '', t('inheritWorld'), x.canAdmin, guest)}</td>`).join('')}</tr>`;
+    box.innerHTML = d.users.length || d.timelines.length ? `<div class="perm-scroll"><table class="perm-table wperm"><tr class="pw"><td></td><td>🌐 ${esc(worldName(w))}</td>${d.timelines.map(x => `<td>${esc(x.name)}</td>`).join('')}</tr>
+      ${d.users.map(u => row(u.id, u.name, u, false)).join('')}${row('guest', t('guests'), d.guest, true)}</table></div>
+      <p class="hint">${esc(t('worldPermsLegend'))}</p>` : `<p class="hint">${esc(t('noUsers'))}</p>`;
+    box.querySelectorAll('select').forEach(el => el.onchange = async () => {
+      const body = { user: el.dataset.u }; if (el.dataset.k === 'world') body.world = el.value; else body.timelines = { [el.dataset.id]: el.value };
+      try { await api('api/perms?world=' + encodeURIComponent(w.id), 'PUT', body); toast(t('saved')); } catch (e) { alert(e.message); renderWorldPerms(w); }
+    });
+  }
   function permsDialog(name, perms, onSave) {
     perms = JSON.parse(JSON.stringify(perms || { worlds: {}, timelines: {} })); perms.worlds ||= {}; perms.timelines ||= {};
     const opt = (val, cur, label) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${esc(label)}</option>`;
     const sel = (kind, id, cur, allowEdit, inheritLabel) => `<select data-k="${kind}" data-id="${esc(id)}">
-      ${inheritLabel ? opt('', cur ?? '', inheritLabel) : ''}${opt('none', cur, t('noAccess'))}${opt('view', cur, t('viewAccess'))}${allowEdit ? opt('edit', cur, t('editAccess')) : ''}</select>`;
+      ${inheritLabel ? opt('', cur ?? '', inheritLabel) : ''}${opt('none', cur, t('noAccess'))}${opt('view', cur, t('viewAccess'))}${allowEdit ? opt('edit', cur, t('editAccess')) + opt('admin', cur, t('adminAccess')) : ''}</select>`;
     const rows = state.worlds.map(w => {
       const tls = state.timelines.filter(x => x.world === w.id);
       return `<tr class="pw"><td>🌐 <b>${esc(worldName(w))}</b></td><td>${sel('worlds', w.id, perms.worlds[w.id], true, t('inheritAll'))}</td></tr>` +

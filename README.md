@@ -258,7 +258,21 @@ Der Updater hat über `docker.sock` Zugriff auf Docker, ist aber von außen nich
 
 **Gäste und Anmeldung:** Ohne Anmeldung sieht man die Karte nur an. Oben rechts gibt es *🔒 Anmelden*, danach sind Editor, Einstellungen, neue Welten/Zeitlinien, Import und JSON-Bearbeitung freigeschaltet. Die Anmeldung bleibt 30 Tage gespeichert; abmelden geht unter *Einstellungen → Konto*.
 
-**Benutzer & Rechte:** Unter *Einstellungen → 👥 Benutzer* (nur für Admins) legst du weitere Benutzer an – als **Admin** (darf alles) oder **Benutzer**. Über *Rechte* bekommt jeder Benutzer pro Welt und pro Zeitlinie *kein Zugriff*, *ansehen* oder *bearbeiten*; Zeitlinien erben die Einstellung ihrer Welt, Welten die Einstellung „Alle Welten“. „Bearbeiten“ einer Welt erlaubt auch neue Zeitlinien darin. Ebenso lassen sich die Rechte der **Gäste** (nicht angemeldet) einschränken, z. B. private Zeitlinien verstecken. Der Server prüft die Rechte bei jedem Zugriff (auch API und MCP ohne Token = Gast-Rechte). Updates, Datenordner, API-Adressen und Benutzerverwaltung sehen nur Admins. Der Benutzer aus `IAM_USER`/`IAM_PASSWORD` ist immer Haupt-Admin. Die Benutzer liegen (mit verschlüsselten Passwörtern) in `/data/users.json`.
+**Benutzer & Rechte:** Unter *Einstellungen → 👥 Benutzer* (nur für Haupt-Admins) legst du Benutzer an – als **Admin** (darf alles) oder **Benutzer**. Jeder Benutzer bekommt pro Welt und pro Zeitlinie eine von vier Stufen:
+
+| Stufe | Bedeutung |
+|---|---|
+| kein Zugriff | sieht die Welt/Zeitlinie nicht |
+| Lesen | ansehen |
+| Schreiben | bearbeiten |
+| Admin | zusätzlich: Zeitlinien anlegen und löschen, Welt-Einstellungen (Name, Kartenbild …) und **Rechte vergeben** |
+
+- Zeitlinien erben die Stufe ihrer Welt, Welten die Stufe „Alle Welten“. **Admin einer Welt** ist automatisch Admin aller ihrer Zeitlinien.
+- Neue Zeitlinien darf nur ein **Admin der Welt** anlegen; wer eine Zeitlinie anlegt, wird automatisch ihr Admin.
+- Welt- und Zeitlinien-Admins verwalten die Rechte selbst unter *Einstellungen → Rechte in „Welt“*: Welt-Admins für die Welt und alle Zeitlinien, Zeitlinien-Admins nur für ihre Zeitlinien. Haupt-Admins brauchen keine Rechte und erscheinen dort nicht.
+- **Gäste** (nicht angemeldet) können höchstens lesen; so lassen sich z. B. private Zeitlinien verstecken.
+- Neue Welten anlegen und Benutzer anlegen/löschen bleibt den Haupt-Admins vorbehalten. Der Benutzer aus `IAM_USER`/`IAM_PASSWORD` ist immer Haupt-Admin.
+- Der Server prüft die Rechte bei jedem Zugriff – auch über API und MCP (persönlicher Token = Rechte des Benutzers, ohne Token = Gast-Rechte). Die Benutzer liegen (mit verschlüsselten Passwörtern) in `/data/users.json`.
 
 **Handy & Tablet:** Die Browser-Version passt sich an kleine Bildschirme an: ein Finger verschiebt, zwei Finger zoomen, Tippen wählt einen Ort. Filter liegen in der Schublade ☰, Infos/Reiseplaner/Editor öffnen sich als Panel von unten (ℹ, 🧭). JSON lässt sich über *Datei → Importieren* (Dateiauswahl des Handys) oder *Datei → Als JSON bearbeiten* (Text einfügen) einspielen. Tipp: Im Handy-Browser „Zum Startbildschirm hinzufügen“ – dann startet die Karte wie eine App.
 

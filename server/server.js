@@ -31,7 +31,7 @@ for (const d of DIRS) fs.mkdirSync(path.join(DATA_DIR, d), { recursive: true });
 // ---------------------------------------------------------------- Benutzer & Rechte
 // data/users.json: { users: [{id,name,pass,role:'admin'|'user',perms:{worlds:{},timelines:{}}}], guest: {worlds:{},timelines:{}} }
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const LEVEL = { none: 0, view: 1, edit: 2 };
+const LEVEL = { none: 0, view: 1, edit: 2, admin: 3 };  // admin = darf Zeitlinien anlegen und Rechte vergeben
 function loadUsers() {
   let d = {}; try { d = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); } catch { }
   d.users = Array.isArray(d.users) ? d.users : [];
@@ -75,14 +75,17 @@ function whoIs(req, url) {
   return { id: 'guest', name: null, guest: true, admin: false, perms: loadUsers().guest };
 }
 function level(who, worldId, tlId, readonly) {
-  if (who.admin) return readonly ? 'view' : 'edit';
+  if (who.admin) return readonly ? 'view' : 'admin';
   const p = who.perms || { worlds: {}, timelines: {} };
-  let l = tlId && p.timelines && p.timelines[tlId] != null ? p.timelines[tlId] : (p.worlds && (p.worlds[worldId] ?? p.worlds['*'])) || 'none';
-  if (readonly && l === 'edit') l = 'view';
+  const wl = (p.worlds && (p.worlds[worldId] ?? p.worlds['*'])) || 'none';
+  // Welt-Admins sind automatisch Admin aller Zeitlinien ihrer Welt
+  let l = tlId && wl !== 'admin' && p.timelines && p.timelines[tlId] != null ? p.timelines[tlId] : wl;
+  if (readonly && LEVEL[l] >= 2) l = 'view';
   return LEVEL[l] != null ? l : 'none';
 }
 const canView = (who, w, t, ro) => LEVEL[level(who, w, t, ro)] >= 1;
 const canEdit = (who, w, t) => LEVEL[level(who, w, t, false)] >= 2;
+const canAdmin = (who, w, t) => LEVEL[level(who, w, t, false)] >= 3;
 const isAdmin = req => whoIs(req).admin;
 const secureReq = req => (req.headers['x-forwarded-proto'] || '').startsWith('https');
 const loginAttempts = new Map();
@@ -141,7 +144,7 @@ const reqToken = (req, url) => { const h = req.headers.authorization || ''; retu
 // Darf dieser Betrachter irgendwo schreiben?
 function canWriteAny(v) {
   if (!v || v.guest) return false; if (v.admin) return true;
-  const p = v.perms || {}; return Object.values(p.worlds || {}).concat(Object.values(p.timelines || {})).includes('edit');
+  const p = v.perms || {}; return Object.values(p.worlds || {}).concat(Object.values(p.timelines || {})).some(l => LEVEL[l] >= 2);
 }
 // Lesen: öffentlich (wenn IAM_PUBLIC_VIEW) – Schreiben: nur mit Anmeldung bzw. API-Token
 function canRead(req, url) {
@@ -470,6 +473,12 @@ async function storeImage(b) {
   const name = uid('img') + IMG_EXT[type]; fs.writeFileSync(path.join(IMG_DIR, name), buf);
   return 'images/' + name;
 }
+function grantCreator(who, tlId) {
+  if (!who || who.admin || !tlId || !who.id || who.id === 'guest') return;
+  const d = loadUsers(), u = d.users.find(x => x.id === who.id); if (!u) return;
+  u.perms = u.perms || { worlds: {}, timelines: {} }; u.perms.timelines = u.perms.timelines || {};
+  u.perms.timelines[tlId] = 'admin'; saveUsers(d);
+}
 function writableTimeline(q, lang) {
   const t = findTimeline(q, lang);
   if (!t) throw Object.assign(new Error('timeline not found'), { code: 404 });
@@ -504,11 +513,11 @@ async function apiWrite(req, res, url, parts) {
 
   if (ep === 'timeline/copy' && req.method === 'POST') {
     const src = findTimeline(b.from || 'canon', lang); if (!src) return send(res, 404, { error: 'source timeline not found' });
-    if (!canEdit(VIEWER, src.world || 'starwars', null)) return send(res, 403, { error: 'Keine Rechte, in dieser Welt Zeitlinien anzulegen / no permission to create timelines in this world' });
+    if (!canAdmin(VIEWER, src.world || 'starwars', null)) return send(res, 403, { error: 'Neue Zeitlinien darf nur ein Admin der Welt anlegen / only world admins can create timelines' });
     const c = JSON.parse(JSON.stringify(src)); delete c._file; delete c.readonly;
     c.id = uid('tl'); c.name = b.name || (src.name + ' (Kopie)');
     let f = slug(c.name) + '.json', i = 2; while (fs.existsSync(path.join(DATA_DIR, 'timelines', f))) f = `${slug(c.name)}_${i++}.json`;
-    c._file = f; saveTimeline(c); return send(res, 201, { ok: true, id: c.id, name: c.name, file: f });
+    c._file = f; saveTimeline(c); grantCreator(VIEWER, c.id); return send(res, 201, { ok: true, id: c.id, name: c.name, file: f });
   }
   if (ep === 'timeline' && req.method === 'PUT') {
     const t = writableTimeline(tlName, lang), nt = b.timeline && b.objects === undefined ? b.timeline : b;
@@ -1100,14 +1109,15 @@ const server = http.createServer(async (req, res) => {
       if (!DIRS.includes(dir)) return send(res, 404, { error: 'unknown dir' });
       const meta = content => { try { const j = JSON.parse(content); return dir === 'worlds' ? { world: j.id, tl: null } : { world: j.world || 'starwars', tl: j.id }; } catch { return null; } };
       const viewOk = mt => mt && (dir === 'worlds' ? (who.admin || canView(who, mt.world, null) || listJson('timelines').some(t => (t.world || 'starwars') === mt.world && canView(who, t.world || 'starwars', t.id))) : canView(who, mt.world, mt.tl));
-      const editOk = mt => mt && (dir === 'worlds' ? who.admin || canEdit(who, mt.world, null) : canEdit(who, mt.world, mt.tl));
+      const editOk = mt => mt && (dir === 'worlds' ? who.admin || canAdmin(who, mt.world, null) : canEdit(who, mt.world, mt.tl));
+      const adminOk = mt => mt && (dir === 'worlds' ? who.admin || canAdmin(who, mt.world, null) : canAdmin(who, mt.world, mt.tl));
       if (!file && req.method === 'GET') {
         const out = [];
         for (const f of fs.readdirSync(path.join(DATA_DIR, dir)).filter(f => f.toLowerCase().endsWith('.json'))) {
           let content; try { content = fs.readFileSync(path.join(DATA_DIR, dir, f), 'utf8'); } catch (err) { if (who.admin) out.push({ file: f, error: err.message }); continue; }
           const mt = meta(content);
           if (!mt) { if (who.admin) out.push({ file: f, content }); continue; }
-          if (viewOk(mt)) out.push({ file: f, content, editable: editOk(mt) });
+          if (viewOk(mt)) out.push({ file: f, content, editable: editOk(mt), admin: adminOk(mt) });
         }
         return send(res, 200, out);
       }
@@ -1119,11 +1129,14 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'PUT') {
         const body = await readBody(req); const mt = meta(body); if (!mt) return send(res, 400, { error: 'invalid JSON' });
         if (existing != null) { if (!editOk(meta(existing)) || !editOk(mt)) return send(res, 403, { error: 'Keine Bearbeitungsrechte / no edit permission' }); }
-        else if (dir === 'worlds' ? !who.admin : !canEdit(who, mt.world, null) && !canEdit(who, mt.world, mt.tl)) return send(res, 403, { error: 'Keine Rechte zum Anlegen / no permission to create' });
-        const tmp = p + '.tmp'; fs.writeFileSync(tmp, body, 'utf8'); fs.renameSync(tmp, p); return send(res, 200, { ok: true });
+        else if (dir === 'worlds' ? !who.admin : !canAdmin(who, mt.world, null)) return send(res, 403, { error: 'Neue Zeitlinien darf nur ein Admin der Welt anlegen / only world admins can create timelines' });
+        const tmp = p + '.tmp'; fs.writeFileSync(tmp, body, 'utf8'); fs.renameSync(tmp, p);
+        // Wer eine Zeitlinie anlegt, wird ihr Admin
+        if (existing == null && dir === 'timelines') grantCreator(who, mt.tl);
+        return send(res, 200, { ok: true });
       }
       if (req.method === 'DELETE') {
-        if (existing != null && !(dir === 'worlds' ? who.admin : editOk(meta(existing)))) return send(res, 403, { error: 'no permission' });
+        if (existing != null && !adminOk(meta(existing))) return send(res, 403, { error: 'Löschen nur für Admins / admins only' });
         if (existing != null) fs.unlinkSync(p); return send(res, 200, { ok: true });
       }
       return send(res, 405, { error: 'method not allowed' });
@@ -1159,6 +1172,40 @@ const server = http.createServer(async (req, res) => {
         return send(res, 201, { token: tok, hint: rec.apiTokenHint, created: rec.apiTokenCreated });
       }
       if (req.method === 'DELETE') { delete rec.apiToken; delete rec.apiTokenHint; delete rec.apiTokenCreated; saveUsers(d); return send(res, 200, { ok: true }); }
+      return send(res, 405, { error: 'method not allowed' });
+    }
+    // Rechte einer Welt verwalten: Welt-Admins (für Welt + Zeitlinien) und Zeitlinien-Admins (für ihre Zeitlinien)
+    if (url.pathname === '/api/perms') {
+      const who = whoIs(req, url), wid = url.searchParams.get('world') || 'starwars';
+      if (who.guest || who.api) return send(res, 401, { error: 'login required' });
+      const tls = allTimelines('de', { admin: true }).filter(t => (t.world || 'starwars') === wid && !t.readonly);
+      const wAdm = canAdmin(who, wid, null), tAdm = tls.filter(t => canAdmin(who, wid, t.id));
+      if (!wAdm && !tAdm.length) return send(res, 403, { error: 'Keine Admin-Rechte in dieser Welt / not an admin of this world' });
+      const d = loadUsers(), ok = LV => LV === '' || LEVEL[LV] != null;
+      if (req.method === 'GET') {
+        const row = p => ({ world: (p.worlds || {})[wid] ?? '', all: (p.worlds || {})['*'] ?? '', timelines: Object.fromEntries(tls.map(t => [t.id, (p.timelines || {})[t.id] ?? ''])) });
+        return send(res, 200, { world: wid, canAdminWorld: wAdm, timelines: tls.map(t => ({ id: t.id, name: t.name, canAdmin: canAdmin(who, wid, t.id) })),
+          users: d.users.filter(u => u.role !== 'admin' && u.id !== who.id).map(u => Object.assign({ id: u.id, name: u.name }, row(u.perms || {}))),
+          guest: row(d.guest || {}) });
+      }
+      if (req.method === 'PUT') {
+        const b = JSON.parse(await readBody(req, 1e6));
+        let target;
+        if (b.user === 'guest') target = (d.guest = d.guest || { worlds: {}, timelines: {} });
+        else { const u = d.users.find(x => x.id === b.user && x.role !== 'admin' && x.id !== who.id); if (!u) return send(res, 404, { error: 'user not found' }); target = (u.perms = u.perms || { worlds: {}, timelines: {} }); }
+        target.worlds = target.worlds || {}; target.timelines = target.timelines || {};
+        if (b.world !== undefined) {
+          if (!wAdm) return send(res, 403, { error: 'Nur Welt-Admins ändern die Rechte für die Welt' });
+          if (!ok(b.world) || (b.user === 'guest' && LEVEL[b.world] >= 2)) return send(res, 400, { error: 'invalid level' });
+          if (b.world === '') delete target.worlds[wid]; else target.worlds[wid] = b.world;
+        }
+        for (const [tid, lv] of Object.entries(b.timelines || {})) {
+          const t = tls.find(x => x.id === tid); if (!t || !canAdmin(who, wid, tid)) return send(res, 403, { error: 'Keine Admin-Rechte für Zeitlinie ' + tid });
+          if (!ok(lv) || (b.user === 'guest' && LEVEL[lv] >= 2)) return send(res, 400, { error: 'invalid level' });
+          if (lv === '') delete target.timelines[tid]; else target.timelines[tid] = lv;
+        }
+        saveUsers(d); return send(res, 200, { ok: true });
+      }
       return send(res, 405, { error: 'method not allowed' });
     }
     // Benutzerverwaltung (nur Admins)
