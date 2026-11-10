@@ -33,6 +33,6 @@ jobs:
             ghcr.io/ascandir/ascandir---swgm:latest
             ghcr.io/ascandir/ascandir---swgm:${{ steps.ver.outputs.version }}
           labels: |
-            org.opencontainers.image.source=https://github.com/Ascandir/Ascandir---SWGM
+            org.opencontainers.image.source=https://github.com/Ascandir/Ascandir---RP-Manager
             org.opencontainers.image.title=Ascandir RP-Manager
             org.opencontainers.image.version=${{ steps.ver.outputs.version }}

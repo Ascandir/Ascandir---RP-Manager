@@ -18,7 +18,7 @@
     interactUntil = performance.now() + 220;
     clearTimeout(interactTimer); interactTimer = setTimeout(() => draw(), 240);
   }
-  const APP_REPO = 'https://github.com/Ascandir/Ascandir---SWGM/releases';
+  const APP_REPO = 'https://github.com/Ascandir/Ascandir---RP-Manager/releases';
 
   // ------------------------------------------------------------- Welttypen
   const WORLD_TYPES = {

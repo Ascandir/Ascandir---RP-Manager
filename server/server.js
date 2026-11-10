@@ -1098,7 +1098,7 @@ let latestRelease = null;
 const cmpVer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; };
 async function checkLatest() {
   try {
-    const r = await fetch('https://api.github.com/repos/Ascandir/Ascandir---SWGM/releases/latest', { headers: { 'User-Agent': 'ascandir-rp-manager', Accept: 'application/vnd.github+json' } });
+    const r = await fetch('https://api.github.com/repos/Ascandir/Ascandir---RP-Manager/releases/latest', { headers: { 'User-Agent': 'ascandir-rp-manager', Accept: 'application/vnd.github+json' } });
     if (r.ok) { const j = await r.json(); latestRelease = String(j.tag_name || '').replace(/^v/, '') || null; }
   } catch { /* offline – egal */ }
 }
