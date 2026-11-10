@@ -220,8 +220,41 @@ volumes:
 | `IAM_PUBLIC_VIEW` | `true` (Standard): Gäste können die Karte ohne Anmeldung ansehen, Welt/Zeitlinie/Jahr wählen und exportieren. `false`: auch zum Ansehen ist eine Anmeldung nötig. |
 | `IAM_API_TOKEN` | Optionaler **Master-Token** mit vollem Zugriff auf alles. Normalerweise reichen die persönlichen Tokens der Benutzer (siehe unten). |
 | `IAM_READONLY` | `true` = nur lesen |
+| `IAM_UPDATE_WEBHOOK` / `IAM_UPDATE_WEBHOOK_TOKEN` | Optional: Update per Knopfdruck in den Einstellungen (siehe unten) |
 
-**Update:** In Portainer beim Stack *Update the stack* mit eingeschaltetem **„Re-pull image and redeploy“** ausführen. Jede neue Version auf GitHub erzeugt automatisch ein neues Image (ca. 1–2 Minuten nach dem Release). Ist ein neueres Image verfügbar, zeigt die App das angemeldeten Nutzern an (abschaltbar mit `IAM_UPDATE_CHECK=false`). Alternativ eine feste Version eintragen, z. B. `ghcr.io/ascandir/ascandir---swgm:0.8.1`.
+**Update:** In Portainer beim Stack *Update the stack* mit eingeschaltetem **„Re-pull image and redeploy“** ausführen. Jede neue Version auf GitHub erzeugt automatisch ein neues Image (ca. 1–2 Minuten nach dem Release). Ist ein neueres Image verfügbar, zeigt die App das angemeldeten Admins an (abschaltbar mit `IAM_UPDATE_CHECK=false`). Alternativ eine feste Version eintragen, z. B. `ghcr.io/ascandir/ascandir---swgm:0.8.1`.
+
+**Update per Knopfdruck (ohne Portainer):** Ein Container kann sich nicht selbst ersetzen – dafür kommt ein kleiner Updater-Container in den Stack ([nickfedor/watchtower](https://github.com/nicholas-fedor/watchtower), gepflegter Nachfolger des archivierten Watchtower). Er aktualisiert **nur** den Karten-Container (Label) und **nur**, wenn ein Admin unter *Einstellungen → Updates* auf **„Jetzt aktualisieren & neu starten“** klickt (oder im Hinweis-Banner). Die Seite wartet dann, bis die neue Version läuft, und lädt neu. Ergänzungen im Stack (fertig in `docker-compose.yml`):
+
+```yaml
+services:
+  interactivemap:
+    # … wie oben, zusätzlich:
+    environment:
+      IAM_UPDATE_WEBHOOK: "http://interactivemap-updater:8080/v1/update"
+      IAM_UPDATE_WEBHOOK_TOKEN: "zweiter-zufalls-token"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    networks:
+      - updater          # zusätzlich zu bestehenden Netzen (z. B. macvlan_net)
+  interactivemap-updater:
+    image: nickfedor/watchtower:latest
+    container_name: interactivemap-updater
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_TOKEN: "zweiter-zufalls-token"   # gleicher Wert wie oben
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+    networks:
+      - updater
+networks:
+  updater:
+```
+
+Der Updater hat über `docker.sock` Zugriff auf Docker, ist aber von außen nicht erreichbar (kein Port) und nur mit dem Token ansprechbar. `IAM_UPDATE_WEBHOOK` kann alternativ auf jeden anderen Webhook zeigen, der ein POST annimmt (z. B. einen Portainer-Webhook).
 
 **Gäste und Anmeldung:** Ohne Anmeldung sieht man die Karte nur an. Oben rechts gibt es *🔒 Anmelden*, danach sind Editor, Einstellungen, neue Welten/Zeitlinien, Import und JSON-Bearbeitung freigeschaltet. Die Anmeldung bleibt 30 Tage gespeichert; abmelden geht unter *Einstellungen → Konto*.
 

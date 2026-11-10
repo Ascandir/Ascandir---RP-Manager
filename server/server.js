@@ -20,6 +20,9 @@ const USER = process.env.IAM_USER || 'admin';
 const PASSWORD = process.env.IAM_PASSWORD || '';
 const API_TOKEN = process.env.IAM_API_TOKEN || '';
 const READONLY = /^(1|true|yes)$/i.test(process.env.IAM_READONLY || '');
+// Selbst-Update per Webhook, z.B. Watchtower-HTTP-API (http://<updater>:8080/v1/update) oder ein Portainer-Webhook
+const UPDATE_HOOK = process.env.IAM_UPDATE_WEBHOOK || '';
+const UPDATE_HOOK_TOKEN = process.env.IAM_UPDATE_WEBHOOK_TOKEN || '';
 const PUBLIC_VIEW = !/^(0|false|no)$/i.test(process.env.IAM_PUBLIC_VIEW || 'true'); // Gäste dürfen ansehen
 const VERSION = (() => { try { return require(path.join(__dirname, '..', 'package.json')).version; } catch { return 'docker'; } })();
 const DIRS = ['worlds', 'timelines'];
@@ -1082,7 +1085,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/logout') return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': 'iam_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
     if (url.pathname === '/api/info') { const who = whoIs(req, url); const ws = allWorlds('de', { admin: true }).map(w => w.id);
       return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, loginRequired: !!PASSWORD, admin: who.admin, user: who.guest ? null : { name: who.name, admin: who.admin },
-      worldAccess: Object.fromEntries(ws.map(w => [w, level(who, w, null)])), publicView: PUBLIC_VIEW, latest: who.admin ? latestRelease : null, updateAvailable: who.admin && !!(latestRelease && cmpVer(latestRelease, VERSION) > 0), latestShown: who.admin ? latestRelease : null, dataDir: who.admin ? DATA_DIR : null }, 'application/json; charset=utf-8', { 'Access-Control-Allow-Origin': '*' }); }
+      worldAccess: Object.fromEntries(ws.map(w => [w, level(who, w, null)])), publicView: PUBLIC_VIEW, latest: who.admin ? latestRelease : null, updateAvailable: who.admin && !!(latestRelease && cmpVer(latestRelease, VERSION) > 0), latestShown: who.admin ? latestRelease : null, updateHook: who.admin && !!UPDATE_HOOK, dataDir: who.admin ? DATA_DIR : null }, 'application/json; charset=utf-8', { 'Access-Control-Allow-Origin': '*' }); }
     if (!canRead(req, url)) {
       if (url.pathname.startsWith('/api/')) return send(res, 401, { error: 'unauthorized' }, 'application/json', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
       return send(res, 401, 'Anmeldung erforderlich', 'text/plain; charset=utf-8', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
@@ -1124,6 +1127,24 @@ const server = http.createServer(async (req, res) => {
         if (existing != null) fs.unlinkSync(p); return send(res, 200, { ok: true });
       }
       return send(res, 405, { error: 'method not allowed' });
+    }
+    // Update auslösen (nur Admins, nur mit IAM_UPDATE_WEBHOOK)
+    if (url.pathname === '/api/admin/update' && req.method === 'POST') {
+      const who = whoIs(req, url);
+      if (!who.admin || who.api) return send(res, 403, { error: 'admin only' });
+      if (!UPDATE_HOOK) return send(res, 400, { error: 'IAM_UPDATE_WEBHOOK ist nicht gesetzt' });
+      // Der Updater stoppt diesen Container – daher nicht auf das Ende warten
+      const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 4000);
+      try {
+        const r = await fetch(UPDATE_HOOK, { method: 'POST', headers: UPDATE_HOOK_TOKEN ? { Authorization: 'Bearer ' + UPDATE_HOOK_TOKEN } : {}, signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!r.ok) return send(res, 502, { error: 'Updater antwortet mit HTTP ' + r.status + (r.status === 401 ? ' (Token falsch?)' : '') });
+        return send(res, 200, { ok: true, started: true, done: true, version: VERSION });
+      } catch (e) {
+        clearTimeout(timer);
+        if (e.name === 'AbortError') return send(res, 202, { ok: true, started: true, version: VERSION });
+        return send(res, 502, { error: 'Updater nicht erreichbar: ' + e.message });
+      }
     }
     // Eigener API-Token (für angemeldete Benutzer)
     if (url.pathname === '/api/me/token') {

@@ -1,5 +1,5 @@
 # Ascandir InteractiveMap – Stack für Portainer
-# In Portainer: Stacks → Add stack → diesen Inhalt einfügen → Passwort/Token anpassen → Deploy
+# In Portainer: Stacks → Add stack → diesen Inhalt einfügen → Passwort/Tokens anpassen → Deploy
 services:
   interactivemap:
     image: ghcr.io/ascandir/ascandir---swgm:latest
@@ -10,10 +10,36 @@ services:
     environment:
       IAM_USER: "admin"             # Benutzername für die Oberfläche
       IAM_PASSWORD: "BITTE-AENDERN"  # Passwort für die Oberfläche (leer = ohne Passwort)
-      IAM_API_TOKEN: "BITTE-LANGEN-ZUFALLS-TOKEN-EINTRAGEN"  # Schlüssel für Story-KI / ChatGPT (Lesen & Schreiben)
+      IAM_API_TOKEN: "BITTE-LANGEN-ZUFALLS-TOKEN-EINTRAGEN"  # optionaler Master-Token (voller Zugriff)
+      # Update per Knopfdruck in den Einstellungen (über den Updater unten):
+      IAM_UPDATE_WEBHOOK: "http://interactivemap-updater:8080/v1/update"
+      IAM_UPDATE_WEBHOOK_TOKEN: "BITTE-ZWEITEN-ZUFALLS-TOKEN-EINTRAGEN"
       # IAM_READONLY: "true"        # nur lesen, keine Änderungen erlauben
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"   # nur dieser Container wird vom Updater aktualisiert
     volumes:
       - interactivemap-data:/data   # Welten & Zeitlinien
+    networks:
+      - updater
+
+  # Updater (gepflegter Watchtower-Fork): aktualisiert NUR Container mit dem Label oben,
+  # und nur wenn ein Admin in den Einstellungen auf „Jetzt aktualisieren“ klickt.
+  interactivemap-updater:
+    image: nickfedor/watchtower:latest
+    container_name: interactivemap-updater
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_TOKEN: "BITTE-ZWEITEN-ZUFALLS-TOKEN-EINTRAGEN"   # derselbe Wert wie IAM_UPDATE_WEBHOOK_TOKEN
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+    networks:
+      - updater
 
 volumes:
   interactivemap-data:
+
+networks:
+  updater:

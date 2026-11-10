@@ -2088,7 +2088,8 @@
         <div class="seg">${['borders', 'bubbles'].map(k => `<button data-terr="${k}" class="${settings.terrStyle === k ? 'active' : ''}">${esc(t(k === 'borders' ? 'terrBorders' : 'terrBubbles'))}</button>`).join('')}</div></section>
       ${isAdminUser() ? `<section class="card"><h3>${esc(t('updates'))}</h3>
         <div class="kv"><span class="k">${esc(t('currentVersion'))}</span><span><b>${esc(info.version)}</b></span></div>
-        ${FS && FS.server && !FS.desktop ? (info.updateAvailable ? `<p class="warn"><b>${esc(t('updDockerNew', info.latest))}</b></p>` : '') + `<p class="hint">${esc(t('updDocker'))}</p>` : `<label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
+        ${FS && FS.server && !FS.desktop ? (info.updateAvailable ? `<p class="warn"><b>${esc(t(info.updateHook ? 'updDockerNewHook' : 'updDockerNew', info.latest))}</b></p>` : '')
+          + (info.updateHook ? `<div class="row"><button id="setSrvUpd" class="${info.updateAvailable ? 'primary' : ''}">⟳ ${esc(t('srvUpdNow'))}</button></div><p class="hint">${esc(t('srvUpdHint'))}</p>` : `<p class="hint">${esc(t('updDocker'))}</p><p class="hint">${esc(t('srvUpdSetup'))}</p>`) : `<label class="chk"><input type="checkbox" id="setAuto" ${settings.autoUpdate ? 'checked' : ''}>${esc(t('autoCheck'))}</label>
         <div class="row" style="margin-top:8px"><button id="setCheck" class="fixed">${esc(t('checkNow'))}</button><span id="setUpdStatus" class="dim"></span></div>`}
         <p class="hint"><a href="#" id="setReleases">${esc(t('releases'))}</a></p></section>` : ''}
       ${FS && FS.server && srvInfo().loginRequired && isAdminUser() ? `<section class="card" id="usersCard"><h3>👥 ${esc(t('users'))}</h3><div id="usersBox" class="hint">…</div></section>` : ''}
@@ -2145,6 +2146,7 @@
       $('#srvOff2').onclick = () => window.iamDesktop.setServer(null);
     });
     $$('.seg [data-mapstyle]').forEach(b => b.addEventListener('click', () => { settings.mapStyle = b.dataset.mapstyle; saveSoon(); renderSettings(); draw(); }));
+    const su = $('#setSrvUpd'); if (su) su.addEventListener('click', serverUpdate);
     const asy = $('#setAtlasSync'); if (asy) asy.addEventListener('click', atlasSync);
     $$('.seg [data-terr]').forEach(b => b.addEventListener('click', () => { settings.terrStyle = b.dataset.terr; saveSoon(); renderSettings(); draw(); }));
     $$('.seg [data-theme]').forEach(b => b.addEventListener('click', () => { settings.theme = b.dataset.theme; applyTheme(); saveSoon(); renderSettings(); renderAll(true); }));
@@ -2184,6 +2186,23 @@
       }
     }
     renderUpdStatus();
+  }
+  // Server-Update über den Updater-Container auslösen und warten, bis die neue Version läuft
+  async function serverUpdate() {
+    if (!confirm(t('srvUpdQ'))) return;
+    const before = (srvInfo() || {}).version;
+    let r; try { r = await api('api/admin/update', 'POST'); } catch (e) { alert(e.message); return; }
+    const ban = document.createElement('div'); ban.className = 'srv-upd'; ban.textContent = t('srvUpdRunning'); document.body.appendChild(ban);
+    const t0 = Date.now(); let wasDown = false;
+    const poll = async () => {
+      let v = null; try { const res = await fetch('api/info', { cache: 'no-store' }); if (res.ok) v = (await res.json()).version; else wasDown = true; } catch (e) { wasDown = true; }
+      const secs = Math.round((Date.now() - t0) / 1000);
+      if (v && (v !== before || (wasDown && secs > 8))) { ban.textContent = t('srvUpdDone', v); setTimeout(() => location.reload(), 1200); return; }
+      if (secs > 300) { ban.textContent = t('srvUpdTimeout'); setTimeout(() => ban.remove(), 8000); return; }
+      if (r && r.done && secs > 20 && !wasDown) { ban.textContent = t('srvUpdNoChange'); setTimeout(() => ban.remove(), 6000); return; }
+      ban.textContent = t('srvUpdRunning') + ` (${secs} s)`; setTimeout(poll, 3000);
+    };
+    setTimeout(poll, 3000);
   }
   // Ältere Star-Wars-Zeitlinien auf die offiziellen Rasterfelder umstellen (mit Sicherungskopie)
   function atlasSync() {
@@ -2311,7 +2330,7 @@
     if (!u) text = '';
     else if (u.state === 'dev') text = t('updDev');
     else if (u.state === 'docker') text = t('updDocker');
-    else if (u.state === 'dockerNew') { text = t('updDockerNew', u.version); html = `<b>${esc(text)}</b> <button id="updLater">${esc(t('updLater'))}</button>`; }
+    else if (u.state === 'dockerNew') { const hk = (srvInfo() || {}).updateHook; text = t(hk ? 'updDockerNewHook' : 'updDockerNew', u.version); html = `<b>${esc(text)}</b> ${hk ? `<button id="updSrvNow" class="primary">⟳ ${esc(t('srvUpdNow'))}</button>` : ''}<button id="updLater">${esc(t('updLater'))}</button>`; }
     else if (u.state === 'checking') text = t('updChecking');
     else if (u.state === 'none') text = t('updNone');
     else if (u.state === 'error') text = t('updError', u.message || '');
@@ -2319,9 +2338,9 @@
     else if (u.state === 'progress') { text = t('updProgress', Math.round(u.percent || 0)); html = `${esc(text)}<div class="bar"><i style="width:${Math.round(u.percent || 0)}%"></i></div>`; }
     else if (u.state === 'downloaded') { text = t('updReady', u.version); html = `<b>${esc(text)}</b> <button id="updInst" class="primary">${esc(t('updInstall'))}</button>`; }
     // In den Einstellungen dieselben Knöpfe direkt anzeigen
-    if (el) el.innerHTML = html ? html.replace(/ id="upd(Dl|Later|Inst)"/g, ' data-upd="$1"').replace(/<button data-upd="Later"[^>]*>[^<]*<\/button>/, '') : esc(text);
+    if (el) el.innerHTML = html ? html.replace(/ id="upd(Dl|Later|Inst|SrvNow)"/g, ' data-upd="$1"').replace(/<button data-upd="Later"[^>]*>[^<]*<\/button>/, '') : esc(text);
     if (html && !state.updDismissed && state.mode !== 'settings') { banner.innerHTML = html; banner.hidden = false; } else banner.hidden = true;
-    const act = { Dl: () => FS && FS.updDownload(), Inst: () => FS && FS.updInstall(), Later: () => { state.updDismissed = true; renderUpdStatus(); } };
+    const act = { Dl: () => FS && FS.updDownload(), Inst: () => FS && FS.updInstall(), Later: () => { state.updDismissed = true; renderUpdStatus(); }, SrvNow: () => { banner.hidden = true; serverUpdate(); } };
     for (const k of Object.keys(act)) {
       const b1 = $('#upd' + k); if (b1) b1.onclick = act[k];
       $$(`[data-upd="${k}"]`).forEach(b2 => { b2.onclick = act[k]; });
