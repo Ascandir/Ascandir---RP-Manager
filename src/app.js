@@ -472,11 +472,12 @@
     const lowRes = performance.now() < interactUntil;
     const v = state.view;
     const key = [v.cx, v.cy, v.z, W, H, DPR, state.year, dataVersion, state.tl.id, state.world.id, state.theme, state.selected, lowRes,
-      JSON.stringify(settings.opts), JSON.stringify(settings.types), settings.terrStyle, settings.mapStyle, [...state.hiddenFactions].join(','), window.I18N.lang].join('|');
+      JSON.stringify(settings.opts), JSON.stringify(settings.types), settings.terrStyle, settings.mapStyle, worldImgVer, [...state.hiddenFactions].join(','), window.I18N.lang].join('|');
     if (key !== baseKey) {
       rebuildTree(); computePositions();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       if (state.world.type === 'fantasy') drawParchment(); else drawSpace();
+      if (state.world.mapImage && state.world.mapImage.src) drawWorldImage();
       if (isSW() && settings.opts.regions) { if (atlasStyle()) drawRegionsAtlas(); else drawRegions(); }
       if (settings.opts.influence && era()) { if (settings.terrStyle === 'bubbles') drawInfluence(lowRes); else drawTerritories(); }
       if (settings.opts.grid) drawGrid();
@@ -670,6 +671,20 @@
     }
   }
   let paperPattern = null;
+  // Eigenes Kartenbild einer Welt (z.B. ein Kontinent), liegt in Weltkoordinaten unter allen Einträgen
+  let worldImgVer = 0; const imgCache = new Map();
+  function worldImg(src) {
+    let im = imgCache.get(src);
+    if (!im) { im = new Image(); im.onload = () => { worldImgVer++; draw(); }; im.src = src; imgCache.set(src, im); if (imgCache.size > 6) imgCache.delete(imgCache.keys().next().value); }
+    return im;
+  }
+  function drawWorldImage() {
+    const m = state.world.mapImage, im = worldImg(m.src); if (!im.complete || !im.naturalWidth) return;
+    worldTransform(ctx); ctx.save(); ctx.globalAlpha = m.opacity ?? 1;
+    ctx.imageSmoothingQuality = 'high'; ctx.drawImage(im, m.x || 0, m.y || 0, m.w, m.h); ctx.restore();
+  }
+  function worldBox(w) { return w.type === 'fantasy' ? { x: 0, y: 0, w: FANTASY_SIZE.w, h: FANTASY_SIZE.h } : { x: 0, y: 0, w: 2300, h: 1900 }; }
+  function fitImage(w, iw, ih) { const b = worldBox(w), sc = Math.min(b.w / iw, b.h / ih); return { w: Math.round(iw * sc), h: Math.round(ih * sc), x: Math.round(b.x + (b.w - iw * sc) / 2), y: Math.round(b.y + (b.h - ih * sc) / 2) }; }
   function drawParchment() {
     ctx.fillStyle = '#3a2e1f'; ctx.fillRect(0, 0, canvas.width, canvas.height);
     worldTransform(ctx);
@@ -1848,6 +1863,7 @@
     const guest = isGuest(), si = srvInfo();
     for (const id of ['#tabEdit', '#tabSettings']) $(id).hidden = guest;
     $('#btnNewWorld').hidden = !isAdminUser() || guest;
+    $('#btnDelWorld').hidden = !isAdminUser() || guest || !!state.world.builtin;
     for (const id of ['#btnNewTl', '#btnDupTl', '#btnImport']) $(id).hidden = !canCreate();
     $('#btnDelTl').hidden = guest; $('#btnDelTl').disabled = !canEditTl();
     $('#btnJson').hidden = !canEditTl();
@@ -1880,6 +1896,7 @@
   $$('#langSwitch button').forEach(b => b.addEventListener('click', () => { if (b.dataset.l !== settings.lang) setLang(b.dataset.l); }));
   $('#worldSelect').addEventListener('change', e => switchWorld(e.target.value));
   $('#tlSelect').addEventListener('change', e => selectTimeline(e.target.value));
+  $('#btnDelWorld').addEventListener('click', () => deleteWorld(state.world));
   $('#btnNewWorld').addEventListener('click', () => {
     modal(t('newWorldTitle'), `
       <label class="field"><span>${esc(t('worldName'))}</span><input id="mWName" value="${esc(t('myWorld'))}"></label>
@@ -1932,6 +1949,15 @@
     if (!timelinesOfWorld().length) state.timelines.push(emptyTimeline(t('mainTimeline')));
     state.tl = timelinesOfWorld()[0]; state.selected = null; state.undo = []; renderAll(true); saveSoon();
   });
+  function deleteWorld(w) {
+    if (!w || w.builtin) return false;
+    if (!confirm(t('confirmDeleteWorld', w.name, timelinesOfWorld(w).length))) return false;
+    for (const tl of timelinesOfWorld(w)) removeTimelineFile(tl);
+    state.timelines = state.timelines.filter(x => x.world !== w.id);
+    state.worlds = state.worlds.filter(x => x !== w);
+    if (FS && w._file) { lastWritten['worlds/' + w._file] = null; FS.remove('worlds', w._file).catch(e => toast(t('saveFailed', e.message))); }
+    switchWorld('starwars'); saveSoon(); toast(t('worldDeleted', w.name)); return true;
+  }
   function removeTimelineFile(tl) { if (FS && tl._file) { lastWritten['timelines/' + tl._file] = null; FS.remove('timelines', tl._file).catch(() => { }); } }
 
   // ------------------------------------------------------------- Export / Import / JSON
@@ -2074,6 +2100,16 @@
           <label class="field"><span>${esc(t('yearSuffixNeg'))}</span><input id="setNeg" value="${esc(w.yearFmt.neg)}"></label>
           <label class="field"><span>${esc(t('yearSuffixPos'))}</span><input id="setPos" value="${esc(w.yearFmt.pos)}"></label>
         </div><p class="hint">${esc(t('yearSuffixHint'))}</p>
+        <h4>🗺 ${esc(t('mapImage'))}</h4><p class="hint">${esc(t('mapImageHint'))}</p>
+        ${w.mapImage && w.mapImage.src ? `<img class="map-thumb" src="${esc(w.mapImage.src)}" alt="">
+          <label class="field"><span>${esc(t('mapOpacity'))}: <b id="miOpV">${Math.round((w.mapImage.opacity ?? 1) * 100)}%</b></span><input type="range" id="miOp" min="10" max="100" value="${Math.round((w.mapImage.opacity ?? 1) * 100)}"></label>
+          <div class="row"><label class="field"><span>${esc(t('mapScale'))} %</span><input type="number" id="miSc" value="${Math.round(w.mapImage.scale ?? 100)}" min="5" max="1000"></label>
+            <label class="field"><span>${esc(t('mapShiftX'))}</span><input type="number" id="miX" value="${Math.round(w.mapImage.x || 0)}"></label>
+            <label class="field"><span>${esc(t('mapShiftY'))}</span><input type="number" id="miY" value="${Math.round(w.mapImage.y || 0)}"></label></div>
+          <div class="row"><button id="miChange">🖼 ${esc(t('imgChange'))}</button><button id="miFit">${esc(t('mapFit'))}</button><button id="miDel" class="danger">${esc(t('mapRemove'))}</button></div>`
+          : `<button id="miChange" class="primary">🖼 ${esc(t('mapUpload'))}</button>`}
+        <input type="file" id="miFile" accept="image/*" hidden>
+        <h4 style="margin-top:14px">${esc(t('dangerZone'))}</h4>
         <button id="setDelWorld" class="danger">${esc(t('deleteWorld'))}</button>`}
       </section>
       ${FS && FS.server && srvInfo() && srvInfo().user ? `<section class="card"><h3>🔑 ${esc(t('myApiTitle'))}</h3>
@@ -2121,14 +2157,31 @@
       $('#setWName').addEventListener('change', e => { w.name = e.target.value.trim() || t('myWorld'); renderTopbar(); saveSoon(); });
       $('#setNeg').addEventListener('change', e => { w.yearFmt.neg = e.target.value.trim(); renderAll(true); saveSoon(); });
       $('#setPos').addEventListener('change', e => { w.yearFmt.pos = e.target.value.trim(); renderAll(true); saveSoon(); });
-      $('#setDelWorld').addEventListener('click', () => {
-        if (!confirm(t('confirmDeleteWorld', w.name, tlCount))) return;
-        for (const tl of timelinesOfWorld(w)) removeTimelineFile(tl);
-        state.timelines = state.timelines.filter(x => x.world !== w.id);
-        state.worlds = state.worlds.filter(x => x !== w);
-        if (FS && w._file) { lastWritten['worlds/' + w._file] = null; FS.remove('worlds', w._file).catch(() => { }); }
-        switchWorld('starwars'); setMode('settings'); saveSoon();
-      });
+      $('#setDelWorld').addEventListener('click', () => { if (deleteWorld(w)) setMode('settings'); });
+      // Kartenbild
+      const mi = () => w.mapImage;
+      const applyScale = () => { const m = mi(), sc = (m.scale ?? 100) / 100; const cx = m.x + m.w / 2, cy = m.y + m.h / 2; m.w = Math.round(m.baseW * sc); m.h = Math.round(m.baseH * sc); m.x = Math.round(cx - m.w / 2); m.y = Math.round(cy - m.h / 2); };
+      const changed = () => { worldImgVer++; draw(); saveSoon(); };
+      $('#miChange').onclick = () => $('#miFile').click();
+      $('#miFile').onchange = async ev => {
+        const f = ev.target.files[0]; if (!f) return;
+        try {
+          const src = await resizeImage(f, 4096, f.type === 'image/png' || f.type === 'image/webp' ? 'image/webp' : 'image/jpeg');
+          const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+          const fit = fitImage(w, im.naturalWidth, im.naturalHeight);
+          w.mapImage = Object.assign({ src, opacity: 1, scale: 100, baseW: fit.w, baseH: fit.h }, fit);
+          changed(); renderSettings(); toast(t('saved'));
+        } catch (e) { alert(t('imgError')); }
+      };
+      if (mi()) {
+        $('#miOp').oninput = e => { mi().opacity = e.target.value / 100; $('#miOpV').textContent = e.target.value + '%'; worldImgVer++; draw(); };
+        $('#miOp').onchange = () => saveSoon();
+        $('#miSc').onchange = e => { mi().scale = Math.max(5, +e.target.value || 100); mi().baseW ||= mi().w; mi().baseH ||= mi().h; applyScale(); $('#miX').value = mi().x; $('#miY').value = mi().y; changed(); };
+        $('#miX').onchange = e => { mi().x = +e.target.value || 0; changed(); };
+        $('#miY').onchange = e => { mi().y = +e.target.value || 0; changed(); };
+        $('#miFit').onclick = () => { const im = worldImg(mi().src); const fit = fitImage(w, im.naturalWidth || mi().w, im.naturalHeight || mi().h); Object.assign(mi(), fit, { scale: 100, baseW: fit.w, baseH: fit.h }); changed(); renderSettings(); };
+        $('#miDel').onclick = () => { if (!confirm(t('mapRemoveQ'))) return; delete w.mapImage; changed(); renderSettings(); };
+      }
     }
     renderUpdStatus();
   }
@@ -2580,11 +2633,11 @@
     const d = document.createElement('div'); d.className = 'lightbox';
     d.innerHTML = `<img src="${esc(src)}" alt="">${cap ? `<div class="cap">${esc(cap)}</div>` : ''}`; d.onclick = () => d.remove(); document.body.appendChild(d);
   }
-  function resizeImage(file, max) {
+  function resizeImage(file, max, mime = 'image/jpeg') {
     return new Promise((res, rej) => {
       const img = new Image(), url = URL.createObjectURL(file);
       img.onload = () => { const sc = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
-        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg', 0.86)); };
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c.toDataURL(mime, mime === 'image/jpeg' ? 0.86 : 0.9)); };
       img.onerror = () => rej(new Error(t('imgError'))); img.src = url;
     });
   }

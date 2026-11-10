@@ -45,6 +45,8 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
   - **Sci-Fi:** Galaxie-Hintergrund mit Sonnen, Planeten, Monden und Stationen
   - **Fantasy:** Pergamentkarte mit Hauptstädten, Städten, Dörfern, Festungen und Wahrzeichen
 - Das Design passt sich automatisch an den Welttyp an.
+- **Kartenbild:** Unter *Einstellungen → Aktuelle Welt → Kartenbild* kannst du für eigene Welten ein Bild hochladen (z. B. einen gezeichneten Kontinent). Es liegt unter Grenzen, Orten und Routen; Deckkraft, Größe und Lage sind einstellbar. Transparente PNGs bleiben transparent. Das Bild wird verkleinert (max. 4096 px) in der Welt-Datei gespeichert.
+- **Welt löschen:** über ⚙ in der Kopfzeile → *Welt löschen* oder unten in den Welt-Einstellungen (nur Admins, löscht auch alle Zeitlinien der Welt).
 
 ### Galaxie-Atlas (Star Wars)
 
