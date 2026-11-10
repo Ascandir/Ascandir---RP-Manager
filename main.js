@@ -52,7 +52,7 @@ function createWindow() {
 
 // ---------------------------------------------------------------- Dateien
 // data/worlds/*.json  = eigene Welten, data/timelines/*.json = Zeitlinien
-const DIRS = ['worlds', 'timelines', 'maps'];
+const DIRS = ['worlds', 'timelines'];
 let base = null;
 function dirPath(dir) {
   if (!DIRS.includes(dir)) throw new Error('Unbekannter Ordner: ' + dir);

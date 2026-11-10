@@ -181,7 +181,6 @@
       state.timelines = state.timelines.filter(x => x.id !== 'canon');
       if (!state.timelines.some(x => x.world === 'starwars')) state.worlds = state.worlds.filter(w => w.id !== 'starwars');
     }
-    if (MAPS) await MAPS.load();
     if (bad.length) setTimeout(() => alert(t('badFiles', bad.join('\n'))), 400);
   }
 
@@ -216,7 +215,6 @@
     try { await FS.save(dir, file, content); } catch (e) { console.error(e); toast(t('saveFailed', e.message)); }
   }
   async function onExternalChange(dir, file) {
-    if (dir === 'maps') { if (MAPS) MAPS.external(file); return; }
     let content; try { content = await FS.read(dir, file); } catch { return; }
     const key = dir + '/' + file;
     if (content != null && content === lastWritten[key]) return;
@@ -468,21 +466,6 @@
   const w2s = (x, y) => ({ x: (x - state.view.cx) * state.view.z + W / 2, y: (y - state.view.cy) * state.view.z + H / 2 });
   const s2w = (x, y) => ({ x: (x - W / 2) / state.view.z + state.view.cx, y: (y - H / 2) / state.view.z + state.view.cy });
   function worldTransform(c) { const z = state.view.z; c.setTransform(DPR * z, 0, 0, DPR * z, DPR * (W / 2 - state.view.cx * z), DPR * (H / 2 - state.view.cy * z)); }
-  // ------------------------------------------------------------- Gezeichnete Karten (Reiter „Zeichnen“, mapeditor.js)
-  const LV = { none: 0, view: 1, edit: 2, admin: 3 };
-  function worldLevel(w) { const i = srvInfo(); if (!i || !i.loginRequired || i.admin) return 'admin'; if (isGuest()) return 'view'; return (i.worldAccess || {})[w.id] || 'none'; }
-  const canEditWorldMap = w => !!w && !w.builtin && !isGuest() && LV[worldLevel(w)] >= 2;
-  const mapWorld = m => state.worlds.find(x => x.id === m.world), mapTl = m => state.timelines.find(x => x.id === m.timeline);
-  const MAPS = window.IAM_MAPEDITOR ? window.IAM_MAPEDITOR({
-    FS, esc, lang: () => settings.lang, toast: m => toast(m), modal: (a, b, c, d) => modal(a, b, c, d),
-    world: () => state.world, tl: () => state.tl, mode: () => state.mode, places: () => (state.tl ? state.tl.objects : []),
-    view: () => state.view, w2s: (x, y) => w2s(x, y), worldTransform: c => worldTransform(c), worldBox: w => worldBox(w),
-    redraw: () => draw(), fit: () => fitView(),
-    hint: txt => { const el = $('#toolHint'); if (txt) { el.textContent = txt; el.hidden = false; } else el.hidden = true; canvas.classList.toggle('tool', !!txt && MAPS && MAPS._st.tool !== 'select'); },
-    canEditWorldMap, canEditTlMap: tl => canEditTl(tl),
-    canEditMap: m => { const w = mapWorld(m); if (!w || w.builtin) return false; if (m.timeline) { const tl = mapTl(m); return !!tl && canEditTl(tl); } return canEditWorldMap(w); },
-    canAdminMap: m => { const w = mapWorld(m); if (!w || w.builtin) return false; if (m.timeline) { const tl = mapTl(m); return !!tl && canAdminTl(tl); } return isWorldAdmin(w); }
-  }) : null;
   let drawQueued = false;
   function draw() { if (!drawQueued) { drawQueued = true; requestAnimationFrame(() => { drawQueued = false; render(); }); } }
   const visibleObj = o => settings.types[o.type] !== false && existsNow(o);
@@ -493,14 +476,12 @@
     const lowRes = performance.now() < interactUntil;
     const v = state.view;
     const key = [v.cx, v.cy, v.z, W, H, DPR, state.year, dataVersion, state.tl.id, state.world.id, state.theme, state.selected, lowRes,
-      JSON.stringify(settings.opts), JSON.stringify(settings.types), settings.terrStyle, settings.mapStyle, worldImgVer, [...state.hiddenFactions].join(','), window.I18N.lang, MAPS ? MAPS.ver() : 0].join('|');
+      JSON.stringify(settings.opts), JSON.stringify(settings.types), settings.terrStyle, settings.mapStyle, worldImgVer, [...state.hiddenFactions].join(','), window.I18N.lang].join('|');
     if (key !== baseKey) {
       rebuildTree(); computePositions();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      const am = MAPS && MAPS.active();
-      if (state.world.type === 'fantasy') { if (am && MAPS.opaque(am)) { ctx.fillStyle = '#3a2e1f'; ctx.fillRect(0, 0, canvas.width, canvas.height); } else drawParchment(); } else drawSpace();
+      if (state.world.type === 'fantasy') drawParchment(); else drawSpace();
       if (state.world.mapImage && state.world.mapImage.src) drawWorldImage();
-      if (am) MAPS.drawBase(ctx);
       if (isSW() && settings.opts.regions) { if (atlasStyle()) drawRegionsAtlas(); else drawRegions(); }
       if (settings.opts.influence && era()) { if (settings.terrStyle === 'bubbles') drawInfluence(lowRes); else drawTerritories(); }
       if (settings.opts.grid) drawGrid();
@@ -518,7 +499,6 @@
     drawPlan();
     drawRouteDraft();
     drawBrush();
-    if (MAPS) MAPS.drawOverlay(ctx);
   }
   // ------------------------------------------------------------- Reiseplaner
   const TR = window.IAM_TRAVEL;
@@ -575,7 +555,7 @@
     $('#btnPlanner').classList.toggle('active', state.plannerOpen);
     box.hidden = !state.plannerOpen;
     // rechte Seite: Infofeld nur, wenn kein Story-/Charakter-/Welt-Reiter offen ist
-    $('#info').hidden = state.mode === 'story' || state.mode === 'chars' || state.mode === 'world' || state.mode === 'draw';
+    $('#info').hidden = state.mode === 'story' || state.mode === 'chars' || state.mode === 'world';
     if (!state.plannerOpen) return;
     const P = settings.planner, fan = state.world.type === 'fantasy';
     computePlan();
@@ -600,7 +580,7 @@
         <label class="field"><span>${esc(t('plClass'))}</span><select id="plCls">${TR.HYPER_CLASSES.map(c => `<option value="${c}" ${+c === +P.cls ? 'selected' : ''}>${esc(t('plClassN', String(c).replace('.', settings.lang === 'en' ? '.' : ',')))}${esc(classHint(c))}</option>`).join('')}</select></label>`}
       <label class="field"><span>${esc(t('plStay'))}</span><input id="plStay" type="number" min="0" step="1" value="${P.stay}"></label>
       <div id="plResult">${planResultHtml(r)}</div>`;
-    $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); renderStory(); renderChars(); renderWorldNotes(); if (MAPS) MAPS.render(); draw(); };
+    $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); renderStory(); renderChars(); renderWorldNotes(); draw(); };
     $$('.pl-in').forEach(inp => inp.addEventListener('change', () => { P.stops[+inp.dataset.i] = inp.value; saveSoon(); renderPlanner(); draw(); }));
     $$('.pl-pick').forEach(b => b.addEventListener('click', () => { state.pick = state.pick === +b.dataset.i ? null : +b.dataset.i; renderPlanner(); if (state.pick != null) { toast(t('plPickHint')); if (isMobile()) setDrawer(false); } }));
     $$('.pl-del').forEach(b => b.addEventListener('click', () => { P.stops.splice(+b.dataset.i, 1); saveSoon(); renderPlanner(); draw(); }));
@@ -1153,7 +1133,6 @@
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
     if (pointers.size === 2) {
       if (drag && drag.kind === 'move' && !drag.moved) state.undo.pop();
-      if (drag && drag.kind === 'map' && MAPS) MAPS.pointerUp();
       drag = null; canvas.classList.remove('dragging');
       const [a, b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
@@ -1164,7 +1143,6 @@
   });
   function onDown(e) {
     const r = canvas.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, w = s2w(sx, sy);
-    if (state.mode === 'draw' && MAPS && e.button === 0 && MAPS.pointerDown(e, sx, sy, w)) { drag = { kind: 'map' }; return; }
     if (e.button === 1 || e.button === 2 || !editable() || state.tool === 'select') {
       const hit = e.button === 0 ? hitTest(sx, sy) : null;
       if (hit && !hit.atlas && editable() && state.tool === 'select') { const root = rootOf(hit); pushUndo(); drag = { kind: 'move', obj: root, ox: w.x - root.x, oy: w.y - root.y, moved: false, hit }; }
@@ -1209,8 +1187,6 @@
     const r = canvas.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
     mouse = { x: sx, y: sy, in: sx >= 0 && sy >= 0 && sx <= W && sy <= H && state.mode !== 'settings' };
     if (trackDrag) return;
-    if (state.mode === 'draw' && MAPS && (!drag || drag.kind === 'map')) MAPS.pointerMove(sx, sy, s2w(sx, sy));
-    if (drag && drag.kind === 'map') return;
     if (drag) {
       const w = s2w(sx, sy);
       if (drag.kind === 'pan') {
@@ -1240,7 +1216,6 @@
     if (trackDrag) { trackDrag = false; return; }
     if (!drag) return;
     const d = drag; drag = null; canvas.classList.remove('dragging');
-    if (d.kind === 'map') { if (MAPS) MAPS.pointerUp(); return; }
     if (d.kind === 'pan' && !d.moved && e.button === 0 && state.pick != null && d.hit) {
       settings.planner.stops[state.pick] = d.hit.name; state.pick = null; saveSoon(); renderPlanner(); draw(); if (isMobile()) setDrawer(true);
     } else if (d.kind === 'pan' && !d.moved && e.button === 0) { state.selected = d.hit ? d.hit.id : null; renderInfo(); draw(); if (isMobile()) setSheet(!!d.hit || state.mode === 'edit'); }
@@ -1249,7 +1224,6 @@
       else { if (isSW()) d.obj.region = regionAt(d.obj.x, d.obj.y) || d.obj.region; state.selected = d.hit.id; afterEdit(); }
     } else if (d.kind === 'paint' || d.kind === 'erase') afterEdit();
   };
-  canvas.addEventListener('dblclick', e => { if (state.mode === 'draw' && MAPS && MAPS.dblclick()) e.preventDefault(); });
   window.addEventListener('pointerup', pointerEnd);
   window.addEventListener('pointercancel', pointerEnd);
   canvas.addEventListener('wheel', e => { e.preventDefault(); const r = canvas.getBoundingClientRect(); zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
@@ -1271,8 +1245,6 @@
   }
   function fitView() {
     if (!W) return;
-    const am = MAPS && MAPS.active();
-    if (am) { state.view.cx = am.width / 2; state.view.cy = am.height / 2; state.view.z = Math.min(W / (am.width + 100), H / (am.height + 100)); draw(); return; }
     if (state.world.type === 'fantasy') { state.view.cx = FANTASY_SIZE.w / 2; state.view.cy = FANTASY_SIZE.h / 2; state.view.z = Math.min(W / (FANTASY_SIZE.w + 100), H / (FANTASY_SIZE.h + 100)); }
     else { state.view.cx = GEO.center.x; state.view.cy = GEO.center.y + 90; state.view.z = Math.min(W / 2400, H / 2150); }
     draw();
@@ -1329,7 +1301,6 @@
   window.addEventListener('keydown', e => {
     const tag = (e.target.tagName || '').toLowerCase();
     const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
-    if (state.mode === 'draw' && MAPS && $('#modal').hidden && MAPS.key(e, typing)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { if (!typing && !isGuest()) { e.preventDefault(); undo(); } return; }
     if (typing || !$('#modal').hidden || state.mode === 'settings') return;
     const step = e.shiftKey ? 10 : 1;
@@ -1350,7 +1321,6 @@
   const TOOL_HINT = { select: 'hintSelect', assign: 'hintAssign', region: 'hintRegion', paint: 'hintPaint', erase: 'hintErase', add: 'hintAdd', route: 'hintRoute' };
   function updateToolHint() {
     const el = $('#toolHint');
-    if (state.mode === 'draw' && MAPS) { MAPS.hint(); return; }
     if (editable()) { el.textContent = t(TOOL_HINT[state.tool]); el.hidden = false; } else el.hidden = true;
     canvas.classList.toggle('tool', editable() && state.tool !== 'select');
   }
@@ -1893,10 +1863,7 @@
     $('#tabStory').classList.toggle('active', state.mode === 'story');
     $('#tabChars').classList.toggle('active', state.mode === 'chars');
     $('#tabWorld').classList.toggle('active', state.mode === 'world');
-    $('#tabDraw').classList.toggle('active', state.mode === 'draw');
-    $('#tabDraw').hidden = !MAPS || !!state.world.builtin;
-    $('#tabDraw').textContent = t('tabDraw');
-    const curTab = { view: 'tabView', edit: 'tabEdit', draw: 'tabDraw', story: 'tabStory', chars: 'tabChars', world: 'tabWorld', settings: 'tabSettings' }[state.mode] || 'tabView';
+    const curTab = { view: 'tabView', edit: 'tabEdit', story: 'tabStory', chars: 'tabChars', world: 'tabWorld', settings: 'tabSettings' }[state.mode] || 'tabView';
     $('#btnModes').innerHTML = `<span class="mi mi-${curTab}"></span>${esc(t(curTab))} <span class="dim">▾</span>`;
     $('#btnModes').title = t('menu');
     $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
@@ -1980,8 +1947,8 @@
   }
   $('#btnNewTl').addEventListener('click', newTimelineDialog);
   $('#btnFile').addEventListener('click', e => { e.stopPropagation(); $('#fileMenu').hidden = !$('#fileMenu').hidden; });
-  document.addEventListener('click', () => { $('#fileMenu').hidden = true; $('#modeMenu').hidden = true; $('#btnModes').classList.remove('open'); });
-  $('#btnModes').addEventListener('click', e => { e.stopPropagation(); $('#fileMenu').hidden = true; const m = $('#modeMenu'); m.hidden = !m.hidden; $('#btnModes').classList.toggle('open', !m.hidden); });
+  document.addEventListener('click', () => { $('#fileMenu').hidden = true; $('#modeMenu').hidden = true; });
+  $('#btnModes').addEventListener('click', e => { e.stopPropagation(); $('#fileMenu').hidden = true; $('#modeMenu').hidden = !$('#modeMenu').hidden; });
   $('#btnDupTl').addEventListener('click', duplicateTimeline);
   $('#btnDelTl').addEventListener('click', () => {
     if (state.tl.readonly || !confirm(t('confirmDeleteTl', state.tl.name))) return;
@@ -1994,7 +1961,6 @@
     if (!w || w.builtin) return false;
     if (!confirm(t('confirmDeleteWorld', w.name, timelinesOfWorld(w).length))) return false;
     for (const tl of timelinesOfWorld(w)) removeTimelineFile(tl);
-    if (MAPS) MAPS.removeWorld(w.id);
     state.timelines = state.timelines.filter(x => x.world !== w.id);
     state.worlds = state.worlds.filter(x => x !== w);
     if (FS && w._file) { lastWritten['worlds/' + w._file] = null; FS.remove('worlds', w._file).catch(e => toast(t('saveFailed', e.message))); }
@@ -2097,10 +2063,9 @@
 
   // ------------------------------------------------------------- Modus & Einstellungen
   function setMode(m) {
-    if (m !== 'view' && m !== 'story' && m !== 'chars' && m !== 'world' && m !== 'settings' && m !== 'draw' && isGuest()) { loginDialog(); return; }
-    if (state.mode === 'draw' && m !== 'draw' && MAPS) MAPS.flush();
+    if (m !== 'view' && m !== 'story' && m !== 'chars' && m !== 'world' && m !== 'settings' && isGuest()) { loginDialog(); return; }
     state.mode = m;
-    if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars' || m === 'world' || m === 'draw');
+    if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars' || m === 'world');
     $('#settingsView').hidden = m !== 'settings';
     if (m === 'settings') renderSettings();
     renderAll(true);
@@ -2111,7 +2076,6 @@
   $('#tabStory').addEventListener('click', () => setMode(state.mode === 'story' ? 'view' : 'story'));
   $('#tabChars').addEventListener('click', () => setMode(state.mode === 'chars' ? 'view' : 'chars'));
   $('#tabWorld').addEventListener('click', () => setMode(state.mode === 'world' ? 'view' : 'world'));
-  $('#tabDraw').addEventListener('click', () => setMode(state.mode === 'draw' ? 'view' : 'draw'));
   $('#eraDesc').addEventListener('click', () => setMode('story'));
   $('#eraName').addEventListener('click', () => setMode('story'));
   $('#tabSettings').addEventListener('click', () => setMode(state.mode === 'settings' ? 'view' : 'settings'));
@@ -2954,7 +2918,7 @@
     editVersion++;
     rebuildTree();
     document.body.classList.toggle('is-sw', isSW());
-    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory(); renderChars(); renderWorldNotes(); if (MAPS) MAPS.render();
+    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory(); renderChars(); renderWorldNotes();
     lastEraId = era() ? era().id : null; renderYear(); updateToolHint(); draw();
   }
 
