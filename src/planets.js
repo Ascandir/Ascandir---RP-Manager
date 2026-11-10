@@ -1,4 +1,4 @@
-/* Ascandir InteractiveMap – prozedurale Planetenbilder nach Biom (keine fremden Bilder) */
+/* Ascandir RP-Manager – prozedurale Planetenbilder nach Biom (keine fremden Bilder) */
 (function () {
   'use strict';
 

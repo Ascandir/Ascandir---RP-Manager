@@ -1,10 +1,10 @@
-# Ascandir InteractiveMap
+# Ascandir RP-Manager
 
-Interaktive Desktop-Karte für Windows: **Star Wars** als eingebaute Welt mit Fraktionen und ihren Einflussgebieten über die Jahrtausende. Dazu kannst du **eigene Welten** (Sci-Fi oder Fantasy) mit eigenen Zeitlinien, Fraktionen, Orten und Routen anlegen. Die App gibt es auf Deutsch und Englisch.
+Werkzeug für Rollenspiel-Runden (früher „InteractiveMap“): eine **interaktive Karte** mit Zeitleiste – **Star Wars** als eingebaute Welt mit Fraktionen und ihren Einflussgebieten über die Jahrtausende, dazu **eigene Welten** (Sci-Fi oder Fantasy) mit eigenen Zeitlinien, Fraktionen, Orten und Routen. Rund um die Karte verwaltest du deine Runde: **Story-Chronik** mit Kapiteln, **Charakterakten**, **Weltregeln** und **Weltnotizen** – und ChatGPT/Claude können per **MCP** mitlesen und mitschreiben. Als Windows-App und als Docker-Server, auf Deutsch und Englisch.
 
 ## Installation & Updates
 
-1. Unter **Releases** die Datei `Ascandir-InteractiveMap-Setup-x.y.z.exe` herunterladen und ausführen.
+1. Unter **Releases** die Datei `Ascandir-RP-Manager-Setup-x.y.z.exe` (bis v0.21: `Ascandir-InteractiveMap-Setup-…`) herunterladen und ausführen.
    Windows SmartScreen meldet eventuell „unbekannter Herausgeber“. Klicke dann auf *Weitere Informationen* und *Trotzdem ausführen*, denn die App ist nicht signiert.
 2. Alles, was die App braucht, wird in den gewählten Ordner installiert. Es muss nichts zusätzlich installiert werden.
 3. **Updates:** Ab Version 0.2.0 sucht die App beim Start auf GitHub nach neuen Versionen (abschaltbar unter *Einstellungen*). Dann erscheint oben rechts ein Hinweis mit den Knöpfen *Herunterladen* und *Neu starten & installieren*.
@@ -299,7 +299,7 @@ Der Container enthält einen MCP-Server, wie ihn ChatGPT-Plugins und Claude-Conn
 | `https://karte.deine-domain.de/mcp` | nur lesen: `get_summary`, `get_state`, `get_place`, `search_places`, `plan_travel`, `list_timelines` |
 | `https://karte.deine-domain.de/mcp/<Token>` | persönlicher Token (Rechte des Benutzers) oder Master-Token; zusätzlich schreiben: `copy_timeline`, `upsert_place`, `delete_place`, `upsert_faction`, `upsert_era`, `set_control` |
 
-**ChatGPT:** *Plugins* öffnen (chatgpt.com/plugins) → **＋** → **Add custom MCP server** → Name „InteractiveMap“ → bei *Connection* die Adresse mit Token eintragen → *Authentication*: **No authentication** → Warnhinweis bestätigen → **Create as a plugin** → das Plugin unter „Meine Plugins“ **installieren**. Im Chat das Plugin auswählen und loslegen. Schreibende Aktionen fragt ChatGPT vorher zur Bestätigung ab. Nach einem Update im Plugin auf *Refresh* klicken, damit neue Werkzeuge erscheinen.
+**ChatGPT:** *Plugins* öffnen (chatgpt.com/plugins) → **＋** → **Add custom MCP server** → Name „RP-Manager“ → bei *Connection* die Adresse mit Token eintragen → *Authentication*: **No authentication** → Warnhinweis bestätigen → **Create as a plugin** → das Plugin unter „Meine Plugins“ **installieren**. Im Chat das Plugin auswählen und loslegen. Schreibende Aktionen fragt ChatGPT vorher zur Bestätigung ab. Nach einem Update im Plugin auf *Refresh* klicken, damit neue Werkzeuge erscheinen.
 Der Token steckt geheim in der Adresse – die Adresse also nicht weitergeben. Bei Cloudflare Access braucht `/mcp*` eine Bypass-Regel.
 
 **Claude:** *Einstellungen → Connectors → Add custom connector* → dieselbe Adresse eintragen.

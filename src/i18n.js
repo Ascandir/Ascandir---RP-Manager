@@ -1,9 +1,9 @@
-/* Ascandir InteractiveMap – Übersetzungen (Deutsch / English) */
+/* Ascandir RP-Manager – Übersetzungen (Deutsch / English) */
 (function () {
   'use strict';
   const D = {
     de: {
-      appName: 'InteractiveMap',
+      appName: 'RP-Manager',
       world: 'Welt', timeline: 'Zeitlinie',
       newWorld: '＋ Welt', newWorldTitle: 'Neue Welt anlegen',
       btnNew: '＋ Neu', btnCopy: '⧉ Kopieren', btnExport: '⭳ Exportieren (JSON / GeoJSON)', btnImport: '⭱ Importieren', btnJson: '{ } Als JSON bearbeiten', btnFolder: '📂 Datenordner öffnen', file: 'Datei',
@@ -93,7 +93,7 @@
       permsTitle: 'Rechte: {0}', permsHint: 'Zeitlinien erben die Rechte ihrer Welt, Welten die Einstellung „Alle Welten“. „Bearbeiten“ einer Welt erlaubt auch neue Zeitlinien darin.', allWorlds: 'Alle Welten (Standard)',
       inheritAll: '— wie „Alle Welten“ —', inheritWorld: '— wie die Welt —', noAccess: 'kein Zugriff', viewAccess: 'ansehen', editAccess: 'bearbeiten',
       noEditRights: 'Für diese Zeitlinie hast du keine Bearbeitungsrechte.', askAdmin: 'Ein Admin kann sie dir unter Einstellungen → Benutzer freigeben.', loggedInAs: 'Angemeldet als {0}', adminOnly: 'Nur Admins können die Welt ändern.',
-      srvTitle: 'Mit Server verbinden', srvHint: 'Die Desktop-App zeigt dann die Daten deines InteractiveMap-Servers (z.B. Docker) – identisch mit der Browser-Version, Änderungen live auf beiden Seiten. Deine lokalen Zeitlinien bleiben unangetastet; übertragen kannst du sie über Datei → Exportieren/Importieren.',
+      srvTitle: 'Mit Server verbinden', srvHint: 'Die Desktop-App zeigt dann die Daten deines RP-Manager-Servers (z.B. Docker) – identisch mit der Browser-Version, Änderungen live auf beiden Seiten. Deine lokalen Zeitlinien bleiben unangetastet; übertragen kannst du sie über Datei → Exportieren/Importieren.',
       srvConnect: 'Verbinden', srvConnected: 'Verbunden mit {0}', srvDisconnect: 'Trennen – lokale Version verwenden', srvDisconnectQ: 'Verbindung trennen und wieder die lokalen Daten anzeigen?', srvDisconnectHint: 'Nach dem Trennen zeigt die App wieder deine lokal gespeicherten Welten und Zeitlinien.',
       srvOffline: 'Der Server {0} ist nicht erreichbar – es wird die lokale Version angezeigt.', srvRetry: 'Erneut verbinden', srvCheckFailed: 'Der Server antwortet nicht wie erwartet ({0}). Trotzdem verbinden?',
       mcpTitle: 'ChatGPT / Claude (MCP-Plugin)', mcpHint: 'In ChatGPT unter Plugins → ＋ → „Add custom MCP server“ diese Adresse eintragen (Token einsetzen), Authentifizierung: keine. Mit Token darf die KI auch Änderungen vornehmen.', mcpRead: 'Nur lesen (ohne Token)', apiTitle: 'API für Story-KI', apiHint: 'Diese Adresse liefert den aktuellen Stand (Jahr, Zeitalter, Mächte) als Text für den KI-Kontext. Mit &place=Name kommen Eckdaten zu Orten dazu.',
@@ -115,7 +115,7 @@
       biomes: { desert: 'Wüste', reddesert: 'Rote Wüste', ice: 'Eiswelt', tundra: 'Tundra', ocean: 'Ozeanwelt', islands: 'Inselwelt', forest: 'Wälder', redforest: 'Rote Wälder', jungle: 'Dschungel', swamp: 'Sumpf', grassland: 'Grasland', mountains: 'Gebirge', volcanic: 'Vulkanisch', city: 'Stadtplanet', gas: 'Gasriese', gasblue: 'Gasriese (blau)', barren: 'Ödland / Fels', salt: 'Salzebenen', toxic: 'Giftig', crystal: 'Kristallwelt', storm: 'Sturmwelt', machine: 'Maschinenwelt', neon: 'Neon-Stadtwelt' }
     },
     en: {
-      appName: 'InteractiveMap',
+      appName: 'RP-Manager',
       world: 'World', timeline: 'Timeline',
       newWorld: '＋ World', newWorldTitle: 'Create new world',
       btnNew: '＋ New', btnCopy: '⧉ Copy', btnExport: '⭳ Export (JSON / GeoJSON)', btnImport: '⭱ Import', btnJson: '{ } Edit as JSON', btnFolder: '📂 Open data folder', file: 'File',
@@ -204,7 +204,7 @@
       permsTitle: 'Permissions: {0}', permsHint: 'Timelines inherit their world’s permission, worlds inherit “All worlds”. “Edit” on a world also allows creating timelines in it.', allWorlds: 'All worlds (default)',
       inheritAll: '— like “All worlds” —', inheritWorld: '— like the world —', noAccess: 'no access', viewAccess: 'view', editAccess: 'edit',
       noEditRights: 'You have no edit permission for this timeline.', askAdmin: 'An admin can grant it under Settings → Users.', loggedInAs: 'Logged in as {0}', adminOnly: 'Only admins can change the world.',
-      srvTitle: 'Connect to server', srvHint: 'The desktop app then shows the data of your InteractiveMap server (e.g. Docker) – identical to the browser version, changes appear live on both sides. Your local timelines stay untouched; move them via File → Export/Import.',
+      srvTitle: 'Connect to server', srvHint: 'The desktop app then shows the data of your RP-Manager server (e.g. Docker) – identical to the browser version, changes appear live on both sides. Your local timelines stay untouched; move them via File → Export/Import.',
       srvConnect: 'Connect', srvConnected: 'Connected to {0}', srvDisconnect: 'Disconnect – use local version', srvDisconnectQ: 'Disconnect and show the local data again?', srvDisconnectHint: 'After disconnecting the app shows your locally stored worlds and timelines again.',
       srvOffline: 'The server {0} is not reachable – showing the local version.', srvRetry: 'Retry', srvCheckFailed: 'The server did not answer as expected ({0}). Connect anyway?',
       mcpTitle: 'ChatGPT / Claude (MCP plugin)', mcpHint: 'In ChatGPT go to Plugins → ＋ → “Add custom MCP server”, enter this address (insert your token), authentication: none. With the token the AI may also make changes.', mcpRead: 'Read only (no token)', apiTitle: 'API for story AI', apiHint: 'This address returns the current state (year, era, powers) as text for the AI context. Add &place=Name for key facts about places.',

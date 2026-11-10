@@ -1,5 +1,5 @@
 /* =========================================================================
-   Ascandir InteractiveMap · Anwendung
+   Ascandir RP-Manager · Anwendung
    ========================================================================= */
 (function () {
   'use strict';
@@ -2126,13 +2126,13 @@
         ${info.dataDir ? `<code class="path">${esc(info.dataDir)}</code>` : ''}
         <button id="setFolder">${esc(t('openFolder'))}</button></section>` : ''}
       ${FS && FS.server && FS.info().loginRequired ? `<section class="card"><h3>${esc(t('account'))}</h3><button id="setLogout">${esc(t('logout'))}</button></section>` : ''}
-      <section class="card"><h3>${esc(t('about'))}</h3><p class="hint">Ascandir InteractiveMap ${esc(info.version)} – ${esc(t('aboutText'))}</p></section>
+      <section class="card"><h3>${esc(t('about'))}</h3><p class="hint">Ascandir RP-Manager ${esc(info.version)} – ${esc(t('aboutText'))}</p></section>
     </div>`;
     $('#setBack').addEventListener('click', () => setMode('view'));
     const lo = $('#setLogout'); if (lo) lo.addEventListener('click', () => FS.logout().then(() => location.reload()));
     const so = $('#srvOn'); if (so) so.onclick = async () => {
       const u = $('#srvUrl').value.trim(); if (!u) return;
-      try { const r = await fetch(u.replace(/\/?$/, '/') + 'api/info'); const j = await r.json(); if (!j.server) throw new Error('kein InteractiveMap-Server'); }
+      try { const r = await fetch(u.replace(/\/?$/, '/') + 'api/info'); const j = await r.json(); if (!j.server) throw new Error('kein RP-Manager-Server'); }
       catch (e) { if (!confirm(t('srvCheckFailed', e.message))) return; }
       window.iamDesktop.setServer(u).catch(e => alert(e.message));
     };

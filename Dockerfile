@@ -1,4 +1,4 @@
-# Ascandir InteractiveMap – Server-Version für Docker / Portainer
+# Ascandir RP-Manager – Server-Version für Docker / Portainer
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production PORT=8080 DATA_DIR=/data

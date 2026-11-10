@@ -1,5 +1,5 @@
 /* =========================================================================
-   Ascandir InteractiveMap – Webserver für Docker
+   Ascandir RP-Manager – Webserver für Docker
    - liefert die App (Ordner src/) im Browser aus
    - speichert Welten & Zeitlinien als JSON in DATA_DIR (Docker-Volume)
    - Live-Updates per Server-Sent Events
@@ -735,7 +735,7 @@ function openApi(req) {
   const ok = { 200: { description: 'OK' } };
   return {
     openapi: '3.1.0',
-    info: { title: 'Ascandir InteractiveMap', version: VERSION, description: 'Interaktive Karte (Star Wars & eigene Welten). Lesen: Zustand der Galaxis in einem Jahr, Orte, Fraktionen. Schreiben: Orte, Fraktionen, Zeitalter und Kontrolle in einer eigenen (kopierten) Zeitlinie ändern.' },
+    info: { title: 'Ascandir RP-Manager', version: VERSION, description: 'Interaktive Karte (Star Wars & eigene Welten). Lesen: Zustand der Galaxis in einem Jahr, Orte, Fraktionen. Schreiben: Orte, Fraktionen, Zeitalter und Kontrolle in einer eigenen (kopierten) Zeitlinie ändern.' },
     servers: [{ url: `${proto}://${host}` }],
     components: { securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } },
     security: [{ bearer: [] }],
@@ -773,7 +773,7 @@ async function apiV1(req, res, url) {
   if (parts[0] === 'openapi.json') return send(res, 200, openApi(req));
   if (req.method !== 'GET') return apiWrite(req, res, url, parts);
   if (!parts.length) return send(res, 200, {
-    name: 'Ascandir InteractiveMap API', version: VERSION,
+    name: 'Ascandir RP-Manager API', version: VERSION,
     endpoints: {
       'GET /api/v1/worlds': 'Alle Welten',
       'GET /api/v1/timelines?world=': 'Zeitlinien (optional nach Welt gefiltert)',
@@ -984,7 +984,7 @@ const MCP_TOOLS = [
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
   { name: 'set_control', title: 'Kontrolle setzen', description: 'Legt fest, welche Fraktion einen Ort ab dem Zeitalter des angegebenen Jahres kontrolliert (faction leer = neutral).', inputSchema: S({ timeline: TL, place: str('Ort'), faction: str('Fraktion'), year: YR, era: str('oder Name des Zeitalters') }, ['timeline', 'place']), run: a => internalCall('POST', '/api/v1/control', {}, a) }
 ];
-const MCP_INSTRUCTIONS = 'Ascandir InteractiveMap: interaktive Karte (Star Wars u. eigene Welten) mit Zeitlinien, Zeitaltern, Fraktionen und Orten. ' +
+const MCP_INSTRUCTIONS = 'Ascandir RP-Manager: interaktive Karte (Star Wars u. eigene Welten) mit Zeitlinien, Zeitaltern, Fraktionen und Orten. ' +
   'Der Kanon ist schreibgeschützt – Änderungen nur in eigenen Zeitlinien (vorher list_timelines oder copy_timeline). Jahre als "3640 BBY"/"4 ABY". ' +
   'Vor Änderungen den Stand mit get_place/get_state lesen. Beschreibungen kurz und ohne Präfixe. ' +
   'WICHTIG: Jede Zeitlinie kann feste Weltregeln haben (list_rules). Sie gelten immer, haben Vorrang vor allem anderen und werden zu Beginn mit list_rules oder get_summary gelesen; ändern nur auf ausdrücklichen Wunsch des Nutzers. ' +
@@ -998,7 +998,7 @@ async function handleMcp(req, res, url, tv) {
   if (req.method === 'GET') {
     if ((req.headers.accept || '').includes('text/event-stream')) return send(res, 405, { error: 'Use POST (Streamable HTTP)' }, 'application/json', { Allow: 'POST' });
     // Statusanzeige für den Browser (zur Fehlersuche)
-    return send(res, 200, { status: 'ok', server: 'Ascandir InteractiveMap MCP', version: VERSION, transport: 'streamable-http (POST)',
+    return send(res, 200, { status: 'ok', server: 'Ascandir RP-Manager MCP', version: VERSION, transport: 'streamable-http (POST)',
       access: writeAllowed ? 'lesen + schreiben (Token korrekt)' : tv ? 'nur lesen (Token korrekt, Benutzer hat nur Leserechte)' : 'nur lesen',
       ...(tv ? { user: tv.name, timelines: allTimelines('de', tv).map(t => t.name) } : {}),
       ...(tv ? {} : { hinweis: 'Hier ist kein Token angekommen (Adresse: ' + url.pathname + (url.search ? ' + Parameter' : '') + '). Enthält der Token Zeichen wie # ? & % / oder Leerzeichen, schneidet der Browser ihn ab – dann einen Token nur aus Buchstaben und Zahlen verwenden.' }),
@@ -1014,7 +1014,7 @@ async function handleMcp(req, res, url, tv) {
     try {
       switch (m.method) {
         case 'initialize': return ok({ protocolVersion: (m.params && m.params.protocolVersion) || '2025-06-18', capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'ascandir-interactivemap', title: 'Ascandir InteractiveMap', version: VERSION },
+          serverInfo: { name: 'ascandir-rp-manager', title: 'Ascandir RP-Manager', version: VERSION },
           instructions: MCP_INSTRUCTIONS + (tv && !tv.admin ? ` Zugriff als Benutzer „${tv.name}“ – verfügbare Zeitlinien: ${allTimelines('de', tv).map(t => t.name).join(', ') || 'keine'}.` : '') });
         case 'ping': return ok({});
         case 'tools/list': return ok({ tools: tools.map(t => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema,
@@ -1044,7 +1044,7 @@ let latestRelease = null;
 const cmpVer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; };
 async function checkLatest() {
   try {
-    const r = await fetch('https://api.github.com/repos/Ascandir/Ascandir---SWGM/releases/latest', { headers: { 'User-Agent': 'ascandir-interactivemap', Accept: 'application/vnd.github+json' } });
+    const r = await fetch('https://api.github.com/repos/Ascandir/Ascandir---SWGM/releases/latest', { headers: { 'User-Agent': 'ascandir-rp-manager', Accept: 'application/vnd.github+json' } });
     if (r.ok) { const j = await r.json(); latestRelease = String(j.tag_name || '').replace(/^v/, '') || null; }
   } catch { /* offline – egal */ }
 }
@@ -1087,8 +1087,8 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { version: VERSION, packaged: true, server: true, readonly: READONLY, loginRequired: !!PASSWORD, admin: who.admin, user: who.guest ? null : { name: who.name, admin: who.admin },
       worldAccess: Object.fromEntries(ws.map(w => [w, level(who, w, null)])), publicView: PUBLIC_VIEW, latest: who.admin ? latestRelease : null, updateAvailable: who.admin && !!(latestRelease && cmpVer(latestRelease, VERSION) > 0), latestShown: who.admin ? latestRelease : null, updateHook: who.admin && !!UPDATE_HOOK, dataDir: who.admin ? DATA_DIR : null }, 'application/json; charset=utf-8', { 'Access-Control-Allow-Origin': '*' }); }
     if (!canRead(req, url)) {
-      if (url.pathname.startsWith('/api/')) return send(res, 401, { error: 'unauthorized' }, 'application/json', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
-      return send(res, 401, 'Anmeldung erforderlich', 'text/plain; charset=utf-8', { 'WWW-Authenticate': 'Basic realm="InteractiveMap", charset="UTF-8"' });
+      if (url.pathname.startsWith('/api/')) return send(res, 401, { error: 'unauthorized' }, 'application/json', { 'WWW-Authenticate': 'Basic realm="RP-Manager", charset="UTF-8"' });
+      return send(res, 401, 'Anmeldung erforderlich', 'text/plain; charset=utf-8', { 'WWW-Authenticate': 'Basic realm="RP-Manager", charset="UTF-8"' });
     }
     if (url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
@@ -1209,6 +1209,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.listen(PORT, () => {
-  console.log(`Ascandir InteractiveMap ${VERSION} läuft auf Port ${PORT} · Daten: ${DATA_DIR}`);
+  console.log(`Ascandir RP-Manager ${VERSION} läuft auf Port ${PORT} · Daten: ${DATA_DIR}`);
   if (!PASSWORD) console.warn('WARNUNG: Kein IAM_PASSWORD gesetzt – die Oberfläche ist ohne Passwort erreichbar.');
 });

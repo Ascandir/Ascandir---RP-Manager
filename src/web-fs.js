@@ -1,4 +1,4 @@
-/* Ascandir InteractiveMap – Anbindung an den Docker-Server (nur wenn über http/https geladen) */
+/* Ascandir RP-Manager – Anbindung an den Docker-Server (nur wenn über http/https geladen) */
 (function () {
   'use strict';
   if (window.iamFS || !/^https?:$/.test(location.protocol)) return;

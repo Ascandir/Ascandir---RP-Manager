@@ -1,4 +1,4 @@
-# Ascandir InteractiveMap – Stack für Portainer
+# Ascandir RP-Manager – Stack für Portainer
 # In Portainer: Stacks → Add stack → diesen Inhalt einfügen → Passwort/Tokens anpassen → Deploy
 services:
   interactivemap:

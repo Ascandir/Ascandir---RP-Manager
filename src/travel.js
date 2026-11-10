@@ -1,4 +1,4 @@
-/* Ascandir InteractiveMap – Reiseplaner (läuft im Browser und auf dem Server)
+/* Ascandir RP-Manager – Reiseplaner (läuft im Browser und auf dem Server)
    Spielfreundliche Schätzung, keine offizielle Kanon-Berechnung. */
 (function (root) {
   'use strict';

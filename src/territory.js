@@ -1,4 +1,4 @@
-/* Ascandir InteractiveMap – Territorien mit Grenzen
+/* Ascandir RP-Manager – Territorien mit Grenzen
    Jede Rasterzelle gehört höchstens einer Fraktion: der mit der stärksten Nähe
    (Abstand / Reichweite) zu einem kontrollierten Objekt, gemalten Gebiet oder beanspruchten Region.
    Aus den Zellen werden per Marching Squares glatte Umriss-Polygone erzeugt. */

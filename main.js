@@ -1,4 +1,4 @@
-// Ascandir InteractiveMap · Electron-Start
+// Ascandir RP-Manager · Electron-Start
 const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -31,7 +31,7 @@ function send(ch, ...args) { if (win && !win.isDestroyed()) win.webContents.send
 function createWindow() {
   win = new BrowserWindow({
     width: 1600, height: 950, minWidth: 1280, minHeight: 680,
-    backgroundColor: '#070a12', title: 'Ascandir – InteractiveMap',
+    backgroundColor: '#070a12', title: 'Ascandir – RP-Manager',
     icon: path.join(__dirname, 'build', 'icon.png'), autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.js') }
   });

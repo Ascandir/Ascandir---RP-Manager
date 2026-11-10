@@ -1,5 +1,5 @@
 /* =========================================================================
-   Ascandir InteractiveMap – eingebaute Welt "Star Wars"
+   Ascandir RP-Manager – eingebaute Welt "Star Wars"
    Alle Positionen sind ANGENÄHERT (an das bekannte Galaxie-Raster angelehnt).
    Fraktions-Einflüsse sind bewusst vereinfacht.
    ========================================================================= */

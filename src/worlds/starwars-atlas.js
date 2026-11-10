@@ -1,4 +1,4 @@
-/* Ascandir InteractiveMap – Galaxie-Atlas (Star Wars)
+/* Ascandir RP-Manager – Galaxie-Atlas (Star Wars)
    Systemverzeichnis mit Rasterfeld, Region und Sektor aus dem offiziellen
    Star-Wars-Galaxy-Map-Gazetteer (Lucasfilm/starwars.com), nur als Faktenliste
    übernommen: Name | Sektor | Regionscode | Rasterfeld. Keine Grafiken.
