@@ -63,6 +63,18 @@ test('MCP: Werkzeuge werden nach Rechten angeboten', async () => {
   assert.ok(!ed.includes('delete_map'), 'ganze Karten können per Connector nicht gelöscht werden');
 });
 
+test('MCP: alle Werkzeug-Schemas sind vollständig typisiert (Voraussetzung für ChatGPT)', async () => {
+  const tools = (await (await fetch(`${BASE}/mcp/${TOK.admin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })).json()).result.tools;
+  const bad = [];
+  const walk = (sc, p) => {
+    if (!sc.type) bad.push(p + ': kein type');
+    if (sc.type === 'array') { if (!sc.items || !sc.items.type) bad.push(p + ': array ohne items.type'); else walk(sc.items, p + '[]'); }
+    if (sc.type === 'object' && sc.properties) for (const [k, v] of Object.entries(sc.properties)) walk(v, p + '.' + k);
+  };
+  for (const t of tools) { assert.match(t.name, /^[a-z_]{1,64}$/); walk(t.inputSchema, t.name); }
+  assert.deepEqual(bad, []);
+});
+
 test('Karte anlegen – nur für eigene Welten, nur mit Schreibrecht, keine Dubletten', async () => {
   const r = await mcp(TOK.editor, 'create_map', { world: 'Eldoria', name: 'Weltkarte' });
   assert.ok(!r.isError, r.text); mapId = r.data.id; assert.equal(r.data.rev, 1);
@@ -77,10 +89,10 @@ test('Karte anlegen – nur für eigene Welten, nur mit Schreibrecht, keine Dubl
 
 test('Beispiel: Gebirgskette + Fluss, dann nur die Flussfarbe per ID ändern', async () => {
   const r = await mcp(TOK.editor, 'add_map_features', { world: 'Eldoria', features: [
-    { type: 'land', geometry: { type: 'polygon', coordinates: [[[200, 200], [1600, 180], [1700, 1300], [300, 1400]]] }, label: { text: 'Eldoria' } },
+    { type: 'land', geometry: { type: 'polygon', coordinates: [[200, 200], [1600, 180], [1700, 1300], [300, 1400]], holes: [[[800, 800], [900, 800], [850, 900]]] }, label: { text: 'Eldoria' } },
     { type: 'mountains', name: 'Graukamm', geometry: { type: 'group', coordinates: [[600, 400], [650, 390], [700, 410], [750, 395], [800, 415]] } },
     { type: 'river', geometry: { type: 'line', coordinates: [[700, 430], [760, 600], [820, 900], [880, 1380]] }, label: { text: 'Silberlauf' } },
-    { type: 'city', geometry: { type: 'point', coordinates: [880, 1300] }, label: { text: 'Mündungsstadt' }, placeId: 'Nordhafen' }
+    { type: 'city', geometry: { type: 'point', coordinates: [[880, 1300]] }, label: { text: 'Mündungsstadt' }, placeId: 'Nordhafen' }
   ] });
   assert.ok(!r.isError, r.text);
   assert.equal(r.data.added.length, 4); assert.equal(r.data.rev, 2);

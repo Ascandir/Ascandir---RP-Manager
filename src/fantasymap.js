@@ -160,7 +160,7 @@
     const kind = String(g.type || '').toLowerCase();
     const allowed = TYPES[type].geoms;
     if (!allowed.includes(kind)) fail(`Geometrie "${kind || '?'}" passt nicht zu Typ "${type}" (erlaubt: ${allowed.join(', ')})`, p + '.type');
-    if (kind === 'point') return { type: 'point', coordinates: pt(g.coordinates, map, p + '.coordinates') };
+    if (kind === 'point') { let c = g.coordinates; if (Array.isArray(c) && c.length === 1 && Array.isArray(c[0])) c = c[0]; return { type: 'point', coordinates: pt(c, map, p + '.coordinates') }; }
     if (kind === 'line') return { type: 'line', coordinates: ptList(g.coordinates, 2, map, p + '.coordinates') };
     if (kind === 'group') {
       const out = { type: 'group', coordinates: ptList(g.coordinates, 1, map, p + '.coordinates') };
@@ -173,6 +173,7 @@
     // polygon: Liste von Ringen (erster = Außenrand, weitere = Löcher); ein einzelner Ring als [[x,y],...] wird akzeptiert
     let rings = g.coordinates;
     if (Array.isArray(rings) && rings.length && Array.isArray(rings[0]) && typeof rings[0][0] === 'number') rings = [rings];
+    if (Array.isArray(g.holes) && Array.isArray(rings)) rings = rings.concat(g.holes); // Löcher als eigene Liste (vereinfachte Schreibweise)
     if (!Array.isArray(rings) || !rings.length) fail('Polygon braucht mindestens einen Ring', p + '.coordinates');
     if (rings.length > 50) fail('zu viele Ringe (max. 50)', p + '.coordinates');
     return { type: 'polygon', coordinates: rings.map((r, i) => { const pts = ptList(r, 3, map, `${p}.coordinates[${i}]`); const a = pts[0], z = pts[pts.length - 1]; if (pts.length > 3 && a[0] === z[0] && a[1] === z[1]) pts.pop(); return pts; }) };
@@ -477,7 +478,7 @@
       f.geometry = mapPoints(f.geometry, q => [q[0] + dx, q[1] + dy]);
     }
     if (o.scale != null) {
-      const sc = isObj(o.scale) ? o.scale : { factor: o.scale };
+      const sc = isObj(o.scale) ? o.scale : { factor: o.scale, origin: o.scaleOrigin };
       const k = num(sc.factor, 0.01, 100, p + '.scale.factor');
       const c = sc.origin ? pt(sc.origin, map, p + '.scale.origin') : centerOf(geomBBox(f.geometry));
       f.geometry = mapPoints(f.geometry, q => [c[0] + (q[0] - c[0]) * k, c[1] + (q[1] - c[1]) * k]);
