@@ -1219,6 +1219,34 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'DELETE') { delete rec.apiToken; delete rec.apiTokenHint; delete rec.apiTokenCreated; saveUsers(d); return send(res, 200, { ok: true }); }
       return send(res, 405, { error: 'method not allowed' });
     }
+    // Speicherbedarf: pro Welt/Zeitlinie (nur was der Betrachter sehen darf), Gesamtgröße nur für Admins
+    if (url.pathname === '/api/storage') {
+      const who = whoIs(req, url);
+      const fsize = f => { try { return fs.statSync(f).size; } catch { return 0; } };
+      const du = d => { let n = 0; try { for (const e of fs.readdirSync(d, { withFileTypes: true })) n += e.isDirectory() ? du(path.join(d, e.name)) : fsize(path.join(d, e.name)); } catch { } return n; };
+      const imgRe = /images\/([A-Za-z0-9_-]+\.(?:jpg|png|webp|gif))/g;
+      const worlds = [{ id: 'starwars', name: SW.name.de, file: null }].concat(listJson('worlds').map(w => ({ id: w.id, name: w.name, file: w._file })));
+      const out = [];
+      for (const w of worlds) {
+        if (!canView(who, w.id, null) && !allTimelines('de', who).some(t => (t.world || 'starwars') === w.id)) continue;
+        const tls = [];
+        for (const f of fs.readdirSync(path.join(DATA_DIR, 'timelines')).filter(f => f.toLowerCase().endsWith('.json'))) {
+          const fp = path.join(DATA_DIR, 'timelines', f); let raw; try { raw = fs.readFileSync(fp, 'utf8'); } catch { continue; }
+          let t; try { t = JSON.parse(raw); } catch { continue; }
+          if ((t.world || 'starwars') !== w.id || !canView(who, w.id, t.id)) continue;
+          const imgs = new Set([...raw.matchAll(imgRe)].map(m => m[1])); let ib = 0; for (const i of imgs) ib += fsize(path.join(IMG_DIR, i));
+          tls.push({ id: t.id, name: t.name, bytes: Buffer.byteLength(raw), images: imgs.size, imageBytes: ib });
+        }
+        out.push({ id: w.id, name: w.name, bytes: w.file ? fsize(path.join(DATA_DIR, 'worlds', w.file)) : 0, timelines: tls.sort((a, b) => (b.bytes + b.imageBytes) - (a.bytes + a.imageBytes)) });
+      }
+      const res2 = { worlds: out };
+      if (who.admin && !who.api) {
+        res2.total = du(DATA_DIR); res2.dataDir = DATA_DIR;
+        res2.parts = { worlds: du(path.join(DATA_DIR, 'worlds')), timelines: du(path.join(DATA_DIR, 'timelines')), images: du(IMG_DIR) };
+        try { const st = fs.statfsSync(DATA_DIR); res2.diskFree = st.bavail * st.bsize; res2.diskSize = st.blocks * st.bsize; } catch { }
+      }
+      return send(res, 200, res2);
+    }
     // Rechte einer Welt verwalten: Welt-Admins (für Welt + Zeitlinien) und Zeitlinien-Admins (für ihre Zeitlinien)
     if (url.pathname === '/api/perms') {
       const who = whoIs(req, url), wid = url.searchParams.get('world') || 'starwars';

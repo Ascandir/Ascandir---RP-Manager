@@ -257,6 +257,8 @@ networks:
 
 Der Updater hat über `docker.sock` Zugriff auf Docker, ist aber von außen nicht erreichbar (kein Port) und nur mit dem Token ansprechbar. `IAM_UPDATE_WEBHOOK` kann alternativ auf jeden anderen Webhook zeigen, der ein POST annimmt (z. B. einen Portainer-Webhook).
 
+**Speicher:** Unter *Einstellungen → Speicher* siehst du, wie viel Platz die Daten belegen – pro Welt und Zeitlinie (inkl. Charakterbilder), jeweils nur für das, worauf du Zugriff hast. Admins sehen zusätzlich die Gesamtgröße des Datenordners und den freien Platz auf dem Laufwerk.
+
 **Gäste und Anmeldung:** Ohne Anmeldung sieht man die Karte nur an. Oben rechts gibt es *🔒 Anmelden*, danach sind Editor, Einstellungen, neue Welten/Zeitlinien, Import und JSON-Bearbeitung freigeschaltet. Die Anmeldung bleibt 30 Tage gespeichert; abmelden geht unter *Einstellungen → Konto*.
 
 **Benutzer & Rechte:** Unter *Einstellungen → 👥 Benutzer* (nur für Haupt-Admins) legst du Benutzer an – als **Admin** (darf alles) oder **Benutzer**. Jeder Benutzer bekommt pro Welt und pro Zeitlinie eine von vier Stufen:

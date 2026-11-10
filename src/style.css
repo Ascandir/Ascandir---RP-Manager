@@ -482,3 +482,11 @@ table.money-log .pos { color: #81c784; } table.money-log .neg { color: #e57373; 
 #left .lfold > .ltg .mini-actions { margin-left: auto; }
 #left #planner .row { flex-wrap: wrap; }
 #left #planner input, #left #planner select { min-width: 0; }
+
+.storage-total { font-size: 15px; margin-bottom: 2px; }
+.storage-bar { height: 6px; border-radius: 3px; background: var(--panel2); margin: 6px 0 2px; overflow: hidden; }
+.storage-bar i { display: block; height: 100%; background: var(--accent); }
+table.storage-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+table.storage-table td { padding: 3px 4px; border-top: 1px solid var(--border, #2a3446); }
+table.storage-table .num { text-align: right; white-space: nowrap; }
+table.storage-table td.ind { padding-left: 22px; }

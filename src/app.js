@@ -1863,7 +1863,7 @@
     $('#tabWorld').classList.toggle('active', state.mode === 'world');
     $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
     const guest = isGuest(), si = srvInfo();
-    for (const id of ['#tabEdit', '#tabSettings']) $(id).hidden = guest;
+    $('#tabEdit').hidden = guest;
     $('#btnNewWorld').hidden = !isAdminUser() || guest;
     $('#btnDelWorld').hidden = !isWorldAdmin() || guest || !!state.world.builtin;
     for (const id of ['#btnNewTl', '#btnDupTl', '#btnImport']) $(id).hidden = !canCreate();
@@ -2057,7 +2057,7 @@
 
   // ------------------------------------------------------------- Modus & Einstellungen
   function setMode(m) {
-    if (m !== 'view' && m !== 'story' && m !== 'chars' && m !== 'world' && isGuest()) { loginDialog(); return; }
+    if (m !== 'view' && m !== 'story' && m !== 'chars' && m !== 'world' && m !== 'settings' && isGuest()) { loginDialog(); return; }
     state.mode = m;
     if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars' || m === 'world');
     $('#settingsView').hidden = m !== 'settings';
@@ -2129,11 +2129,15 @@
         <p class="hint">${esc(t('dataHint'))}</p>
         ${info.dataDir ? `<code class="path">${esc(info.dataDir)}</code>` : ''}
         <button id="setFolder">${esc(t('openFolder'))}</button></section>` : ''}
-      ${FS && FS.server && FS.info().loginRequired ? `<section class="card"><h3>${esc(t('account'))}</h3><button id="setLogout">${esc(t('logout'))}</button></section>` : ''}
+      <section class="card"><h3>💾 ${esc(t('storageTitle'))}</h3><div id="storageBox" class="hint">…</div></section>
+      ${FS && FS.server && FS.info().loginRequired ? (isGuest() ? `<section class="card"><h3>${esc(t('account'))}</h3><p class="hint">${esc(t('guestSettingsHint'))}</p><button id="setLogin" class="primary">${esc(t('login'))}</button></section>`
+        : `<section class="card"><h3>${esc(t('account'))}</h3><button id="setLogout">${esc(t('logout'))}</button></section>`) : ''}
       <section class="card"><h3>${esc(t('about'))}</h3><p class="hint">Ascandir RP-Manager ${esc(info.version)} – ${esc(t('aboutText'))}</p></section>
     </div>`;
     $('#setBack').addEventListener('click', () => setMode('view'));
     const lo = $('#setLogout'); if (lo) lo.addEventListener('click', () => FS.logout().then(() => location.reload()));
+    const li = $('#setLogin'); if (li) li.addEventListener('click', () => loginDialog());
+    renderStorage();
     const so = $('#srvOn'); if (so) so.onclick = async () => {
       const u = $('#srvUrl').value.trim(); if (!u) return;
       try { const r = await fetch(u.replace(/\/?$/, '/') + 'api/info'); const j = await r.json(); if (!j.server) throw new Error('kein RP-Manager-Server'); }
@@ -2293,6 +2297,34 @@
     $('#guestPerm').onclick = () => permsDialog(t('guests'), d.guest, perms => api('api/guest', 'PUT', perms).then(renderUsers));
     $('#nuAdd').onclick = () => api('api/users', 'POST', { name: $('#nuName').value, password: $('#nuPw').value, role: $('#nuRole').value, perms: { worlds: { '*': 'view' }, timelines: {} } })
       .then(u => { toast(t('saved')); renderUsers().then(() => { if (u.role !== 'admin') permsDialog(u.name, u.perms, perms => api('api/users/' + u.id, 'PUT', { perms }).then(renderUsers)); }); }).catch(e => alert(e.message));
+  }
+  // Speicherbedarf anzeigen (Server: /api/storage nach Rechten; lokal: aus den geladenen Dateien)
+  const fmtBytes = b => { const L = settings.lang === 'en' ? 'en-GB' : 'de-DE', nf = (v, d) => v.toLocaleString(L, { maximumFractionDigits: d, minimumFractionDigits: d });
+    return b >= 1e9 ? nf(b / 1e9, 2) + ' GB' : b >= 1e6 ? nf(b / 1e6, 1) + ' MB' : b >= 1e3 ? nf(b / 1e3, 0) + ' KB' : b + ' B'; };
+  const fmtGB = b => (b / 1e9).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' GB';
+  async function renderStorage() {
+    const box = $('#storageBox'); if (!box) return;
+    let d;
+    if (FS && FS.server) { try { d = await api('api/storage'); } catch (e) { box.textContent = e.message; return; } }
+    else {
+      const len = s2 => new Blob([s2 || '']).size;
+      d = { worlds: state.worlds.map(w => ({ id: w.id, name: worldName(w), bytes: w._file ? len(lastWritten['worlds/' + w._file]) : 0,
+        timelines: timelinesOfWorld(w).filter(x => x._file).map(x => ({ id: x.id, name: x.name, bytes: len(lastWritten['timelines/' + x._file]), images: 0, imageBytes: 0 })).sort((a, b) => b.bytes - a.bytes) })) };
+      d.total = d.worlds.reduce((n, w) => n + w.bytes + w.timelines.reduce((m, x) => m + x.bytes, 0), 0);
+    }
+    if (!$('#storageBox')) return;
+    box.classList.remove('hint');
+    const wsum = w => w.bytes + w.timelines.reduce((n, x) => n + x.bytes + (x.imageBytes || 0), 0);
+    const vis = d.worlds.filter(w => w.bytes || w.timelines.length);
+    const visSum = vis.reduce((n, w) => n + wsum(w), 0);
+    box.innerHTML = `
+      ${d.total != null ? `<div class="storage-total"><b>${esc(fmtGB(d.total))}</b> <span class="dim">(${esc(fmtBytes(d.total))}) ${esc(t('storageTotal'))}</span></div>
+        ${d.parts ? `<div class="dim small">${esc(t('storageParts', fmtBytes(d.parts.timelines), fmtBytes(d.parts.images), fmtBytes(d.parts.worlds)))}</div>` : ''}
+        ${d.diskFree != null ? `<div class="storage-bar"><i style="width:${Math.min(100, Math.max(1, 100 * (1 - d.diskFree / d.diskSize))).toFixed(1)}%"></i></div><div class="dim small">${esc(t('storageDisk', fmtGB(d.diskFree), fmtGB(d.diskSize)))}</div>` : ''}`
+        : `<div class="storage-total"><b>${esc(fmtGB(visSum))}</b> <span class="dim">(${esc(fmtBytes(visSum))}) ${esc(t('storageVisible'))}</span></div>`}
+      <table class="storage-table">${vis.map(w => `<tr class="sw"><td>🌐 <b>${esc(w.name)}</b></td><td class="num"><b>${esc(fmtBytes(wsum(w)))}</b></td></tr>
+        ${w.timelines.map(x => `<tr><td class="ind">${esc(x.name)}${x.images ? ` <span class="dim">· ${x.images} 🖼 ${esc(fmtBytes(x.imageBytes))}</span>` : ''}</td><td class="num">${esc(fmtBytes(x.bytes + (x.imageBytes || 0)))}</td></tr>`).join('')}`).join('')}</table>
+      <p class="hint">${esc(t(d.total != null ? 'storageHintAdmin' : 'storageHintUser'))}</p>`;
   }
   // Rechte einer Welt und ihrer Zeitlinien vergeben (für Welt- und Zeitlinien-Admins)
   async function renderWorldPerms(w) {
@@ -2893,6 +2925,7 @@
     if (settings.autoUpdate && FS && (!FS.server || FS.desktop)) setTimeout(() => checkUpdates(false), 2500);
     if (FS && FS.server && !FS.desktop && state.appInfo.updateAvailable && !isGuest()) setTimeout(() => { state.upd = { state: 'dockerNew', version: state.appInfo.latest }; renderUpdStatus(); }, 1500);
     const off = new URLSearchParams(location.search).get('offline');
+    if (off) setTimeout(() => { setMode('settings'); const iu = $('#srvUrl'); if (iu) iu.value = off; }, 300);
     if (off) setTimeout(() => { let b = $('#offBanner'); if (!b) { b = document.createElement('div'); b.id = 'offBanner'; $('#mapWrap').appendChild(b); } b.innerHTML = `<b>☁</b> ${esc(t('srvOffline', off))} <button id="offRetry" class="primary">${esc(t('srvRetry'))}</button> <button id="offClose">${esc(t('close'))}</button>`; b.hidden = false;
       $('#offRetry').onclick = () => window.iamDesktop && window.iamDesktop.getServer().then(u => u && window.iamDesktop.setServer(u)); $('#offClose').onclick = () => { b.hidden = true; }; }, 600);
   })();
