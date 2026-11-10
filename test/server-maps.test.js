@@ -58,7 +58,7 @@ let mapId, riverId;
 test('MCP: Werkzeuge werden nach Rechten angeboten', async () => {
   const list = async tok => (await (await fetch(`${BASE}/mcp/${tok}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })).json()).result.tools.map(t => t.name);
   const ed = await list(TOK.editor), vw = await list(TOK.viewer);
-  for (const n of ['list_maps', 'get_map', 'find_map_features', 'export_map', 'create_map', 'update_map', 'add_map_features', 'update_map_features', 'delete_map_features']) assert.ok(ed.includes(n), n);
+  for (const n of ['upload_map_asset', 'delete_map_asset', 'set_world_image', 'list_maps', 'get_map', 'find_map_features', 'export_map', 'create_map', 'update_map', 'add_map_features', 'update_map_features', 'delete_map_features']) assert.ok(ed.includes(n), n);
   assert.ok(vw.includes('get_map') && !vw.includes('add_map_features'), 'Leser bekommt nur lesende Werkzeuge');
   assert.ok(!ed.includes('delete_map'), 'ganze Karten können per Connector nicht gelöscht werden');
 });
@@ -157,11 +157,45 @@ test('Export als SVG und Übersicht als Text', async () => {
   assert.ok(bb.data.features.some(f => f.name === 'Graukamm'));
 });
 
+const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+test('MCP: PNG als Karten-Asset hochladen, platzieren und exportieren', async () => {
+  const r = await mcp(TOK.editor, 'upload_map_asset', { map: mapId, name: 'Wappen', data: PNG, place: { x: 1000, y: 600, width: 80, rotation: 15, label: { text: 'Burg' } } });
+  assert.ok(!r.isError, r.text);
+  assert.match(r.data.asset.src, /^images\/img[0-9a-f]+\.png$/); assert.equal(r.data.asset.w, 1); assert.ok(r.data.featureId);
+  assert.ok(fs.existsSync(path.join(DATA, r.data.asset.src)));
+  const again = await mcp(TOK.editor, 'add_map_features', { map: mapId, features: [{ type: 'image', asset: r.data.asset.id, geometry: { type: 'point', coordinates: [1200, 700] }, style: { size: 40 } }] });
+  assert.ok(!again.isError, again.text);
+  const g = await mcp(TOK.viewer, 'get_map', { map: mapId });
+  assert.equal(g.data.assets[0].name, 'Wappen');
+  const svg = await call('GET', `/api/v1/map/svg?map=${mapId}`, null, TOK.viewer);
+  assert.match(svg.text, /<image href="data:image\/png;base64,/, 'Bild ist im SVG eingebettet');
+  const del = await mcp(TOK.editor, 'delete_map_asset', { map: mapId, id: r.data.asset.id });
+  assert.ok(del.isError && /verwendet/.test(del.text));
+  const fake = await mcp(TOK.editor, 'upload_map_asset', { map: mapId, name: 'x', data: Buffer.from('<svg onload=alert(1)>').toString('base64') });
+  assert.ok(fake.isError && /not a supported image/.test(fake.text), 'nur echte Bilder');
+  const ssrf = await mcp(TOK.editor, 'upload_map_asset', { map: mapId, name: 'x', url: 'http://127.0.0.1:' + PORT + '/api/info' });
+  assert.ok(ssrf.isError && /lokalen Netz/.test(ssrf.text), 'keine Downloads aus dem lokalen Netz');
+  const viewer = await call('POST', '/api/v1/map/asset', { map: mapId, name: 'x', data: PNG }, TOK.tlEditor);
+  assert.equal(viewer.status, 403);
+});
+
+test('MCP: Weltbild setzen nur als Welt-Admin', async () => {
+  const no = await mcp(TOK.editor, 'set_world_image', { world: 'Eldoria', data: PNG });
+  assert.ok(no.isError && /Admins/.test(no.text));
+  const ok = await mcp(TOK.admin, 'set_world_image', { world: 'Eldoria', data: PNG, opacity: 0.8 });
+  assert.ok(!ok.isError, ok.text);
+  const w = JSON.parse(fs.readFileSync(path.join(DATA, 'worlds', 'Eldoria.json'), 'utf8'));
+  assert.match(w.mapImage.src, /^images\//); assert.equal(w.mapImage.h, 1700); assert.equal(w.mapImage.opacity, 0.8);
+  assert.equal(w.name, 'Eldoria', 'übrige Weltdaten bleiben');
+  const clr = await mcp(TOK.admin, 'set_world_image', { world: 'Eldoria', clear: true });
+  assert.ok(!clr.isError); assert.equal(JSON.parse(fs.readFileSync(path.join(DATA, 'worlds', 'Eldoria.json'), 'utf8')).mapImage, undefined);
+});
+
 test('Bestehende Daten bleiben unberührt', async () => {
   const tl = JSON.parse(fs.readFileSync(path.join(DATA, 'timelines', 'Haupt.json'), 'utf8'));
   assert.equal(tl.objects.length, 1); assert.equal(tl.name, 'Haupt');
   const w = JSON.parse(fs.readFileSync(path.join(DATA, 'worlds', 'Eldoria.json'), 'utf8'));
-  assert.deepEqual(Object.keys(w).sort(), ['id', 'name', 'type', 'yearFmt']);
+  assert.deepEqual(Object.keys(w).filter(k => k !== 'mapImage').sort(), ['id', 'name', 'type', 'yearFmt']);
   const tls = await call('GET', '/api/v1/timelines', null, TOK.admin);
   assert.equal(tls.status, 200);
 });

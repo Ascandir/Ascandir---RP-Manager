@@ -31,11 +31,11 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
 | Vollbild | F11 |
 | Rückgängig (Editor) | Strg+Z |
 
-**Reiter oben rechts:**
+**Bereichsmenü oben rechts** (Knopf mit dem aktuellen Bereich, z. B. „🗺 Ansicht ▾“): Ansicht, Editor, Zeichnen (nur eigene Welten), Story, Charaktere, Welt, Einstellungen und die Sprache DE/EN.
 - **Ansicht:** Filter für Objekte (Sonnen, Planeten, Monde, Stationen bzw. Hauptstädte, Städte, Dörfer, Festungen, Wahrzeichen), Einflussbereiche, Hyperraumrouten bzw. Routen, Regionen, Sektoren, Raster, Namen und einzelne Fraktionen
 - **Story:** zeigt den Story-Text (RP-Stand) des aktuellen Zeitalters in voller Länge und alle Kapitel/Zeitalter zum Anklicken; mit Bearbeitungsrechten direkt editierbar (Leerzeile = Absatz, `**fett**`, `*kursiv*`)
 - **Editor:** Zeitalter, Fraktionen, Routen und Werkzeuge (Zuweisen, Region, Einfluss malen, Radieren, Objekt anlegen, Route zeichnen)
-- **Sprache:** Umschalter DE / EN oben rechts, gilt pro Betrachter (im Browser gespeichert)
+- **Sprache:** Umschalter DE / EN unten im Bereichsmenü, gilt pro Betrachter (im Browser gespeichert)
 - **Einstellungen:** Design (automatisch, Sci-Fi oder Fantasy), Updates, Einstellungen der aktuellen Welt (Name, Jahres-Kürzel wie „v. Z.“/„n. Z.“, Löschen), Datenordner
 
 ### Welten
@@ -158,6 +158,7 @@ Im Reiter **✎ Zeichnen** zeichnest du für eigene Welten (nicht für die Star-
   - Ziehen verschiebt. Eckpunkte ziehen ändert die Form, Alt+Klick löscht einen Eckpunkt. Der Griff unten rechts oder ＋/－ skaliert. Pfeiltasten verschieben, Entf löscht.
   - Im Bereich *Auswahl*: Typ, Ebene, Name, Beschriftung (Größe, Farbe, Ausrichtung, Winkel, kursiv, Versalien) und Stil (Füllung, Linie, Stärke, Strich, Deckkraft, Symbolgröße, Dichte, Glättung) ändern.
   - Objekte nach vorne oder hinten holen und mit einem **Ort der Zeitlinie verknüpfen**.
+- **Eigene Bilder:** Unter *Eigene Bilder* → **Bild hochladen** (PNG mit Transparenz eignet sich gut für eigene Symbole, Wappen oder Burgen; auch JPEG, WebP und GIF). Bild anklicken, dann auf die Karte klicken. Breite, Drehung und Deckkraft stellst du in der Auswahl ein. Bilder werden in SVG-Exporte eingebettet.
 - **Ebenen:** Gelände, Wasser, Vegetation, Wege, Grenzen, Orte, Beschriftungen, Dekoration. Jede Ebene lässt sich ein- und ausblenden und sperren. Die **Legende** zeigt die verwendeten Symbole.
 - **Rückgängig/Wiederholen:** ↶/↷ oder Strg+Z / Strg+Y. Optional gibt es ein Raster und Ausrichten am Raster. ⌂ zeigt die ganze Karte.
 - **Export:** **SVG** (Vektor, beliebig skalierbar) und **PNG** (1×, 2× oder 4×).
@@ -189,11 +190,15 @@ Im Reiter **✎ Zeichnen** zeichnest du für eigene Welten (nicht für die Star-
 | `add_map_features` | Bis zu 500 Objekte atomar hinzufügen, gibt die neuen ids zurück. `placeId` darf auch ein Ortsname sein |
 | `update_map_features` | Per id ändern: Stil/Beschriftung zusammenführen, Geometrie ersetzen, `translate`, `scale`, `rotate`, `order`, Typ, Ebene, Ort |
 | `delete_map_features` | Per id löschen |
+| `upload_map_asset` | Bild (PNG/JPEG/WebP/GIF, öffentliche URL oder Base64) als Asset in die Karte laden, mit `place` sofort platzieren. Danach beliebig oft mit `add_map_features` (`type: "image"`, `asset: <id>`) setzen |
+| `delete_map_asset` | Bild entfernen (nur wenn es nicht mehr verwendet wird) |
+| `set_world_image` | Ein Bild (z. B. gemalte Kontinentkarte) als Hintergrund einer eigenen Welt setzen bzw. mit `clear` entfernen (nur Welt-Admins) |
 
 - Alle Änderungen sind **atomar**: Ein fehlerhaftes Objekt verwirft den ganzen Aufruf, und die Fehlermeldung nennt die Stelle (z. B. `ops[1].feature.style.fill`).
 - Grenzen: 500 Änderungen pro Aufruf, 20 000 Objekte bzw. 250 000 Punkte pro Karte, 5 000 Punkte pro Objekt, Texte bis 200 Zeichen.
 - Mit `expectRev` schützt man sich vor parallelen Änderungen.
 - Ganze Karten lassen sich über den Connector bewusst **nicht** löschen.
+- Hochgeladene Bilder werden am Inhalt geprüft (nur echte PNG/JPEG/WebP/GIF, max. 10 MB) und unter `images/` im Datenordner gespeichert. Downloads aus dem lokalen Netz (z. B. `192.168…`, `localhost`) lehnt der Server ab. Base64 per ChatGPT geht bis etwa 6 MB.
 
 Beispiel im Chat: *„Zeichne in Eldoria eine Gebirgskette von 600/400 nach 800/410 und einen Fluss von dort bis zur Küste bei 880/1380. Mach den Fluss danach dunkelblau.“* ChatGPT legt beides mit `add_map_features` an und ändert danach nur den Fluss per id mit `update_map_features` (`style.stroke`).
 
@@ -201,6 +206,7 @@ Beispiel im Chat: *„Zeichne in Eldoria eine Gebirgskette von 600/400 nach 800/
 - `GET /api/v1/maps`, `GET /api/v1/map`, `GET /api/v1/map/features`, `GET /api/v1/map/svg`
 - `POST/PATCH /api/v1/map`
 - `POST/PATCH/DELETE /api/v1/map/features`
+- `POST/DELETE /api/v1/map/asset`, `POST/DELETE /api/v1/world/image`, `POST /api/v1/image`
 
 Für absolute Links im SVG-Export kann `IAM_PUBLIC_URL` gesetzt werden (z. B. `https://rp.ascandir.com`).
 

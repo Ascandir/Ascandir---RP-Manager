@@ -122,3 +122,24 @@ test('Darstellung ist deterministisch (gleiche Karte = gleiche Symbole)', () => 
   const m = F.applyOps(base(), [{ op: 'add', feature: { id: 'w', type: 'forest', geometry: { type: 'polygon', coordinates: [[[0, 0], [300, 0], [300, 300], [0, 300]]] } } }]).map;
   assert.equal(JSON.stringify(F.build(m)), JSON.stringify(F.build(JSON.parse(JSON.stringify(m)))));
 });
+
+test('Bild-Assets: anlegen, platzieren, prüfen, entfernen', () => {
+  let m = base();
+  assert.throws(() => F.applyOps(m, [{ op: 'add', feature: { type: 'image', asset: 'x', geometry: { type: 'point', coordinates: [1, 1] } } }]), /asset/);
+  assert.throws(() => F.applyOps(m, [{ op: 'addAsset', asset: { name: 'x', src: 'javascript:alert(1)', w: 10, h: 10 } }]), /src/);
+  assert.throws(() => F.applyOps(m, [{ op: 'addAsset', asset: { name: 'x', src: '../../etc/passwd.png', w: 10, h: 10 } }]), /src/);
+  const r = F.applyOps(m, [
+    { op: 'addAsset', asset: { id: 'wappen', name: 'Wappen', src: 'images/img123.png', w: 200, h: 100 } },
+    { op: 'add', feature: { id: 'b1', type: 'image', asset: 'wappen', geometry: { type: 'point', coordinates: [500, 500] }, style: { size: 100, rotation: 90 } } }
+  ]);
+  m = r.map;
+  assert.deepEqual(r.result.assetsAdded, ['wappen']);
+  assert.deepEqual(F.featureBBox(m.features[0], m).map(Math.round), [475, 450, 525, 550], 'gedrehte Begrenzung');
+  const prim = F.build(m).find(p => p.image);
+  assert.equal(prim.w, 100); assert.equal(prim.h, 50); assert.equal(prim.angle, 90);
+  assert.match(F.toSVG(m, { resolveImage: () => 'data:image/png;base64,AAAA' }), /<image href="data:image\/png;base64,AAAA"/);
+  assert.throws(() => F.applyOps(m, [{ op: 'removeAsset', id: 'wappen' }]), e => e.code === 409, 'verwendetes Bild nicht löschbar');
+  m = F.applyOps(m, [{ op: 'delete', id: 'b1' }, { op: 'removeAsset', id: 'wappen' }]).map;
+  assert.equal(m.assets.length, 0);
+  assert.doesNotThrow(() => F.normalizeMap(JSON.parse(JSON.stringify(m))));
+});

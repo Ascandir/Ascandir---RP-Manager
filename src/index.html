@@ -36,17 +36,23 @@
       </span>
       <input type="file" id="fileImport" accept=".json,.geojson,application/json,application/geo+json" hidden>
     </div>
-    <div class="lang-switch" id="langSwitch"><button data-l="de">DE</button><button data-l="en">EN</button></div>
     <div class="mode-tabs">
       <button id="btnLogin" hidden></button>
       <button id="btnUser" hidden></button>
-      <button id="tabView" data-i18n="tabView"></button>
-      <button id="tabEdit" data-i18n="tabEdit"></button>
-      <button id="tabStory" data-i18n="tabStory"></button>
-      <button id="tabChars" data-i18n="tabChars"></button>
-      <button id="tabWorld" data-i18n="tabWorld"></button>
-      <button id="tabDraw" hidden></button>
-      <button id="tabSettings" data-i18n="tabSettings"></button>
+      <span class="menu" id="modeMenuWrap">
+        <button id="btnModes" class="fixed"></button>
+        <div class="menu-list mode-list" id="modeMenu" hidden>
+          <button id="tabView" data-i18n="tabView"></button>
+          <button id="tabEdit" data-i18n="tabEdit"></button>
+          <button id="tabDraw" hidden></button>
+          <button id="tabStory" data-i18n="tabStory"></button>
+          <button id="tabChars" data-i18n="tabChars"></button>
+          <button id="tabWorld" data-i18n="tabWorld"></button>
+          <button id="tabSettings" data-i18n="tabSettings"></button>
+          <div class="menu-sep"></div>
+          <div class="lang-switch" id="langSwitch"><button data-l="de">DE</button><button data-l="en">EN</button></div>
+        </div>
+      </span>
     </div>
   </header>
 

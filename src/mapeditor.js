@@ -32,7 +32,8 @@
       mBorder: 'Zierrahmen', mPrimary: 'Hauptkarte der Welt', styles: { parchment: 'Pergament', ink: 'Tusche' }, nameTaken: 'Name ist schon vergeben',
       err: 'Fehler', confirmMany: n => `${n} Objekte löschen?`, scale: 'Skalieren', exported: 'Export gestartet', pngScale: 'Auflösung',
       vis: 'sichtbar', lock: 'gesperrt', count: n => `${n} Obj.`, linkHint: 'Verknüpft das Objekt mit einem Ort der Zeitlinie (für ChatGPT & Suche).',
-      types: { land: 'Land / Küste', island: 'Insel', area: 'Gebiet', mountains: 'Gebirge', mountain: 'Berg', hills: 'Hügel', lake: 'See', river: 'Fluss', forest: 'Wald', swamp: 'Sumpf', desert: 'Wüste', road: 'Straße', path: 'Pfad', line: 'Linie', border: 'Grenze', region: 'Reich / Region', city: 'Stadt', town: 'Kleinstadt', village: 'Dorf', fortress: 'Festung', tower: 'Turm', ruin: 'Ruine', label: 'Beschriftung', compass: 'Windrose', ship: 'Schiff', serpent: 'Seeschlange', cartouche: 'Titelkartusche', symbol: 'Symbol' },
+      assets: 'Eigene Bilder', upload: 'Bild hochladen', uploading: 'Lade hoch…', assetHint: 'PNG mit Transparenz eignet sich für eigene Symbole. Bild anklicken, dann auf die Karte klicken. ChatGPT kann Bilder per upload_map_asset hinzufügen.', hintImage: 'Klicken = Bild setzen', asset: 'Bild', rotation: 'Drehung', imgWidth: 'Breite', delAsset: 'Bild entfernen', assetUsed: 'Das Bild wird noch verwendet.', noAssets: 'Noch keine eigenen Bilder.',
+      types: { image: 'Bild', land: 'Land / Küste', island: 'Insel', area: 'Gebiet', mountains: 'Gebirge', mountain: 'Berg', hills: 'Hügel', lake: 'See', river: 'Fluss', forest: 'Wald', swamp: 'Sumpf', desert: 'Wüste', road: 'Straße', path: 'Pfad', line: 'Linie', border: 'Grenze', region: 'Reich / Region', city: 'Stadt', town: 'Kleinstadt', village: 'Dorf', fortress: 'Festung', tower: 'Turm', ruin: 'Ruine', label: 'Beschriftung', compass: 'Windrose', ship: 'Schiff', serpent: 'Seeschlange', cartouche: 'Titelkartusche', symbol: 'Symbol' },
       layerNames: { terrain: 'Gelände', water: 'Wasser', vegetation: 'Vegetation', routes: 'Wege', borders: 'Grenzen', places: 'Orte', labels: 'Beschriftungen', decor: 'Dekoration' },
       aligns: { left: 'links', center: 'Mitte', right: 'rechts' }, dashes: { solid: 'durchgezogen', dashed: 'gestrichelt', dotted: 'gepunktet', dashdot: 'Strich-Punkt', long: 'lang' }
     },
@@ -60,7 +61,8 @@
       mBorder: 'Decorative frame', mPrimary: 'Main map of the world', styles: { parchment: 'Parchment', ink: 'Ink' }, nameTaken: 'Name already taken',
       err: 'Error', confirmMany: n => `Delete ${n} objects?`, scale: 'Scale', exported: 'Export started', pngScale: 'Resolution',
       vis: 'visible', lock: 'locked', count: n => `${n} obj.`, linkHint: 'Links the object to a place of the timeline (for ChatGPT & search).',
-      types: { land: 'Land / coast', island: 'Island', area: 'Area', mountains: 'Mountains', mountain: 'Mountain', hills: 'Hills', lake: 'Lake', river: 'River', forest: 'Forest', swamp: 'Swamp', desert: 'Desert', road: 'Road', path: 'Path', line: 'Line', border: 'Border', region: 'Realm / region', city: 'City', town: 'Town', village: 'Village', fortress: 'Fortress', tower: 'Tower', ruin: 'Ruin', label: 'Label', compass: 'Compass rose', ship: 'Ship', serpent: 'Sea serpent', cartouche: 'Title cartouche', symbol: 'Symbol' },
+      assets: 'Own images', upload: 'Upload image', uploading: 'Uploading…', assetHint: 'Transparent PNGs work well as custom symbols. Click an image, then click on the map. ChatGPT can add images via upload_map_asset.', hintImage: 'Click = place image', asset: 'Image', rotation: 'Rotation', imgWidth: 'Width', delAsset: 'Remove image', assetUsed: 'The image is still in use.', noAssets: 'No own images yet.',
+      types: { image: 'Image', land: 'Land / coast', island: 'Island', area: 'Area', mountains: 'Mountains', mountain: 'Mountain', hills: 'Hills', lake: 'Lake', river: 'River', forest: 'Forest', swamp: 'Swamp', desert: 'Desert', road: 'Road', path: 'Path', line: 'Line', border: 'Border', region: 'Realm / region', city: 'City', town: 'Town', village: 'Village', fortress: 'Fortress', tower: 'Tower', ruin: 'Ruin', label: 'Label', compass: 'Compass rose', ship: 'Ship', serpent: 'Sea serpent', cartouche: 'Title cartouche', symbol: 'Symbol' },
       layerNames: { terrain: 'Terrain', water: 'Water', vegetation: 'Vegetation', routes: 'Routes', borders: 'Borders', places: 'Places', labels: 'Labels', decor: 'Decoration' },
       aligns: { left: 'left', center: 'center', right: 'right' }, dashes: { solid: 'solid', dashed: 'dashed', dotted: 'dotted', dashdot: 'dash-dot', long: 'long' }
     }
@@ -73,7 +75,7 @@
     const esc = app.esc;
     const st = {
       maps: [], chosen: loadJSON('iam.mapSel.v1', {}), ver: 1,
-      tool: 'select', drawType: 'land', geom: {}, freehand: false, grid: false, snap: false,
+      tool: 'select', drawType: 'land', asset: null, geom: {}, freehand: false, grid: false, snap: false,
       sel: [], draft: null, drag: null, hoverPt: null,
       undo: [], redo: [], dirty: new Set(), saveTimer: null, baseRev: {}, lastWritten: {}, saving: false,
       primCache: new Map(), cacheFor: null, prims: null, pathCache: new WeakMap()
@@ -172,7 +174,7 @@
     // Primitive pro Objekt zwischenspeichern: beim Ziehen wird nur das geänderte Objekt neu aufgebaut
     function primsOf(m) {
       if (st.prims && st.cacheFor === m) return st.prims;
-      const pal = JSON.stringify([m.style, m.palette, m.background, m.layers]);
+      const pal = JSON.stringify([m.style, m.palette, m.background, m.layers, m.assets]);
       const order = m.features.map((f, i) => ({ f, i })).sort((a, b) => F.LAYERS.indexOf(a.f.layer) - F.LAYERS.indexOf(b.f.layer) || a.i - b.i);
       const out = [], next = new Map(), hidden = new Set(F.LAYERS.filter(l => m.layers[l] && m.layers[l].visible === false));
       for (const { f } of order) {
@@ -185,10 +187,18 @@
       st.primCache = next; st.cacheFor = m; st.prims = out;
       return out;
     }
+    const imgCache = new Map();
+    function imgOf(src) {
+      let im = imgCache.get(src);
+      if (!im) { im = new Image(); im.onload = () => { st.ver++; app.redraw(); }; im.src = src; imgCache.set(src, im); if (imgCache.size > 300) imgCache.delete(imgCache.keys().next().value); }
+      return im;
+    }
+    const loadImg = src => { const im = imgOf(src); return im.complete && im.naturalWidth ? im : null; };
+    const whenLoaded = srcs => Promise.all(srcs.map(src => new Promise(r => { const im = imgOf(src); if (im.complete) r(); else { im.addEventListener('load', r); im.addEventListener('error', r); } })));
     function drawMap(ctx, m, opt) {
       const bg = F.backgroundPrims(m);
       F.drawPrims(ctx, bg.filter(p => p.layer === '_bg'), st.pathCache);
-      F.drawPrims(ctx, opt && opt.prims || primsOf(m), st.pathCache);
+      F.drawPrims(ctx, opt && opt.prims || primsOf(m), st.pathCache, loadImg);
       F.drawPrims(ctx, bg.filter(p => p.layer === '_frame'), st.pathCache);
     }
     function drawBase(ctx) { const m = active(); if (!m) return; app.worldTransform(ctx); ctx.save(); if (st.preview && st.preview.id === m.id) drawMap(ctx, st.preview, { prims: st.previewPrims }); else drawMap(ctx, m); ctx.restore(); }
@@ -289,14 +299,46 @@
       document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
     }
     const fname = m => (String(m.name).normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'karte');
-    function exportSvg() { const m = active(); if (!m) return; download(new Blob([F.toSVG(m)], { type: 'image/svg+xml' }), fname(m) + '.svg'); }
+    const toDataUrl = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+    async function exportSvg() {
+      const m = active(); if (!m) return;
+      const emb = {}; // Bilder einbetten, damit die SVG-Datei für sich allein vollständig ist
+      for (const a of m.assets || []) { if (a.src.startsWith('data:')) { emb[a.src] = a.src; continue; } try { emb[a.src] = await toDataUrl(await (await fetch(a.src)).blob()); } catch { emb[a.src] = a.src; } }
+      download(new Blob([F.toSVG(m, { resolveImage: src => emb[src] || src })], { type: 'image/svg+xml' }), fname(m) + '.svg');
+    }
     function exportPng(scale) {
       const m = active(); if (!m) return;
       const k = Math.max(0.25, Math.min(4, scale || 1)), maxPx = 16000;
       const s = Math.min(k, maxPx / m.width, maxPx / m.height);
       const c = document.createElement('canvas'); c.width = Math.round(m.width * s); c.height = Math.round(m.height * s);
-      const x = c.getContext('2d'); x.setTransform(s, 0, 0, s, 0, 0); drawMap(x, m, { prims: F.build(m) });
-      c.toBlob(b => { if (b) download(b, fname(m) + '.png'); else app.toast(L().err); }, 'image/png');
+      const x = c.getContext('2d'); x.setTransform(s, 0, 0, s, 0, 0);
+      whenLoaded((m.assets || []).map(a => a.src)).then(() => { drawMap(x, m, { prims: F.build(m) }); c.toBlob(b => { if (b) download(b, fname(m) + '.png'); else app.toast(L().err); }, 'image/png'); });
+    }
+    // ------------------------------------------------------------- Eigene Bilder (Assets)
+    const readFile = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error('Datei nicht lesbar')); r.readAsDataURL(f); });
+    const loadDims = src => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('kein unterstütztes Bild')); im.src = src; });
+    async function shrink(dataUrl, max, mime) {
+      const im = await loadDims(dataUrl); let w = im.naturalWidth, h = im.naturalHeight;
+      if (Math.max(w, h) <= max) return { src: dataUrl, w, h };
+      const k = max / Math.max(w, h); w = Math.round(w * k); h = Math.round(h * k);
+      const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h);
+      return { src: c.toDataURL(mime), w, h };
+    }
+    async function uploadAsset(file) {
+      const T = L(), m = active(); if (!m || !canEdit(m) || !file) return;
+      if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { app.toast(T.err + ': PNG, JPEG, WebP, GIF'); return; }
+      app.toast(T.uploading);
+      try {
+        const mime = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
+        let img = await shrink(await readFile(file), FS && FS.server ? 2048 : 1024, mime);
+        if (FS && FS.server) {
+          const r = await fetch('api/v1/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: img.src }) });
+          const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText);
+          img = { src: j.src, w: j.w, h: j.h };
+        }
+        const res = commit([{ op: 'addAsset', asset: { name: file.name.replace(/\.[^.]+$/, '').slice(0, 100) || 'Bild', src: img.src, w: img.w, h: img.h } }]);
+        if (res && res.assetsAdded) { st.asset = res.assetsAdded[0]; setTool('draw', 'image'); }
+      } catch (e) { app.toast(T.err + ': ' + e.message); }
     }
 
     // ------------------------------------------------------------- Eingabe
@@ -350,6 +392,7 @@
         st.drag = { kind: 'box', start: [w.x, w.y], cur: [w.x, w.y], add: e.shiftKey }; if (!e.shiftKey) st.sel = []; render(); return true;
       }
       if (st.tool === 'label') { addLabel(p); return true; }
+      if (st.drawType === 'image') { if (!F.assetOf(m, st.asset)) { app.toast(L().noAssets); return true; } addFeature({ type: 'image', asset: st.asset, geometry: { type: 'point', coordinates: p } }); return true; }
       const type = st.drawType, g = geomOf(type);
       if (g === 'point') { addFeature(Object.assign({ type, geometry: { type: 'point', coordinates: p } }, type === 'cartouche' ? { label: { text: m.name } } : {})); return true; }
       if (g === 'group') { st.draft = { type, geom: 'group', pts: [p] }; st.drag = { kind: 'stamp' }; app.redraw(); return true; }
@@ -511,6 +554,7 @@
       const m = active(); if (!m || !canEdit(m)) { app.hint(null); return; }
       if (st.tool === 'select') return app.hint(T.hintSelect);
       if (st.tool === 'label') return app.hint(T.hintLabel);
+      if (st.drawType === 'image') return app.hint(T.hintImage);
       const g = geomOf(st.drawType);
       app.hint(g === 'point' ? T.hintPoint : g === 'group' ? T.hintGroup : st.freehand ? T.hintFree : T.hintPoly);
     }
@@ -523,7 +567,7 @@
     function render() {
       const box = document.getElementById('mapedit'); if (!box) return;
       const show = app.mode() === 'draw'; box.hidden = !show;
-      const tb = document.getElementById('tabDraw'); if (tb) { tb.textContent = '✎ ' + L().tab; tb.classList.toggle('active', show); }
+      const tb = document.getElementById('tabDraw'); if (tb) tb.classList.toggle('active', show);
       if (!show) return;
       const T = L(), w = app.world();
       if (!w || w.builtin) { box.innerHTML = `<div class="readonly-note">${esc(T.onlyCustom)}</div>`; app.hint(null); return; }
@@ -548,17 +592,22 @@
           <button id="meUndo" title="${esc(T.undo)}" ${st.undo.length ? '' : 'disabled'}>↶</button><button id="meRedo" title="${esc(T.redo)}" ${st.redo.length ? '' : 'disabled'}>↷</button>
         </div>
         <div class="me-row"><label class="chk"><input type="checkbox" id="meGrid" ${st.grid ? 'checked' : ''}> ${esc(T.grid)}</label> <label class="chk"><input type="checkbox" id="meSnap" ${st.snap ? 'checked' : ''}> ${esc(T.snap)}</label> <button id="meFit">⌂ ${esc(T.fit)}</button></div>`;
-        if (st.tool === 'draw') {
+        if (st.tool === 'draw' && st.drawType !== 'image') {
           const g = F.TYPES[st.drawType].geoms;
           h += `<div class="me-row">${g.length > 1 ? g.map(x => `<button data-geom="${x}" class="${geomOf(st.drawType) === x ? 'active' : ''}">${esc(T.geom[x])}</button>`).join('') : ''}
             ${['line', 'polygon'].includes(geomOf(st.drawType)) ? `<label class="chk"><input type="checkbox" id="meFree" ${st.freehand ? 'checked' : ''}> ${esc(T.freehand)}</label>` : ''}</div>`;
         }
         h += `<details class="me-sec" data-sec="palette" ${isOpen('palette', true)}><summary>${esc(T.palette)}</summary>`;
         for (const ly of F.LAYERS) {
-          const types = Object.keys(F.TYPES).filter(k => F.TYPES[k].layer === ly); if (!types.length) continue;
+          const types = Object.keys(F.TYPES).filter(k => F.TYPES[k].layer === ly && k !== 'image'); if (!types.length) continue;
           h += `<div class="me-pal-h">${esc(T.layerNames[ly])}</div><div class="me-pal">` + types.map(k => `<button class="me-sym ${st.tool === 'draw' && st.drawType === k ? 'active' : ''}" data-type="${k}" title="${esc(T.types[k])}"><img src="${icon(k, m.style)}" alt=""><span>${esc(T.types[k])}</span></button>`).join('') + '</div>';
         }
         h += '</details>';
+        const assets = m.assets || [];
+        h += `<details class="me-sec" data-sec="assets" ${isOpen('assets', true)}><summary>${esc(T.assets)} (${assets.length})</summary>
+          <div class="me-pal">${assets.map(a => `<span class="me-asset-w"><button class="me-sym ${st.tool === 'draw' && st.drawType === 'image' && st.asset === a.id ? 'active' : ''}" data-asset="${esc(a.id)}" title="${esc(a.name)} (${a.w}×${a.h})"><img src="${esc(a.src)}" alt="" style="object-fit:contain"><span>${esc(a.name)}</span></button><button class="me-adel" data-adel="${esc(a.id)}" title="${esc(T.delAsset)}">×</button></span>`).join('') || `<p class="hint">${esc(T.noAssets)}</p>`}</div>
+          <label class="me-upload"><input type="file" id="meUpload" accept="image/png,image/jpeg,image/webp,image/gif" hidden><span class="btn">⤒ ${esc(T.upload)}</span></label>
+          <p class="hint small">${esc(T.assetHint)}</p></details>`;
       }
       // Auswahl
       if (ed) {
@@ -572,7 +621,7 @@
       const cnt = {}; for (const f of m.features) cnt[f.layer] = (cnt[f.layer] || 0) + 1;
       h += `<details class="me-sec" data-sec="layers" ${isOpen('layers', false)}><summary>${esc(T.layers)}</summary>` + F.LAYERS.map(ly => `<div class="me-layer"><label class="chk" title="${esc(T.vis)}"><input type="checkbox" data-lvis="${ly}" ${m.layers[ly].visible !== false ? 'checked' : ''} ${ed ? '' : 'disabled'}> ${esc(T.layerNames[ly])}</label><span class="dim small">${cnt[ly] || 0}</span>${ed ? `<label class="chk small" title="${esc(T.lock)}"><input type="checkbox" data-llock="${ly}" ${m.layers[ly].locked ? 'checked' : ''}> 🔒</label>` : ''}</div>`).join('') + '</details>';
       // Legende
-      const used = [...new Set(m.features.map(f => f.type))].filter(k => k !== 'label' && k !== 'cartouche' && k !== 'compass');
+      const used = [...new Set(m.features.map(f => f.type))].filter(k => k !== 'label' && k !== 'cartouche' && k !== 'compass' && k !== 'image');
       if (used.length) h += `<details class="me-sec" data-sec="legend" ${isOpen('legend', false)}><summary>${esc(T.legend)}</summary><div class="me-legend">` + used.map(k => `<div><img src="${icon(k, m.style)}" alt=""> ${esc(T.types[k])}</div>`).join('') + '</div></details>';
       box.innerHTML = h;
       wire(box, m, fs);
@@ -580,7 +629,8 @@
     }
     function inspector(f, m) {
       const T = L(), s = F.styleOf(f, m), lb = f.label || {}, g = f.geometry.type;
-      const types = Object.keys(F.TYPES).filter(k => F.TYPES[k].geoms.includes(g));
+      const isImg = f.type === 'image';
+      const types = isImg ? ['image'] : Object.keys(F.TYPES).filter(k => F.TYPES[k].geoms.includes(g) && k !== 'image');
       const places = (app.places() || []);
       const hasFill = g === 'polygon' || g === 'point' || g === 'group';
       return `<div class="form-grid me-insp">
@@ -596,6 +646,10 @@
         <label>${esc(T.angle)}<input id="miAngle" type="number" min="-360" max="360" value="${lb.angle ?? ''}" placeholder="auto"></label>
         <span class="row"><label class="chk"><input type="checkbox" id="miItalic" ${lb.italic ? 'checked' : ''}> ${esc(T.italic)}</label><label class="chk"><input type="checkbox" id="miCaps" ${lb.caps ? 'checked' : ''}> ${esc(T.caps)}</label></span>
         <div class="me-sub">${esc(T.style)}</div>
+        ${isImg ? `<label>${esc(T.asset)}<select id="miAsset">${(m.assets || []).map(a => `<option value="${esc(a.id)}" ${a.id === f.asset ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
+        <label>${esc(T.imgWidth)}<input id="miSize" type="number" min="1" max="1000" value="${Math.round(s.size || Math.min((F.assetOf(m, f.asset) || { w: 300 }).w, 300))}"></label>
+        <label>${esc(T.rotation)}<input id="miRot" type="number" min="-360" max="360" value="${s.rotation || 0}"></label>
+        <label>${esc(T.opacity)}<input id="miOpacity" type="range" min="0.05" max="1" step="0.05" value="${s.opacity ?? 1}"></label>` : `
         ${hasFill ? `<label>${esc(T.fill)}${colorInput('miFill', s.fill, true)}</label>` : ''}
         <label>${esc(T.stroke)}${colorInput('miStroke', s.stroke, true)}</label>
         <label>${esc(T.width)}<input id="miWidth" type="number" min="0" max="200" step="0.1" value="${s.width ?? ''}"></label>
@@ -603,7 +657,7 @@
         <label>${esc(T.opacity)}<input id="miOpacity" type="range" min="0.05" max="1" step="0.05" value="${s.opacity ?? 1}"></label>
         ${g !== 'line' || ['mountains', 'hills', 'forest'].includes(f.type) ? `<label>${esc(T.symSize)}<input id="miSize" type="number" min="1" max="1000" value="${s.size ?? ''}"></label>` : ''}
         ${g === 'polygon' && ['mountains', 'hills', 'forest', 'swamp', 'desert'].includes(f.type) ? `<label>${esc(T.density)}<input id="miDensity" type="range" min="0.3" max="3" step="0.1" value="${s.density ?? 1}"></label>` : ''}
-        ${g === 'line' || g === 'polygon' ? `<label class="chk"><input type="checkbox" id="miSmooth" ${s.smooth ? 'checked' : ''}> ${esc(T.smooth)}</label>` : ''}
+        ${g === 'line' || g === 'polygon' ? `<label class="chk"><input type="checkbox" id="miSmooth" ${s.smooth ? 'checked' : ''}> ${esc(T.smooth)}</label>` : ''}`}
       </div>
       <div class="me-row"><button id="miFront">⇡ ${esc(T.front)}</button><button id="miBack">⇣ ${esc(T.back)}</button><button id="meBig">＋</button><button id="meSmall">－</button><button id="miReset">${esc(T.reset)}</button><button id="meDelSel" class="danger">🗑 ${esc(T.delete)}</button></div>
       <p class="dim small">id: ${esc(f.id)}</p>`;
@@ -620,6 +674,9 @@
       on('meFit', 'onclick', () => app.fit());
       box.querySelectorAll('details[data-sec]').forEach(d => d.ontoggle = () => { openSec[d.dataset.sec] = d.open; try { localStorage.setItem('iam.mapSec.v1', JSON.stringify(openSec)); } catch { } });
       box.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+      box.querySelectorAll('[data-asset]').forEach(b => b.onclick = () => { st.asset = b.dataset.asset; setTool('draw', 'image'); });
+      box.querySelectorAll('[data-adel]').forEach(b => b.onclick = () => { if (m.features.some(f => f.asset === b.dataset.adel)) { app.toast(L().assetUsed); return; } if (st.asset === b.dataset.adel) st.asset = null; commit([{ op: 'removeAsset', id: b.dataset.adel }]); });
+      on('meUpload', 'onchange', e => { const f = e.target.files[0]; e.target.value = ''; uploadAsset(f); });
       box.querySelectorAll('[data-type]').forEach(b => b.onclick = () => setTool('draw', b.dataset.type));
       box.querySelectorAll('[data-geom]').forEach(b => b.onclick = () => { st.geom[st.drawType] = b.dataset.geom; st.draft = null; render(); });
       box.querySelectorAll('[data-lvis]').forEach(c => c.onchange = () => { const ly = c.dataset.lvis; saveMeta(m, { layers: { [ly]: { visible: c.checked, locked: !!m.layers[ly].locked } } }); });
@@ -635,6 +692,8 @@
       on('miPlace', 'onchange', e => upd({ placeId: e.target.value || null }));
       on('miText', 'onchange', e => upd({ label: e.target.value.trim() ? { text: e.target.value.trim() } : (f.type === 'label' ? { text: f.label.text } : null) }));
       const num = (id, k, wrap) => on(id, 'onchange', e => { const v = e.target.value === '' ? null : +e.target.value; upd(wrap === 'label' ? { label: { [k]: v } } : { style: { [k]: v } }); });
+      num('miRot', 'rotation');
+      on('miAsset', 'onchange', e => upd({ asset: e.target.value }));
       num('miLSize', 'size', 'label'); num('miAngle', 'angle', 'label'); num('miWidth', 'width'); num('miSize', 'size'); num('miDensity', 'density'); num('miOpacity', 'opacity');
       on('miAlign', 'onchange', e => upd({ label: { align: e.target.value || null } }));
       on('miItalic', 'onchange', e => upd({ label: { italic: e.target.checked } }));

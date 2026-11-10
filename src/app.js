@@ -1895,7 +1895,10 @@
     $('#tabWorld').classList.toggle('active', state.mode === 'world');
     $('#tabDraw').classList.toggle('active', state.mode === 'draw');
     $('#tabDraw').hidden = !MAPS || !!state.world.builtin;
-    $('#tabDraw').textContent = '✎ ' + t('tabDraw');
+    $('#tabDraw').textContent = t('tabDraw');
+    const curTab = { view: 'tabView', edit: 'tabEdit', draw: 'tabDraw', story: 'tabStory', chars: 'tabChars', world: 'tabWorld', settings: 'tabSettings' }[state.mode] || 'tabView';
+    $('#btnModes').innerHTML = `<span class="mi mi-${curTab}"></span>${esc(t(curTab))} <span class="dim">▾</span>`;
+    $('#btnModes').title = t('menu');
     $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
     const guest = isGuest(), si = srvInfo();
     $('#tabEdit').hidden = guest;
@@ -1977,7 +1980,8 @@
   }
   $('#btnNewTl').addEventListener('click', newTimelineDialog);
   $('#btnFile').addEventListener('click', e => { e.stopPropagation(); $('#fileMenu').hidden = !$('#fileMenu').hidden; });
-  document.addEventListener('click', () => { $('#fileMenu').hidden = true; });
+  document.addEventListener('click', () => { $('#fileMenu').hidden = true; $('#modeMenu').hidden = true; $('#btnModes').classList.remove('open'); });
+  $('#btnModes').addEventListener('click', e => { e.stopPropagation(); $('#fileMenu').hidden = true; const m = $('#modeMenu'); m.hidden = !m.hidden; $('#btnModes').classList.toggle('open', !m.hidden); });
   $('#btnDupTl').addEventListener('click', duplicateTimeline);
   $('#btnDelTl').addEventListener('click', () => {
     if (state.tl.readonly || !confirm(t('confirmDeleteTl', state.tl.name))) return;

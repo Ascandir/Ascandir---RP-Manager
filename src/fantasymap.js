@@ -13,7 +13,7 @@
   const FORMAT = 'ascandir-map';
   const VERSION = 1;
   const LAYERS = ['terrain', 'water', 'vegetation', 'routes', 'borders', 'places', 'labels', 'decor'];
-  const LIMITS = { features: 20000, pointsPerFeature: 5000, pointsPerMap: 250000, batch: 500, text: 200, name: 100, meta: 2000, query: 500 };
+  const LIMITS = { assets: 200, assetDataUrl: 3000000, features: 20000, pointsPerFeature: 5000, pointsPerMap: 250000, batch: 500, text: 200, name: 100, meta: 2000, query: 500 };
   const DEFAULT_SIZE = { width: 2300, height: 1700 }; // = Koordinatensystem der Fantasy-Welten in der Karte
 
   // Typen: Standard-Ebene und erlaubte Geometrien
@@ -45,7 +45,8 @@
     ship: { layer: 'decor', geoms: ['point'] },
     serpent: { layer: 'decor', geoms: ['point'] },
     cartouche: { layer: 'decor', geoms: ['point'] },
-    symbol: { layer: 'decor', geoms: ['point', 'group'] }
+    symbol: { layer: 'decor', geoms: ['point', 'group'] },
+    image: { layer: 'decor', geoms: ['point'] } // eigenes Bild/Asset (siehe map.assets)
   };
   const SYMBOLS = ['mountain', 'hill', 'tree', 'pine', 'tuft', 'dune', 'city', 'town', 'village', 'fortress', 'tower', 'ruin', 'compass', 'ship', 'serpent', 'marker', 'star', 'cave', 'bridge'];
   const DASHES = { solid: [], dashed: [6, 4], dotted: [1, 3], dashdot: [8, 3, 1, 3], long: [12, 6] };
@@ -198,6 +199,7 @@
     let pad = f.geometry.type === 'polygon' ? (st.width || 0) : Math.max(st.size || 0, st.width || 0) / 2 + 2;
     if (f.type === 'label' && f.label) { const w = (f.label.text || '').length * (f.label.size || 24) * 0.55; pad = Math.max(pad, w / 2, (f.label.size || 24)); }
     if (f.type === 'cartouche') pad = Math.max(pad, 160);
+    if (f.type === 'image') { const s = imageSize(f, map), c = f.geometry.coordinates, r = (st.rotation || 0) * Math.PI / 180, hw = (Math.abs(Math.cos(r)) * s.w + Math.abs(Math.sin(r)) * s.h) / 2, hh = (Math.abs(Math.sin(r)) * s.w + Math.abs(Math.cos(r)) * s.h) / 2; return [c[0] - hw, c[1] - hh, c[0] + hw, c[1] + hh]; }
     return [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad];
   }
   const centerOf = b => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
@@ -219,7 +221,7 @@
   function featureDistance(f, x, y, map) {
     const g = f.geometry, st = styleOf(f, map);
     if (g.type === 'point') {
-      if (f.type === 'label' || f.type === 'cartouche') { const b = featureBBox(f, map); return x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3] ? 0 : Math.hypot(x - g.coordinates[0], y - g.coordinates[1]); }
+      if (f.type === 'label' || f.type === 'cartouche' || f.type === 'image') { const b = featureBBox(f, map); return x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3] ? 0 : Math.hypot(x - g.coordinates[0], y - g.coordinates[1]); }
       return Math.max(0, Math.hypot(x - g.coordinates[0], y - g.coordinates[1]) - (st.size || 10) / 2);
     }
     if (g.type === 'group') return Math.max(0, Math.min(...g.coordinates.map(q => Math.hypot(x - q[0], y - q[1]))) - (st.size || 10) / 2);
@@ -248,7 +250,7 @@
     return Object.assign({}, base, pr.types[f.type] || {}, (map && map.palette && map.palette[f.type]) || {}, f.style || {});
   }
   const STYLE_KEYS = {
-    fill: v => v, stroke: v => v, width: v => v, dash: v => v, opacity: v => v, size: v => v, symbol: v => v, density: v => v, smooth: v => v, coast: v => v
+    fill: v => v, stroke: v => v, width: v => v, dash: v => v, opacity: v => v, size: v => v, symbol: v => v, density: v => v, smooth: v => v, coast: v => v, rotation: v => v
   };
   function normStyle(s, p) {
     if (s == null) return {};
@@ -266,6 +268,7 @@
       else if (k === 'dash') { if (!(v in DASHES)) fail(`dash: ${Object.keys(DASHES).join(', ')}`, q); o[k] = v; }
       else if (k === 'symbol') { if (!SYMBOLS.includes(v)) fail(`symbol: ${SYMBOLS.join(', ')}`, q); o[k] = v; }
       else if (k === 'smooth' || k === 'coast') o[k] = !!v;
+      else if (k === 'rotation') o[k] = r2(num(v, -360, 360, q));
     }
     return o;
   }
@@ -292,6 +295,21 @@
   }
   const merge = (a, b) => { const o = Object.assign({}, a || {}); for (const [k, v] of Object.entries(b || {})) { if (v === null) delete o[k]; else o[k] = v; } return o; };
 
+  // ---------------------------------------------------------------- Assets (eigene Bilder, z.B. per MCP hochgeladen)
+  const ASSET_SRC_RE = /^images\/[A-Za-z0-9_-]{1,80}\.(png|jpg|webp|gif)$/;
+  const ASSET_DATA_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+  function normAsset(a, p, existingIds) {
+    if (!isObj(a)) fail('Asset muss ein Objekt sein', p);
+    let id = a.id;
+    if (id != null) { if (typeof id !== 'string' || !ID_RE.test(id)) fail('id: 1–48 Zeichen aus A–Z, a–z, 0–9, _ und -', p + '.id'); if (existingIds && existingIds.has(id)) fail(`Asset-id "${id}" ist bereits vergeben`, p + '.id', 409); }
+    else id = newId('a');
+    const src = String(a.src || '');
+    if (!(ASSET_SRC_RE.test(src) || (src.length <= LIMITS.assetDataUrl && ASSET_DATA_RE.test(src)))) fail('src: gespeichertes Bild (images/…) oder data:image/png|jpeg|webp|gif;base64', p + '.src');
+    return { id, name: str(a.name || 'Bild', LIMITS.name, p + '.name', false), src, w: Math.round(num(a.w, 1, 20000, p + '.w')), h: Math.round(num(a.h, 1, 20000, p + '.h')) };
+  }
+  const assetOf = (map, id) => (map && map.assets || []).find(a => a.id === id) || null;
+  function imageSize(f, map) { const a = assetOf(map, f.asset), st = styleOf(f, map); if (!a) return { w: st.size || 40, h: st.size || 40 }; const w = st.size || Math.min(a.w, 300); return { w, h: w * a.h / a.w }; }
+
   // ---------------------------------------------------------------- Objekte
   function normFeature(input, map, p, existingIds) {
     if (!isObj(input)) fail('Objekt erwartet', p);
@@ -309,6 +327,10 @@
     if (input.placeId != null) { if (typeof input.placeId !== 'string' || input.placeId.length > 80) fail('placeId ungültig', p + '.placeId'); f.placeId = input.placeId; }
     if (input.meta != null) { if (!isObj(input.meta) || JSON.stringify(input.meta).length > LIMITS.meta) fail(`meta: Objekt, max. ${LIMITS.meta} Zeichen`, p + '.meta'); f.meta = clone(input.meta); }
     if (type === 'label' && !(f.label && f.label.text)) fail('Beschriftung braucht label.text', p + '.label');
+    if (type === 'image') {
+      if (typeof input.asset !== 'string' || !assetOf(map, input.asset)) fail(`asset: id eines Bildes aus map.assets erwartet${(map.assets || []).length ? ' (vorhanden: ' + map.assets.slice(0, 20).map(a => a.id).join(', ') + ')' : ' – zuerst ein Bild hochladen (upload_map_asset)'}`, p + '.asset');
+      f.asset = input.asset;
+    }
     return f;
   }
 
@@ -323,7 +345,7 @@
       height: o.height ? Math.round(num(o.height, 100, 50000, 'height')) : DEFAULT_SIZE.height,
       style: PRESETS[o.style] ? o.style : 'parchment', palette: {}, border: o.border !== false, primary: !!o.primary,
       layers: Object.fromEntries(LAYERS.map(l => [l, { visible: true }])),
-      created: now, updated: now, rev: 1, features: []
+      created: now, updated: now, rev: 1, assets: [], features: []
     };
     if (o.background) m.background = color(o.background, 'background');
     return m;
@@ -363,6 +385,12 @@
     if (m0.background) m.background = color(m0.background, 'background');
     for (const l of LAYERS) m.layers[l] = { visible: !(m0.layers && m0.layers[l] && m0.layers[l].visible === false), locked: !!(m0.layers && m0.layers[l] && m0.layers[l].locked) };
     if (isObj(m0.palette)) for (const [k, v] of Object.entries(m0.palette)) { if (!TYPES[k]) fail(`palette: unbekannter Typ "${k}"`, 'palette'); m.palette[k] = normStyle(v, 'palette.' + k); }
+    m.assets = [];
+    if (m0.assets != null) {
+      if (!Array.isArray(m0.assets)) fail('assets muss eine Liste sein', 'assets');
+      if (m0.assets.length > LIMITS.assets) fail(`zu viele Bilder (max. ${LIMITS.assets})`, 'assets');
+      const aids = new Set(); m0.assets.forEach((a, i) => { const n = normAsset(a, `assets[${i}]`, aids); aids.add(n.id); m.assets.push(n); });
+    }
     const feats = m0.features || [];
     if (!Array.isArray(feats)) fail('features muss eine Liste sein', 'features');
     if (feats.length > LIMITS.features) fail(`zu viele Objekte (max. ${LIMITS.features})`, 'features');
@@ -416,7 +444,16 @@
       } else if (o.op === 'delete') {
         const idx = byId.get(o.id); if (idx == null || !m.features[idx]) fail(`Objekt "${o.id}" nicht gefunden`, p + '.id', 404);
         m.features[idx] = null; byId.delete(o.id); ids.delete(o.id); res.deleted.push(o.id);
-      } else fail('op muss "add", "update" oder "delete" sein', p + '.op');
+      } else if (o.op === 'addAsset') {
+        m.assets = m.assets || [];
+        if (m.assets.length >= LIMITS.assets) fail(`zu viele Bilder (max. ${LIMITS.assets})`, p, 413);
+        const a = normAsset(o.asset, p + '.asset', new Set(m.assets.map(x => x.id))); m.assets.push(a); (res.assetsAdded = res.assetsAdded || []).push(a.id);
+      } else if (o.op === 'removeAsset') {
+        if (!assetOf(m, o.id)) fail(`Bild "${o.id}" nicht gefunden`, p + '.id', 404);
+        const users = m.features.filter(f => f && f.asset === o.id).map(f => f.id);
+        if (users.length) fail(`Bild "${o.id}" wird noch verwendet von: ${users.slice(0, 10).join(', ')}`, p + '.id', 409);
+        m.assets = m.assets.filter(a => a.id !== o.id); (res.assetsRemoved = res.assetsRemoved || []).push(o.id);
+      } else fail('op muss "add", "update", "delete", "addAsset" oder "removeAsset" sein', p + '.op');
     });
     m.features = m.features.filter(Boolean);
     let pts = 0; for (const f of m.features) pts += pointCount(f.geometry);
@@ -454,6 +491,7 @@
     }
     if (o.style !== undefined) { if (o.style === null) delete f.style; else { f.style = merge(f.style, normStyle(o.style, p + '.style')); if (!Object.keys(f.style).length) delete f.style; } }
     if (o.label !== undefined) { if (o.label === null) delete f.label; else { f.label = merge(f.label, normLabel(o.label, p + '.label')); if (!Object.keys(f.label).length) delete f.label; } }
+    if (o.asset !== undefined) f.asset = o.asset;
     if (o.name !== undefined) { if (o.name === null || o.name === '') delete f.name; else f.name = str(o.name, LIMITS.name, p + '.name'); }
     if (o.placeId !== undefined) { if (o.placeId === null || o.placeId === '') delete f.placeId; else { if (typeof o.placeId !== 'string' || o.placeId.length > 80) fail('placeId ungültig', p + '.placeId'); f.placeId = o.placeId; } }
     if (o.meta !== undefined) { if (o.meta === null) delete f.meta; else { if (!isObj(o.meta)) fail('meta muss ein Objekt sein', p + '.meta'); f.meta = merge(f.meta, o.meta); if (JSON.stringify(f.meta).length > LIMITS.meta) fail('meta zu groß', p + '.meta'); } }
@@ -491,7 +529,7 @@
     for (const f of map.features) { byLayer[f.layer] = (byLayer[f.layer] || 0) + 1; byType[f.type] = (byType[f.type] || 0) + 1; }
     const labels = map.features.filter(f => (f.label && f.label.text) || f.name).slice(0, 60).map(f => ({ id: f.id, type: f.type, text: (f.label && f.label.text) || f.name }));
     return { id: map.id, name: map.name, world: map.world, timeline: map.timeline, width: map.width, height: map.height, style: map.style, rev: map.rev, updated: map.updated,
-      featureCount: map.features.length, byLayer, byType, labels, layers: map.layers };
+      featureCount: map.features.length, byLayer, byType, labels, layers: map.layers, assets: (map.assets || []).map(a => ({ id: a.id, name: a.name, w: a.w, h: a.h })) };
   }
 
   // ---------------------------------------------------------------- Symbole (Einheitsgröße 1, Mittelpunkt 0/0, y nach unten)
@@ -657,6 +695,13 @@
         const [x, y] = g.coordinates, size = st.size || 24;
         if (f.type === 'label') { pushLabel(prims, f, st, pr, x, y, (f.label && f.label.align) || 'center'); continue; }
         if (f.type === 'cartouche') { pushCartouche(prims, f, st, pr, x, y); continue; }
+        if (f.type === 'image') {
+          const a = assetOf(map, f.asset); if (!a) continue;
+          const s = imageSize(f, map);
+          prims.push({ layer: L, fid, image: a.src, x, y, w: s.w, h: s.h, angle: st.rotation || 0, opacity: op });
+          if (f.label && f.label.text) pushLabel(prims, f, st, pr, x, y + s.h / 2 + 4 + (f.label.size || 16) / 2, f.label.align || 'center');
+          continue;
+        }
         glyph(sym, x, y, size, 0, (hashStr(fid) % 1000) / 1000);
         if (f.type === 'compass') prims.push({ layer: L, fid, text: 'N', x, y: y - size * 0.52, size: size * 0.16, color: stroke || ink, align: 'center', font: 'serif', bold: true, baseline: 'bottom' });
         if (f.label && f.label.text) pushLabel(prims, f, st, pr, x + size * 0.55, y, f.label.align || 'left');
@@ -697,6 +742,11 @@
     const prims = backgroundPrims(map).filter(p => p.layer === '_bg').concat(build(map, opt), backgroundPrims(map).filter(p => p.layer === '_frame'));
     const out = [`<?xml version="1.0" encoding="UTF-8"?>`, `<svg xmlns="http://www.w3.org/2000/svg" width="${map.width}" height="${map.height}" viewBox="0 0 ${map.width} ${map.height}">`, `<title>${xmlEsc(map.name)}</title>`];
     for (const p of prims) {
+      if (p.image != null) {
+        const href = opt.resolveImage ? opt.resolveImage(p.image) : p.image; if (!href) continue;
+        out.push(`<image href="${xmlEsc(href)}" x="${f2(p.x - p.w / 2)}" y="${f2(p.y - p.h / 2)}" width="${f2(p.w)}" height="${f2(p.h)}" preserveAspectRatio="none"${p.opacity != null && p.opacity < 1 ? ` opacity="${f2(p.opacity)}"` : ''}${p.angle ? ` transform="rotate(${f2(p.angle)} ${f2(p.x)} ${f2(p.y)})"` : ''}/>`);
+        continue;
+      }
       if (p.text != null) {
         const anchor = p.align === 'left' ? 'start' : p.align === 'right' ? 'end' : 'middle';
         const fam = FONTS[p.font] || FONTS.serif;
@@ -721,8 +771,14 @@
 
   // ---------------------------------------------------------------- Canvas-Zeichnung (Browser)
   // ctx muss bereits in Weltkoordinaten transformiert sein; prims einmal mit build() erzeugen und wiederverwenden
-  function drawPrims(ctx, prims, cache) {
+  // loadImage(src) -> geladenes Bild oder null (Aufrufer lädt nach und zeichnet neu)
+  function drawPrims(ctx, prims, cache, loadImage) {
     for (const p of prims) {
+      if (p.image != null) {
+        const im = loadImage && loadImage(p.image); if (!im) continue;
+        ctx.save(); ctx.globalAlpha = p.opacity == null ? 1 : p.opacity; ctx.translate(p.x, p.y); if (p.angle) ctx.rotate(p.angle * Math.PI / 180);
+        ctx.drawImage(im, -p.w / 2, -p.h / 2, p.w, p.h); ctx.restore(); continue;
+      }
       if (p.text != null) {
         ctx.save(); ctx.translate(p.x, p.y); if (p.angle) ctx.rotate(p.angle * Math.PI / 180);
         ctx.font = `${p.italic ? 'italic ' : ''}${p.bold ? 'bold ' : ''}${p.size}px ${FONTS[p.font] || FONTS.serif}`;
@@ -747,7 +803,7 @@
 
   const API = {
     FORMAT, VERSION, LAYERS, TYPES, SYMBOLS, DASHES, FONTS, PRESETS, LIMITS, DEFAULT_SIZE, MapError,
-    newId, createMap, normalizeMap, migrate, normMeta, normFeature, normStyle, normLabel, applyOps, query, brief, summarize,
+    newId, createMap, normAsset, assetOf, normalizeMap, migrate, normMeta, normFeature, normStyle, normLabel, applyOps, query, brief, summarize,
     styleOf, featureBBox, featureDistance, geomBBox, pointInPolygon, simplify, mapPoints, build, backgroundPrims, toSVG, drawPrims, polyArea
   };
   root.IAM_FMAP = API;

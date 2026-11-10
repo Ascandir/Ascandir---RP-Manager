@@ -522,3 +522,30 @@ table.storage-table td.ind { padding-left: 22px; }
 .form-grid > label:not(.chk) > input:not([type=checkbox]):not([type=color]), .form-grid > label > select { color: var(--text); width: 100%; }
 .form-grid .row, #mapedit .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .form-grid input[type=color] { width: 38px; height: 26px; padding: 1px; }
+/* Bereichsmenü oben rechts */
+#btnModes { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; }
+#modeMenuWrap .menu-list { left: auto; right: 0; min-width: 210px; }
+#modeMenu > button { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
+#topbar #modeMenu > button.active { background: var(--accent) !important; color: #fff6e6 !important; border-color: var(--accent) !important; }
+body[data-theme="scifi"] #topbar #modeMenu > button.active { color: #1a1205 !important; }
+#modeMenu .menu-sep { height: 1px; background: var(--line); margin: 4px 2px; }
+#modeMenu .lang-switch { align-self: flex-start; margin: 2px 6px 4px; }
+#topbar #modeMenu .lang-switch button { background: transparent !important; color: var(--text) !important; }
+#topbar #modeMenu .lang-switch button.active { background: var(--accent) !important; color: #fff6e6 !important; }
+.mi::before, #modeMenu > button::before { display: inline-block; width: 1.3em; text-align: center; }
+#modeMenu > button[hidden] { display: none; }
+#tabView::before, .mi-tabView::before { content: "🗺"; }
+#tabEdit::before, .mi-tabEdit::before { content: "🛠"; }
+#tabDraw::before, .mi-tabDraw::before { content: "✎"; }
+#tabStory::before, .mi-tabStory::before { content: "📜"; }
+#tabChars::before, .mi-tabChars::before { content: "👤"; }
+#tabWorld::before, .mi-tabWorld::before { content: "🌍"; }
+#tabSettings::before, .mi-tabSettings::before { content: "⚙"; }
+/* eigene Bilder im Karteneditor */
+#mapedit .me-asset-w { position: relative; display: block; }
+#mapedit .me-asset-w .me-sym { width: 100%; }
+#mapedit .me-adel { position: absolute; top: 1px; right: 1px; padding: 0 5px; line-height: 16px; min-height: 0; font-size: 12px; opacity: .7; }
+#mapedit .me-adel:hover { opacity: 1; color: var(--danger); }
+#mapedit .me-upload { display: inline-block; margin-top: 6px; cursor: pointer; }
+#mapedit .me-upload .btn { display: inline-block; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; background: var(--panel2); }
+#mapedit .me-upload .btn:hover { border-color: var(--accent); }

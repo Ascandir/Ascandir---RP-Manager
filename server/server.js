@@ -485,23 +485,78 @@ function charText(t, c, lang) {
 // Bilder für Charaktere: Download (URL) oder Base64 -> Datei in DATA_DIR/images, ausgeliefert unter /images/<datei>
 const IMG_DIR = path.join(DATA_DIR, 'images');
 const IMG_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
-async function storeImage(b) {
-  let buf, type;
+// Bildtyp und -größe am Inhalt erkennen (nicht am angegebenen Typ) – so landen nur echte PNG/JPEG/WebP/GIF im Datenordner
+function sniffImage(buf) {
+  try {
+    if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) return { type: 'image/png', w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+    if (buf.length > 10 && buf.toString('ascii', 0, 4) === 'GIF8') return { type: 'image/gif', w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
+    if (buf.length > 30 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') {
+      const k = buf.toString('ascii', 12, 16);
+      if (k === 'VP8X') return { type: 'image/webp', w: 1 + buf.readUIntLE(24, 3), h: 1 + buf.readUIntLE(27, 3) };
+      if (k === 'VP8 ') return { type: 'image/webp', w: buf.readUInt16LE(26) & 0x3fff, h: buf.readUInt16LE(28) & 0x3fff };
+      if (k === 'VP8L') { const b = buf.readUInt32LE(21); return { type: 'image/webp', w: (b & 0x3fff) + 1, h: ((b >> 14) & 0x3fff) + 1 }; }
+    }
+    if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+      let i = 2;
+      while (i + 9 < buf.length) {
+        if (buf[i] !== 0xff) { i++; continue; }
+        const mk = buf[i + 1], len = buf.readUInt16BE(i + 2);
+        if (mk >= 0xc0 && mk <= 0xcf && mk !== 0xc4 && mk !== 0xc8 && mk !== 0xcc) return { type: 'image/jpeg', w: buf.readUInt16BE(i + 7), h: buf.readUInt16BE(i + 5) };
+        i += 2 + len;
+      }
+      return { type: 'image/jpeg', w: 0, h: 0 };
+    }
+  } catch { }
+  return null;
+}
+// Downloads nur von öffentlichen Adressen (kein Zugriff auf das Heimnetz/Docker-Netz über den Server)
+const dnsP = require('dns').promises, net = require('net');
+function privateIp(ip) {
+  if (net.isIPv6(ip)) {
+    const l = ip.toLowerCase(); if (l.startsWith('::ffff:')) return privateIp(l.slice(7));
+    return l === '::1' || l === '::' || /^f[cd]/.test(l) || /^fe[89ab]/.test(l);
+  }
+  const [a, b] = ip.split('.').map(Number);
+  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+}
+async function safeFetch(u, hops = 0) {
+  let url; try { url = new URL(u); } catch { throw Object.assign(new Error('ungültige URL'), { code: 400 }); }
+  if (!/^https?:$/.test(url.protocol)) throw Object.assign(new Error('url must start with http(s)://'), { code: 400 });
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  const addrs = net.isIP(host) ? [host] : (await dnsP.lookup(host, { all: true }).catch(() => [])).map(a => a.address);
+  if (!addrs.length) throw Object.assign(new Error('Adresse nicht gefunden: ' + host), { code: 400 });
+  if (addrs.some(privateIp)) throw Object.assign(new Error('Bilder aus dem lokalen Netz können nicht geladen werden – bitte öffentliche URL oder Base64 verwenden'), { code: 400 });
+  const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(20000) });
+  if (r.status >= 300 && r.status < 400 && r.headers.get('location')) {
+    if (hops >= 4) throw Object.assign(new Error('zu viele Weiterleitungen'), { code: 400 });
+    return safeFetch(new URL(r.headers.get('location'), url).toString(), hops + 1);
+  }
+  return r;
+}
+const IMG_MAX = 10 * 1024 * 1024;
+async function storeImageInfo(b) {
+  let buf;
   if (b.data) {
-    const m = String(b.data).match(/^data:(image\/[a-z+]+);base64,(.*)$/s); type = m ? m[1] : (b.mime || 'image/png');
-    buf = Buffer.from(m ? m[2] : String(b.data), 'base64');
+    const m = String(b.data).match(/^data:[^;,]*;base64,(.*)$/s);
+    buf = Buffer.from((m ? m[1] : String(b.data)).replace(/\s+/g, ''), 'base64');
   } else if (b.url) {
-    if (!/^https?:\/\//i.test(b.url)) throw Object.assign(new Error('url must start with http(s)://'), { code: 400 });
-    let r; try { r = await fetch(b.url, { redirect: 'follow', signal: AbortSignal.timeout(20000) }); } catch (e) { throw Object.assign(new Error('image download failed: ' + e.message), { code: 400 }); }
+    let r; try { r = await safeFetch(String(b.url)); } catch (e) { throw Object.assign(new Error('image download failed: ' + e.message), { code: 400 }); }
     if (!r.ok) throw Object.assign(new Error('image download failed: HTTP ' + r.status), { code: 400 });
-    type = (r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (+r.headers.get('content-length') > IMG_MAX) throw Object.assign(new Error('image larger than 10 MB'), { code: 400 });
     buf = Buffer.from(await r.arrayBuffer());
   } else throw Object.assign(new Error('url or data required'), { code: 400 });
-  if (!IMG_EXT[type]) throw Object.assign(new Error('not a supported image (jpeg, png, webp, gif): ' + (type || 'unknown')), { code: 400 });
-  if (buf.length > 10 * 1024 * 1024) throw Object.assign(new Error('image larger than 10 MB'), { code: 400 });
+  if (buf.length > IMG_MAX) throw Object.assign(new Error('image larger than 10 MB'), { code: 400 });
+  const info = sniffImage(buf);
+  if (!info) throw Object.assign(new Error('not a supported image (png, jpeg, webp, gif)'), { code: 400 });
   fs.mkdirSync(IMG_DIR, { recursive: true });
-  const name = uid('img') + IMG_EXT[type]; fs.writeFileSync(path.join(IMG_DIR, name), buf);
-  return 'images/' + name;
+  const name = uid('img') + IMG_EXT[info.type]; fs.writeFileSync(path.join(IMG_DIR, name), buf);
+  return { src: 'images/' + name, type: info.type, w: info.w || 512, h: info.h || 512, bytes: buf.length };
+}
+const storeImage = async b => (await storeImageInfo(b)).src;
+// Bilder für den SVG-Export einbetten (damit die Datei auch ohne Server vollständig ist)
+function imageDataUri(src) {
+  const m = /^images\/([A-Za-z0-9_-]+\.(png|jpg|webp|gif))$/.exec(src || ''); if (!m) return /^data:image\//.test(src || '') ? src : null;
+  try { const buf = fs.readFileSync(path.join(IMG_DIR, m[1])); const info = sniffImage(buf); return info ? `data:${info.type};base64,${buf.toString('base64')}` : null; } catch { return null; }
 }
 function grantCreator(who, tlId) {
   if (!who || who.admin || !tlId || !who.id || who.id === 'guest') return;
@@ -627,7 +682,7 @@ function mapRead(req, res, url, parts, lang) {
     return send(res, 200, { map: m.id, rev: m.rev, total: r.total, truncated: r.truncated, features: geo ? r.features : r.features.map(f => FMAP.brief(f, m)) });
   }
   if (sub === 'svg') {
-    const svg = FMAP.toSVG(m);
+    const svg = FMAP.toSVG(m, { resolveImage: imageDataUri });
     return send(res, 200, svg, 'image/svg+xml; charset=utf-8', q.get('download') ? { 'Content-Disposition': `attachment; filename="${slug(m.name)}.svg"` } : {});
   }
   return send(res, 404, { error: 'unknown endpoint' });
@@ -660,6 +715,27 @@ async function mapWrite(req, res, url, parts, b, lang) {
     const n = FMAP.normMeta(m, b); n.rev = m.rev + 1; n.updated = new Date().toISOString();
     if (n.primary && !n.timeline && !m.primary) for (const o of listJson('maps').filter(x => x.world === n.world && !x.timeline && x.primary && x.id !== n.id)) { o.primary = false; saveMapFile(o); }
     saveMapFile(n); return send(res, 200, { ok: true, id: n.id, rev: n.rev });
+  }
+  if (sub === 'asset' && req.method === 'POST') { // Bild hochladen, als Asset ablegen und optional gleich platzieren
+    const name = String(b.name || '').trim() || 'Bild';
+    const pl = b.place && typeof b.place === 'object' ? b.place : null;
+    const img = await storeImageInfo(b); VIEWER = who;
+    const cur = FMAP.normalizeMap(resolveMap({ map: m.id }, lang, who)); // nach dem Download neu lesen
+    const assetId = b.id || FMAP.newId('a'), ops = [{ op: 'addAsset', asset: { id: assetId, name, src: img.src, w: img.w, h: img.h } }];
+    if (pl) {
+      const f = { type: 'image', asset: assetId, layer: pl.layer, geometry: { type: 'point', coordinates: [pl.x, pl.y] }, style: {} };
+      if (pl.width != null) f.style.size = pl.width; if (pl.rotation != null) f.style.rotation = pl.rotation; if (pl.opacity != null) f.style.opacity = pl.opacity;
+      if (pl.label) f.label = pl.label; if (pl.name) f.name = pl.name; if (pl.placeId) f.placeId = pl.placeId;
+      ops.push({ op: 'add', feature: f });
+    }
+    let r; try { r = FMAP.applyOps(cur, ops); } catch (e) { try { fs.unlinkSync(path.join(DATA_DIR, img.src)); } catch { } throw e; }
+    saveMapFile(r.map);
+    return send(res, 201, { ok: true, map: m.id, rev: r.map.rev, asset: { id: assetId, name, src: img.src, w: img.w, h: img.h }, featureId: r.result.added[0] || null,
+      hint: 'Platzieren mit add_map_features: {type:"image", asset:"' + assetId + '", geometry:{type:"point", coordinates:[x,y]}, style:{size: Breite}}' });
+  }
+  if (sub === 'asset' && req.method === 'DELETE') {
+    const r = FMAP.applyOps(m, [{ op: 'removeAsset', id: String(b.id || '') }]);
+    saveMapFile(r.map); return send(res, 200, { ok: true, map: m.id, rev: r.map.rev, removed: b.id });
   }
   if (sub === 'features') {
     let ops;
@@ -698,6 +774,23 @@ async function apiWrite(req, res, url, parts) {
   const tlName = b.timeline || q.get('timeline');
   const ep = parts.join('/');
   if (parts[0] === 'map') return mapWrite(req, res, url, parts, b, lang);
+  if (ep === 'image' && req.method === 'POST') { // nur speichern (z.B. Upload aus dem Karteneditor) – liefert Pfad und Größe
+    const img = await storeImageInfo(b); return send(res, 201, Object.assign({ ok: true }, img));
+  }
+  if (ep === 'world/image' && (req.method === 'POST' || req.method === 'DELETE')) { // Hintergrundbild einer eigenen Welt
+    const w = findWorldQ(b.world, lang); if (!w) return send(res, 404, { error: 'world not found' });
+    if (w.builtin) return send(res, 409, { error: 'Die eingebaute Star-Wars-Galaxie hat kein eigenes Weltbild' });
+    if (!canAdmin(VIEWER, w.id, null)) return send(res, 403, { error: 'Weltbild ändern dürfen nur Admins der Welt / world admins only' });
+    const wf = listJson('worlds').find(x => x.id === w.id), file = safeFile('worlds', wf._file);
+    const saveWorld = o => { const c = Object.assign({}, o); delete c._file; const tmp = file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(c, null, 2), 'utf8'); fs.renameSync(tmp, file); };
+    if (req.method === 'DELETE') { delete wf.mapImage; saveWorld(wf); return send(res, 200, { ok: true, removed: true }); }
+    const img = await storeImageInfo(b); VIEWER = viewer;
+    const fresh = listJson('worlds').find(x => x.id === w.id) || wf;
+    const box = fresh.type === 'fantasy' ? { w: 2300, h: 1700 } : { w: 2300, h: 1900 }, sc = Math.min(box.w / img.w, box.h / img.h);
+    const op = b.opacity != null ? Math.max(0.05, Math.min(1, +b.opacity || 1)) : 1;
+    fresh.mapImage = { src: img.src, w: Math.round(img.w * sc), h: Math.round(img.h * sc), x: Math.round((box.w - img.w * sc) / 2), y: Math.round((box.h - img.h * sc) / 2), opacity: op };
+    saveWorld(fresh); return send(res, 201, { ok: true, world: w.id, image: fresh.mapImage });
+  }
 
   if (ep === 'timeline/copy' && req.method === 'POST') {
     const src = findTimeline(b.from || 'canon', lang); if (!src) return send(res, 404, { error: 'source timeline not found' });
@@ -1013,6 +1106,9 @@ async function apiV1(req, res, url) {
       'GET /api/v1/map?map=&world=&timeline=&detail=full&format=text': 'Karte: Überblick bzw. komplett',
       'GET /api/v1/map/features?map=&ids=&bbox=x1,y1,x2,y2&type=&layer=&q=&near=x,y,r&geometry=1&limit=': 'Kartenobjekte suchen',
       'GET /api/v1/map/svg?map=&download=1': 'Karte als SVG',
+      'POST /api/v1/map/asset | DELETE /api/v1/map/asset': 'Bild als Karten-Asset hochladen (name, url oder data, place) / entfernen (id)',
+      'POST /api/v1/world/image | DELETE /api/v1/world/image': 'Weltbild setzen (world, url oder data, opacity) / entfernen',
+      'POST /api/v1/image': 'Bild nur speichern (url oder data) → src, w, h',
       'POST /api/v1/map | PATCH /api/v1/map': 'Karte anlegen (world, timeline, name, width, height, style) / Metadaten ändern (expectRev)',
       'POST /api/v1/map/features | PATCH /api/v1/map/features | DELETE /api/v1/map/features': 'Objekte hinzufügen (features oder ops, atomar) / ändern (updates per id) / löschen (ids)'
     },
@@ -1126,10 +1222,10 @@ const ITEM = { type: 'object', properties: { name: { type: 'string' }, newName: 
 const REL = { type: 'object', properties: { name: { type: 'string' }, relation: { type: 'string', description: 'z.B. Schwester, Rivale, Informant' }, kind: { type: 'string', enum: ['ally', 'enemy', 'family', 'contact', 'other'] } }, required: ['name'] };
 const MAPQ = { map: str('Karten-id oder Name (leer = Karte der Zeitlinie bzw. Hauptkarte der Welt)'), world: str('Welt (id oder Name)'), timeline: str('Zeitlinie (Name oder id)') };
 const GEOM = { type: 'object', properties: { type: { type: 'string', enum: ['point', 'line', 'polygon', 'group'] }, coordinates: { type: 'array', items: {}, description: 'point: [x,y] · line/group: [[x,y],…] · polygon: [[[x,y],…]]' }, sizes: { type: 'array', items: { type: 'number' }, description: 'nur group: Größe je Symbol' } }, required: ['type', 'coordinates'] };
-const MSTYLE = { type: 'object', description: 'fill, stroke (#rrggbb/rgba()/none), width, dash (solid|dashed|dotted|dashdot|long), opacity 0–1, size (Symbolgröße), symbol, density, smooth, coast', properties: { fill: { type: 'string' }, stroke: { type: 'string' }, width: { type: 'number' }, dash: { type: 'string', enum: Object.keys(FMAP.DASHES) }, opacity: { type: 'number' }, size: { type: 'number' }, symbol: { type: 'string', enum: FMAP.SYMBOLS }, density: { type: 'number' }, smooth: { type: 'boolean' }, coast: { type: 'boolean' } } };
+const MSTYLE = { type: 'object', description: 'fill, stroke (#rrggbb/rgba()/none), width, dash (solid|dashed|dotted|dashdot|long), opacity 0–1, size (Symbolgröße), symbol, density, smooth, coast, rotation (Grad, für Bilder)', properties: { rotation: { type: 'number' }, fill: { type: 'string' }, stroke: { type: 'string' }, width: { type: 'number' }, dash: { type: 'string', enum: Object.keys(FMAP.DASHES) }, opacity: { type: 'number' }, size: { type: 'number' }, symbol: { type: 'string', enum: FMAP.SYMBOLS }, density: { type: 'number' }, smooth: { type: 'boolean' }, coast: { type: 'boolean' } } };
 const MLABEL = { type: 'object', description: 'Beschriftung', properties: { text: { type: 'string' }, size: { type: 'number' }, color: { type: 'string' }, halo: { type: 'string' }, align: { type: 'string', enum: ['left', 'center', 'right'] }, angle: { type: 'number' }, font: { type: 'string', enum: Object.keys(FMAP.FONTS) }, italic: { type: 'boolean' }, bold: { type: 'boolean' }, caps: { type: 'boolean' }, spacing: { type: 'number' }, dx: { type: 'number' }, dy: { type: 'number' } } };
-const FEATURE = { type: 'object', properties: { id: str('optional eigene id (A–Z, 0–9, _ -)'), type: { type: 'string', enum: Object.keys(FMAP.TYPES) }, layer: { type: 'string', enum: FMAP.LAYERS, description: 'Standard je nach Typ' }, geometry: GEOM, style: MSTYLE, label: MLABEL, name: { type: 'string' }, placeId: str('Ort der Welt (id oder Name)'), meta: { type: 'object' } }, required: ['type', 'geometry'] };
-const UPDATE = { type: 'object', properties: { id: { type: 'string' }, geometry: GEOM, translate: { type: 'array', items: { type: 'number' }, description: '[dx, dy]' }, scale: { description: 'Faktor oder {factor, origin:[x,y]}' }, rotate: { type: 'number' }, style: MSTYLE, label: MLABEL, name: { type: 'string' }, type: { type: 'string', enum: Object.keys(FMAP.TYPES) }, layer: { type: 'string', enum: FMAP.LAYERS }, placeId: { type: 'string' }, meta: { type: 'object' }, order: { type: 'string', enum: ['front', 'back'], description: 'nach vorne/hinten in der Zeichenreihenfolge' } }, required: ['id'] };
+const FEATURE = { type: 'object', properties: { id: str('optional eigene id (A–Z, 0–9, _ -)'), type: { type: 'string', enum: Object.keys(FMAP.TYPES) }, layer: { type: 'string', enum: FMAP.LAYERS, description: 'Standard je nach Typ' }, geometry: GEOM, style: MSTYLE, label: MLABEL, name: { type: 'string' }, placeId: str('Ort der Welt (id oder Name)'), asset: str('nur bei type image: id des hochgeladenen Bildes'), meta: { type: 'object' } }, required: ['type', 'geometry'] };
+const UPDATE = { type: 'object', properties: { id: { type: 'string' }, geometry: GEOM, translate: { type: 'array', items: { type: 'number' }, description: '[dx, dy]' }, scale: { description: 'Faktor oder {factor, origin:[x,y]}' }, rotate: { type: 'number' }, style: MSTYLE, label: MLABEL, name: { type: 'string' }, type: { type: 'string', enum: Object.keys(FMAP.TYPES) }, layer: { type: 'string', enum: FMAP.LAYERS }, placeId: { type: 'string' }, asset: { type: 'string' }, meta: { type: 'object' }, order: { type: 'string', enum: ['front', 'back'], description: 'nach vorne/hinten in der Zeichenreihenfolge' } }, required: ['id'] };
 const MCP_TOOLS = [
   { name: 'list_timelines', title: 'Zeitlinien auflisten', description: 'Alle Welten-Zeitlinien mit ihren Zeitaltern.', ro: true, inputSchema: S({ lang: LG }), run: (a, v) => internalCall('GET', '/api/v1/timelines', a, null, v) },
   { name: 'get_summary', title: 'Lage der Galaxis', description: 'Kurzer Text zum Stand in einem Jahr: Zeitalter, Mächte und ihre Gebiete, optional Eckdaten zu Orten. Ideal als Kontext für Geschichten.', ro: true,
@@ -1235,13 +1331,22 @@ const MCP_TOOLS = [
       layers: { type: 'object', description: '{ebene: {visible: true|false}}' }, palette: { type: 'object', description: '{typ: {fill, stroke, width, …}}; null entfernt' }, expectRev: { type: 'number', description: 'optional: nur ändern, wenn die Karte noch diese rev hat' } })),
     run: a => internalCall('PATCH', '/api/v1/map', {}, a) },
   { name: 'add_map_features', title: 'Kartenobjekte hinzufügen', description: 'Fügt mehrere Objekte in EINEM atomaren Schritt hinzu (alles oder nichts, max. 500). Gibt die neuen ids zurück. Geometrie: point [x,y] · line [[x,y],…] · polygon [[[x,y],…]] (Ring, ohne Wiederholung des Startpunkts) · group [[x,y],…] (mehrere Symbole, z.B. einzelne Gipfel; optional sizes). ' +
-      'Typen: land/island (Küste), lake, river (line, geglättet), mountains (group = Gebirgskette aus Gipfeln, line = Symbole entlang einer Linie, polygon = Fläche), mountain (point), hills, forest, swamp, desert, road, path, border, region, city, town, village, fortress, tower, ruin, label, compass, ship, serpent, cartouche, symbol. ' +
+      'Typen: image (eigenes Bild, braucht asset = id aus upload_map_asset), land/island (Küste), lake, river (line, geglättet), mountains (group = Gebirgskette aus Gipfeln, line = Symbole entlang einer Linie, polygon = Fläche), mountain (point), hills, forest, swamp, desert, road, path, border, region, city, town, village, fortress, tower, ruin, label, compass, ship, serpent, cartouche, symbol. ' +
       'Beispiel Fluss: {type:"river", geometry:{type:"line", coordinates:[[820,410],[900,520],[1010,690]]}, label:{text:"Silberlauf"}}. placeId darf id oder Name eines Ortes der Welt sein.',
     inputSchema: S(Object.assign({}, MAPQ, { features: { type: 'array', items: FEATURE }, expectRev: { type: 'number' } }), ['features']),
     run: a => internalCall('POST', '/api/v1/map/features', {}, a) },
   { name: 'update_map_features', title: 'Kartenobjekte ändern', description: 'Ändert Objekte per id in EINEM atomaren Schritt (max. 500): style/label werden zusammengeführt (null entfernt eine Eigenschaft), geometry ersetzt die Form, translate [dx,dy] verschiebt, scale (Faktor oder {factor, origin:[x,y]}) skaliert, rotate (Grad) dreht, außerdem name, type, layer, placeId, meta. Nicht genannte Objekte bleiben unverändert.',
     inputSchema: S(Object.assign({}, MAPQ, { updates: { type: 'array', items: UPDATE }, expectRev: { type: 'number' } }), ['updates']),
     run: a => internalCall('PATCH', '/api/v1/map/features', {}, a) },
+  { name: 'upload_map_asset', title: 'Bild für Karte hochladen', description: 'Lädt ein Bild (PNG mit Transparenz empfohlen, auch JPEG/WebP/GIF, max. 10 MB) als Asset in die Karte – z.B. eigene Symbole, Wappen, Burgen, Siegel oder Illustrationen. Quelle: öffentliche https-URL oder Base64 (data:image/png;base64,…). Mit place {x, y, width, rotation} wird es gleich platziert. Später erneut platzieren mit add_map_features {type:"image", asset:<id>, geometry:{type:"point", coordinates:[x,y]}, style:{size:<Breite>, rotation}}.',
+    inputSchema: S(Object.assign({}, MAPQ, { name: str('Name des Bildes, z.B. "Wappen von Eldoria"'), url: str('öffentliche https-URL des Bildes'), data: str('alternativ: Base64 oder data:-URL'),
+      place: { type: 'object', description: 'optional sofort platzieren', properties: { x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number', description: 'Breite in Kartenkoordinaten (Höhe ergibt sich aus dem Seitenverhältnis)' }, rotation: { type: 'number' }, opacity: { type: 'number' }, layer: { type: 'string', enum: FMAP.LAYERS }, label: MLABEL, name: { type: 'string' }, placeId: { type: 'string' } }, required: ['x', 'y'] } }), ['name']),
+    run: a => internalCall('POST', '/api/v1/map/asset', {}, a) },
+  { name: 'delete_map_asset', title: 'Kartenbild entfernen', description: 'Entfernt ein hochgeladenes Bild aus der Karte (nur wenn kein Objekt es mehr verwendet).', destructive: true,
+    inputSchema: S(Object.assign({}, MAPQ, { id: str('Asset-id aus get_map (assets)') }), ['id']), run: a => internalCall('DELETE', '/api/v1/map/asset', {}, a) },
+  { name: 'set_world_image', title: 'Weltbild setzen', description: 'Setzt ein Bild (z.B. eine gemalte Kontinentkarte als PNG/JPEG) als Hintergrund einer eigenen Welt; es wird eingepasst. Nur für Admins der Welt. clear=true entfernt das Weltbild.',
+    inputSchema: S({ world: str('Welt (id oder Name)'), url: str('öffentliche https-URL'), data: str('alternativ: Base64 oder data:-URL'), opacity: { type: 'number', description: '0.05–1, Standard 1' }, clear: { type: 'boolean' } }, ['world']),
+    run: a => internalCall(a.clear ? 'DELETE' : 'POST', '/api/v1/world/image', {}, a) },
   { name: 'delete_map_features', title: 'Kartenobjekte löschen', description: 'Löscht die genannten Objekte (nur per id, max. 500, atomar). Unbekannte ids brechen den ganzen Vorgang ab. Ganze Karten werden über den Connector nie gelöscht.', destructive: true,
     inputSchema: S(Object.assign({}, MAPQ, { ids: { type: 'array', items: { type: 'string' } }, expectRev: { type: 'number' } }), ['ids']),
     run: a => internalCall('DELETE', '/api/v1/map/features', {}, a) }
@@ -1254,7 +1359,7 @@ const MCP_INSTRUCTIONS = 'Ascandir RP-Manager: interaktive Karte (Star Wars u. e
   'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
   'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. ' +
-  'Eigene Welten können gezeichnete Vektor-Karten haben (list_maps, get_map, find_map_features lesen; create_map, add_map_features, update_map_features, delete_map_features ändern; export_map für SVG). Objekte werden IMMER per id geändert, nie per Name; vor Änderungen get_map oder find_map_features aufrufen. Mehrere Objekte in einem Aufruf bündeln.';
+  'Eigene Welten können gezeichnete Vektor-Karten haben (list_maps, get_map, find_map_features lesen; create_map, add_map_features, update_map_features, delete_map_features ändern; upload_map_asset lädt eigene Bilder/PNG-Symbole in eine Karte; export_map für SVG). Weltbild (gemalte Karte als Hintergrund) mit set_world_image, Charakterbilder mit add_character_image. Objekte werden IMMER per id geändert, nie per Name; vor Änderungen get_map oder find_map_features aufrufen. Mehrere Objekte in einem Aufruf bündeln.';
 async function handleMcp(req, res, url, tv) {
   // tv = Betrachter aus dem Token (null = Gast). Sichtbar ist nur, was dieser Benutzer sehen darf.
   const viewerOf = () => tv || whoIs({ headers: {} }, null);
