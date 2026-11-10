@@ -88,7 +88,17 @@ Im Reiter *Story* gibt es beliebig viele **Abschnitte**, gruppiert in **Kapitel 
 
 Die Abschnitte werden in der Zeitlinien-Datei unter `"story"` gespeichert.
 
-### Welt (Weltnotizen)
+### Welt: Regeln und Notizen
+
+Der Reiter *Welt* hat zwei Bereiche:
+
+**📜 Regeln** – feste Vorgaben für die Zeitlinie, die **immer gelten und Vorrang haben** (z. B. Erzählstil, Kanon-Vorgaben, Machtsystem, Tabus). Regeln sind nicht an Jahre gebunden, nummeriert, sortierbar (↑/↓) und lassen sich deaktivieren, ohne sie zu löschen. ChatGPT bekommt die aktiven Regeln bei jeder Lageabfrage (`get_summary`) automatisch mitgeliefert und wird angewiesen, sie zu Beginn zu lesen und einzuhalten.
+- **MCP:** `list_rules`, `upsert_rule` (Titel/id, `text`, `active`, Position `after`), `delete_rule` – ändern soll die KI Regeln nur auf deinen ausdrücklichen Wunsch.
+- **REST:** `GET /api/v1/rules`, `POST/DELETE /api/v1/rule`.
+
+**🗒 Notizen** – siehe unten.
+
+#### Weltnotizen
 
 Der Reiter *Welt* beschreibt den **aktuellen Zustand der Welt** – unabhängig von deiner eigenen Story. Drei getrennte Quellen ergänzen sich:
 

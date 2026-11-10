@@ -273,6 +273,8 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
     }
   }
   const st = (tl.story || []).filter(e => e.year <= year).sort(storySortT(tl));
+  const rls = rulesOf(tl).filter(r => r.active !== false);
+  if (rls.length) L.splice(1, 0, (de ? 'WELTREGELN (gelten immer): ' : 'WORLD RULES (always apply): ') + rls.map((r, i) => `${i + 1}. ${r.title}${r.text ? ': ' + String(r.text).replace(/\s*\n\s*/g, ' ') : ''}`).join(' | '));
   const wns = tl.worldNotes || [];
   const wnsNow = wns.filter(n => wnAt(n, year));
   if (wnsNow.length) L.push((de ? `Weltnotizen (${wnsNow.length}): ` : `World notes (${wnsNow.length}): `) + [...new Set(wnsNow.slice().sort(wnSort).map(n => n.category))].join(' · ') + (de ? ' – Details mit list_world_notes' : ' – details via list_world_notes'));
@@ -348,6 +350,15 @@ function storyText(t, lang, list) {
   const chs = chapSorted(t); if (chs.length) out.unshift((de ? 'Kapitel: ' : 'Chapters: ') + chs.map((c, i) => `${i + 1}. ${c.title} [id: ${c.id}]`).join(' · '));
   return out.join('\n\n');
 }
+// ---------------------------------------------------------------- Weltregeln (tl.rules): feste Regeln, die immer gelten
+const rulesOf = t => (t.rules || []).slice().sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
+function rulesText(t, lang, all) {
+  const de = lang !== 'en', list = rulesOf(t).filter(r => all || r.active !== false);
+  if (!list.length) return de ? `Keine Weltregeln in „${t.name}“.` : `No world rules in "${t.name}".`;
+  return (de ? `Weltregeln für „${t.name}“ – gelten immer und haben Vorrang:` : `World rules for "${t.name}" – always apply and take precedence:`) + '\n' +
+    list.map((r, i) => `${i + 1}. ${r.title}${r.active === false ? (de ? ' (deaktiviert)' : ' (disabled)') : ''} [id: ${r.id}]${r.text ? '\n   ' + String(r.text).replace(/\n/g, '\n   ') : ''}`).join('\n');
+}
+function ruleFind(t, b) { const L = t.rules || []; if (b.id) return L.find(x => x.id === b.id) || null; const q = String(b.title || '').toLowerCase().trim(); return q ? L.find(x => x.title.toLowerCase() === q) || null : null; }
 // ---------------------------------------------------------------- Weltnotizen (tl.worldNotes): aktueller Zustand der Welt
 const WN_CATS = ['Galaktische Lage', 'Sith-Imperium', 'Galaktische Republik', 'Planeten & Regionen', 'Organisationen', 'Offene Handlungsstränge', 'Gesicherte Erkenntnisse'];
 const WN_CERT = ['confirmed', 'suspected', 'rumor'];
@@ -562,6 +573,20 @@ async function apiWrite(req, res, url, parts) {
     t.eras.sort((a, c) => a.year - c.year);
     saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, era: { id: e.id, name: e.name, year: e.year, label: fmtYear(e.year, f) } });
   }
+  if (ep === 'rule' && (req.method === 'POST' || req.method === 'PATCH')) {
+    t.rules = t.rules || []; let r = ruleFind(t, b); const created = !r;
+    if (!r) { if (req.method === 'PATCH' || !b.title) return send(res, b.title ? 404 : 400, { error: b.title ? 'rule not found' : 'title required' }); r = { id: uid('rl'), title: String(b.title).trim(), text: '', created: new Date().toISOString() }; t.rules.push(r); rulesOf(t).forEach((x, n) => { x.order = n; }); }
+    if (b.newTitle) r.title = String(b.newTitle);
+    if (b.text !== undefined) r.text = b.append && r.text ? r.text + '\n' + String(b.text) : String(b.text);
+    if (b.active !== undefined) r.active = !!b.active;
+    if (b.after !== undefined) { const L = rulesOf(t).filter(x => x !== r); let i = L.length; if (b.after === 'start') i = 0; else { const k = L.findIndex(x => x.id === b.after || x.title.toLowerCase() === String(b.after).toLowerCase()); if (k >= 0) i = k + 1; } L.splice(i, 0, r); L.forEach((x, n) => { x.order = n; }); }
+    r.updated = new Date().toISOString();
+    saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, rule: { nr: rulesOf(t).indexOf(r) + 1, id: r.id, title: r.title, text: r.text, active: r.active !== false } });
+  }
+  if (ep === 'rule' && req.method === 'DELETE') {
+    const r = ruleFind(t, b); if (!r) return send(res, 404, { error: 'rule not found (id or exact title)' });
+    t.rules = t.rules.filter(x => x !== r); saveTimeline(t); return send(res, 200, { ok: true });
+  }
   if (ep === 'worldnote' && (req.method === 'POST' || req.method === 'PATCH')) {
     t.worldNotes = t.worldNotes || []; const f = yearFmt(t, lang), now = new Date().toISOString();
     let n = wnFind(t, b); const created = !n;
@@ -753,6 +778,8 @@ async function apiV1(req, res, url) {
       'GET /api/v1/state?timeline=&year=&lang=': 'Zeitalter + Fraktionen mit Gebieten im Jahr',
       'GET /api/v1/place?name=&timeline=&year=&lang=': 'Eckdaten und Kontrolle eines Ortes im Jahr',
       'GET /api/v1/search?q=&timeline=': 'Orte suchen',
+      'GET /api/v1/rules?timeline=&all=&format=text': 'Weltregeln lesen',
+      'POST /api/v1/rule | DELETE /api/v1/rule': 'Weltregel anlegen/ändern (title/id, newTitle, text, append, active, after) / löschen',
       'GET /api/v1/worldnotes?timeline=&category=&q=&place=&format=text': 'Weltnotizen lesen',
       'POST /api/v1/worldnote | DELETE /api/v1/worldnote': 'Weltnotiz anlegen/aktualisieren (title/id, category, text, append, certainty, places) / löschen',
       'GET /api/v1/characters?timeline=&q=&faction=&place=&format=text': 'Charaktere auflisten',
@@ -789,6 +816,11 @@ async function apiV1(req, res, url) {
     const t = tl(), y = year(t), o = findPlace(t, q.get('name'));
     if (!o) return send(res, 404, { error: 'place not found' });
     return send(res, 200, Object.assign({ year: y, yearLabel: fmtYear(y, yearFmt(t, lang)) }, placeInfo(t, o, y, lang)));
+  }
+  if (ep === 'rules') {
+    const t = tl(), all = q.get('all') === '1' || q.get('all') === 'true';
+    if (q.get('format') === 'text') return send(res, 200, rulesText(t, lang, all), 'text/plain; charset=utf-8');
+    return send(res, 200, { timeline: t.name, rules: rulesOf(t).filter(r => all || r.active !== false).map((r, i) => ({ nr: i + 1, id: r.id, title: r.title, text: r.text || '', active: r.active !== false })) });
   }
   if (ep === 'worldnotes') {
     const t = tl(), cq = (q.get('category') || '').toLowerCase(), qq = (q.get('q') || '').toLowerCase(), pq = (q.get('place') || '').toLowerCase();
@@ -909,6 +941,13 @@ const MCP_TOOLS = [
   { name: 'reorder_story', title: 'Story sortieren', description: 'Story-Abschnitte in chronologische Reihenfolge bringen: ids in der gewünschten Reihenfolge übergeben (alle oder ein Teil). Sortiert wird nach Jahr und innerhalb eines Jahres nach dieser Reihenfolge. adjustYears=true setzt Abschnitte, die laut Reihenfolge später kommen, aber ein früheres Jahr haben, auf das Jahr ihres Vorgängers.',
     inputSchema: S({ timeline: TL, ids: { type: 'array', items: { type: 'string' }, description: 'Abschnitts-ids in chronologischer Reihenfolge' }, adjustYears: { type: 'boolean' } }, ['timeline', 'ids']), run: a => internalCall('POST', '/api/v1/story/order', {}, a) },
   { name: 'delete_story_entry', title: 'Story-Abschnitt löschen', description: 'Abschnitt per id löschen.', inputSchema: S({ timeline: TL, id: str('id aus list_story') }, ['timeline', 'id']), run: a => internalCall('DELETE', '/api/v1/story', {}, a) },
+  { name: 'list_rules', title: 'Weltregeln lesen', description: 'Feste Regeln der Welt/Zeitlinie, die IMMER gelten und Vorrang haben (z.B. Erzählregeln, Kanon-Vorgaben, Machtsystem). Vor dem Erzählen und vor Änderungen lesen und strikt einhalten.', ro: true,
+    inputSchema: S({ timeline: TL, all: { type: 'boolean', description: 'auch deaktivierte Regeln zeigen' }, lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/rules', { timeline: a.timeline, all: a.all ? '1' : undefined, lang: a.lang, format: 'text' }, null, v) },
+  { name: 'upsert_rule', title: 'Weltregel anlegen/ändern', description: 'Weltregel anlegen oder ändern (per Titel oder id). NUR auf ausdrücklichen Wunsch des Nutzers – Regeln gibt der Nutzer vor. active=false deaktiviert, after = Position (Regel-id/-titel oder "start").',
+    inputSchema: S({ timeline: TL, title: str('Titel (Schlüssel)'), id: str('alternativ: id'), newTitle: str('neuer Titel'), text: str('Regeltext'), append: { type: 'boolean' }, active: { type: 'boolean' }, after: str('Position') }, ['timeline']),
+    run: a => internalCall('POST', '/api/v1/rule', {}, a) },
+  { name: 'delete_rule', title: 'Weltregel löschen', description: 'Weltregel löschen (nur auf ausdrücklichen Wunsch des Nutzers).', inputSchema: S({ timeline: TL, title: str('Titel'), id: str('id') }, ['timeline']), run: a => internalCall('DELETE', '/api/v1/rule', {}, a) },
   { name: 'list_world_notes', title: 'Weltnotizen lesen', description: 'Aktueller Zustand der Welt (unabhängig von der Spieler-Story): Galaktische Lage, Fraktionen, Planeten & Regionen, Organisationen, offene Handlungsstränge, gesicherte Erkenntnisse. Weltnotizen sind NICHT das Wissen aller Charaktere – das steht in den Charakterakten.', ro: true,
     inputSchema: S({ timeline: TL, year: str('Stand zu diesem Jahr (Standard: Jahr des neuesten Story-Abschnitts; "latest" = jeweils neuester Stand)'), history: { type: 'boolean', description: 'frühere Stände mit ausgeben' }, category: str('nur diese Kategorie'), query: str('Suchtext'), place: str('Ort'), lang: LG }, ['timeline']),
     run: (a, v) => internalCall('GET', '/api/v1/worldnotes', { timeline: a.timeline, year: a.year, history: a.history ? '1' : undefined, category: a.category, q: a.query, place: a.place, lang: a.lang, format: 'text' }, null, v) },
@@ -945,6 +984,7 @@ const MCP_TOOLS = [
 const MCP_INSTRUCTIONS = 'Ascandir InteractiveMap: interaktive Karte (Star Wars u. eigene Welten) mit Zeitlinien, Zeitaltern, Fraktionen und Orten. ' +
   'Der Kanon ist schreibgeschützt – Änderungen nur in eigenen Zeitlinien (vorher list_timelines oder copy_timeline). Jahre als "3640 BBY"/"4 ABY". ' +
   'Vor Änderungen den Stand mit get_place/get_state lesen. Beschreibungen kurz und ohne Präfixe. ' +
+  'WICHTIG: Jede Zeitlinie kann feste Weltregeln haben (list_rules). Sie gelten immer, haben Vorrang vor allem anderen und werden zu Beginn mit list_rules oder get_summary gelesen; ändern nur auf ausdrücklichen Wunsch des Nutzers. ' +
   'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
   'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse.';

@@ -2442,12 +2442,52 @@
   }
   const wnRank = c => { const i = WN_CATS_DE.findIndex(x => x.toLowerCase() === String(c || '').toLowerCase()); return i < 0 ? 100 : i; };
   const wnSort = (a, b) => wnRank(a.category) - wnRank(b.category) || String(a.category || '').localeCompare(String(b.category || '')) || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.title).localeCompare(String(b.title));
+  // Weltregeln: feste Vorgaben, die immer gelten (nicht an Jahre gebunden)
+  let ruleEdit = null;
+  function renderRules(box, tabs) {
+    const can = canEditTl(), list = (state.tl.rules ||= []).slice().sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
+    const form = r => `<div class="story-sec editing" id="ruleForm">
+      <input id="ruleTitle" placeholder="${esc(t('ruleTitle'))}" value="${esc(r ? r.title : '')}">
+      <textarea id="ruleText" class="story-edit" rows="4" placeholder="${esc(t('ruleTextPh'))}">${esc(r ? r.text || '' : '')}</textarea>
+      <label class="chk"><input type="checkbox" id="ruleActive" ${!r || r.active !== false ? 'checked' : ''}><span>${esc(t('ruleActive'))}</span></label>
+      <div class="row"><button id="ruleSave" class="primary">${esc(t('ok'))}</button><button id="ruleCancel">${esc(t('cancel'))}</button>${r ? `<button id="ruleDel" class="danger">${esc(t('delete'))}</button>` : ''}</div></div>`;
+    box.innerHTML = `
+      <div class="story-kicker">🌌 ${esc(t('tabWorld'))} · ${esc(state.tl.name)}</div>
+      ${tabs}
+      <p class="hint">${esc(t('rulesIntro'))}</p>
+      <div class="story-secs rules">${list.map((r, i) => ruleEdit === r.id ? form(r) : `
+        <article class="story-sec rule${r.active === false ? ' off' : ''}" data-rid="${esc(r.id)}">
+          <div class="sec-head"><span class="rule-nr">${i + 1}</span><b>${esc(r.title)}</b>${r.active === false ? `<span class="cert" style="--gc:#90a4ae">${esc(t('ruleOff'))}</span>` : ''}
+            ${can ? `<span class="sec-btns"><button class="fixed r-up" ${i ? '' : 'disabled'}>↑</button><button class="fixed r-dn" ${i < list.length - 1 ? '' : 'disabled'}>↓</button><button class="fixed r-ed">✎</button></span>` : ''}</div>
+          ${r.text ? `<div class="story-text">${rich(r.text)}</div>` : ''}
+        </article>`).join('') || `<p class="hint">${esc(t('rulesEmpty'))}</p>`}
+        ${ruleEdit === 'new' ? form(null) : can ? `<button id="ruleNew">＋ ${esc(t('ruleAdd'))}</button>` : ''}</div>`;
+    const rid = el => el.closest('[data-rid]').dataset.rid, rerender = () => { renderWorldNotes.force = true; renderWorldNotes(); };
+    const move = (id, d) => { const i = list.findIndex(r => r.id === id), j = i + d; if (j < 0 || j >= list.length) return; pushUndo(); const [r] = list.splice(i, 1); list.splice(j, 0, r); list.forEach((x, n) => { x.order = n; }); afterEdit(); rerender(); };
+    box.querySelectorAll('.r-up').forEach(b => b.onclick = () => move(rid(b), -1));
+    box.querySelectorAll('.r-dn').forEach(b => b.onclick = () => move(rid(b), 1));
+    box.querySelectorAll('.r-ed').forEach(b => b.onclick = () => { ruleEdit = rid(b); rerender(); });
+    const nb = $('#ruleNew'); if (nb) nb.onclick = () => { ruleEdit = 'new'; rerender(); $('#ruleTitle').focus(); };
+    const sv = $('#ruleSave'); if (sv) sv.onclick = () => {
+      const title = $('#ruleTitle').value.trim(); if (!title) { $('#ruleTitle').focus(); return; }
+      pushUndo(); let r = state.tl.rules.find(x => x.id === ruleEdit);
+      if (!r) { r = { id: uid('rl'), created: new Date().toISOString(), order: list.length }; state.tl.rules.push(r); }
+      r.title = title; r.text = $('#ruleText').value; r.active = $('#ruleActive').checked; r.updated = new Date().toISOString();
+      ruleEdit = null; afterEdit(); rerender();
+    };
+    const cc = $('#ruleCancel'); if (cc) cc.onclick = () => { ruleEdit = null; rerender(); };
+    const dl = $('#ruleDel'); if (dl) dl.onclick = () => { const r = state.tl.rules.find(x => x.id === ruleEdit); if (!r || !confirm(t('ruleDelQ', r.title))) return; pushUndo(); state.tl.rules = state.tl.rules.filter(x => x !== r); ruleEdit = null; afterEdit(); rerender(); };
+  }
   function renderWorldNotes() {
     const box = $('#wnotes'), show = state.mode === 'world' && !state.plannerOpen;
     box.hidden = !show; if (show) $('#info').hidden = true;
-    if (!show) { wnEdit = null; return; }
-    if (wnEdit && $('#wnForm') && !renderWorldNotes.force) return;
+    if (!show) { wnEdit = null; ruleEdit = null; return; }
+    if ((wnEdit && $('#wnForm') || ruleEdit && $('#ruleForm')) && !renderWorldNotes.force) return;
     renderWorldNotes.force = false;
+    const wtab = settings.worldTab === 'notes' ? 'notes' : 'rules';
+    const tabs = `<div class="seg wtabs"><button data-wtab="rules" class="${wtab === 'rules' ? 'active' : ''}">📜 ${esc(t('wRules'))} <span class="dim">${(state.tl.rules || []).filter(r => r.active !== false).length}</span></button><button data-wtab="notes" class="${wtab === 'notes' ? 'active' : ''}">🗒 ${esc(t('wNotes'))} <span class="dim">${(state.tl.worldNotes || []).length}</span></button></div>`;
+    const bindTabs = () => box.querySelectorAll('[data-wtab]').forEach(b => b.onclick = () => { settings.worldTab = b.dataset.wtab; wnEdit = null; ruleEdit = null; saveSoon(); renderWorldNotes.force = true; renderWorldNotes(); });
+    if (wtab === 'rules') { renderRules(box, tabs); bindTabs(); return; }
     const can = canEditTl(), list = (state.tl.worldNotes ||= []), q = wnQ.toLowerCase(), byYear = settings.wnScope !== 'all', Y = byYear ? state.year : null;
     const cur = new Map(list.map(n => [n.id, wnAt(n, Y)]));
     const shown = list.filter(n => (cur.get(n.id) || wnEdit === n.id) && (!q || (n.title + ' ' + wnRevs(n).map(r => r.text).join(' ') + ' ' + n.category + ' ' + (n.places || []).join(' ')).toLowerCase().includes(q))).sort(wnSort);
@@ -2477,6 +2517,7 @@
       </article>`; };
     box.innerHTML = `
       <div class="story-kicker">🌌 ${esc(t('tabWorld'))} · ${esc(state.tl.name)}</div>
+      ${tabs}
       <p class="hint">${esc(t('wnIntro'))}</p>
       <div class="story-bar" style="margin-top:6px"><span class="dim">${byYear ? esc(t('wnAsOf', fmtYear(state.year))) : esc(t('wnLatest'))}${byYear && hidden ? ` · ${esc(t('wnHidden', hidden))}` : ''}</span>
         <div class="seg small"><button data-wnscope="year" class="${byYear ? 'active' : ''}">${esc(t('wnScopeYear'))}</button><button data-wnscope="all" class="${byYear ? '' : 'active'}">${esc(t('wnScopeAll'))}</button></div></div>
@@ -2489,6 +2530,7 @@
         ${!shown.length ? `<p class="hint">${esc(list.length ? t('charNoMatch') : t('wnEmpty'))}</p>` : ''}
         ${wnEdit === 'new:' && !cats.includes('') ? form(null) : ''}
         ${can && wnEdit !== 'new:' ? `<button id="wnNew">＋ ${esc(t('wnAdd'))}</button>` : ''}</div>`;
+    bindTabs();
     box.querySelectorAll('[data-wnscope]').forEach(b => b.onclick = () => { settings.wnScope = b.dataset.wnscope; saveSoon(); renderWorldNotes(); });
     box.querySelectorAll('.wn-htg').forEach(a => a.onclick = ev => { ev.preventDefault(); const k = 'wnh:' + a.closest('[data-nid]').dataset.nid; fold.has(k) ? fold.delete(k) : fold.add(k); saveFold(); renderWorldNotes(); });
     $('#wnSearch').addEventListener('input', e => { wnQ = e.target.value; const pos = e.target.selectionStart; renderWorldNotes(); const el = $('#wnSearch'); el.focus(); el.setSelectionRange(pos, pos); });
