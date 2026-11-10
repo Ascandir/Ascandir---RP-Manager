@@ -2665,8 +2665,9 @@
   // Gliederung des Steckbriefs: [Abschnitt, kurze Felder, Textfelder]
   const CH_SECTIONS = [['secIdentity', ['species', 'age', 'gender', 'homeworld'], []], ['secLooks', [], ['appearance']], ['secPersonality', [], ['personality']],
     ['secBackground', [], ['bio']], ['secAffil', ['faction', 'title', 'organization', 'master'], []], ['secAbilities', [], ['abilities']],
-    ['secRelations', [], []], ['secKnowledge', [], ['knowledge']], ['secCurrent', ['location', 'status'], ['threads']], ['secNotes', [], ['notes']]];
+    ['secInventory', [], []], ['secRelations', [], []], ['secKnowledge', [], ['knowledge']], ['secCurrent', ['location', 'status'], ['threads']], ['secNotes', [], ['notes']]];
   const REL_KINDS = ['ally', 'enemy', 'family', 'contact', 'other'];
+  const defCurrency = () => state.world.type === 'fantasy' ? 'Gold' : 'Credits';
   const REL_COL = { ally: '#81c784', enemy: '#e57373', family: '#ffb74d', contact: '#64b5f6', other: '#90a4ae' };
   const charsAt = o => (state.tl.characters || []).filter(c => { const n = o.name.toLowerCase(); return (c.location || '').toLowerCase() === n || (c.homeworld || '').toLowerCase() === n; });
   function openChar(id) { charSel = id; charEdit = false; if (state.plannerOpen) state.plannerOpen = false; setMode('chars'); }
@@ -2738,6 +2739,14 @@
     const relHtml = REL_KINDS.map(k => { const r = rels.filter(x => (x.kind || 'other') === k); return r.length ? `<span class="k"><span class="rk" style="--gc:${REL_COL[k]}"></span>${esc(t('rel_' + k))}</span><span>${r.map(x => `${charLink(x.name)}${x.relation ? ` <span class="dim">(${esc(x.relation)})</span>` : ''}`).join(', ')}</span>` : ''; }).join('');
     const sec = ([key, info, texts]) => {
       if (key === 'secRelations') return relHtml ? `<h3 class="facts-h">${esc(t(key))}</h3><div class="kv">${relHtml}</div>` : '';
+      if (key === 'secInventory') {
+        const inv = c.inventory || []; if (c.money == null && !inv.length) return '';
+        const grp = ty => inv.filter(i => (i.type || 'gear') === ty);
+        const itHtml = i => `<li class="${i.important ? 'imp' : ''}">${i.important ? `<span title="${esc(t('invImportant'))}">⭐</span> ` : ''}<b>${esc(i.name)}</b>${(i.qty ?? 1) !== 1 ? ` <span class="qty">×${esc(i.qty)}</span>` : ''}${i.location ? ` <span class="dim">· ${esc(i.location)}</span>` : ''}${i.note ? `<div class="dim small">${rich(i.note)}</div>` : ''}</li>`;
+        return `<h3 class="facts-h">${esc(t(key))}</h3>
+          ${c.money != null ? `<div class="money">💰 <b>${esc(Number(c.money).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</b> ${esc(c.currency || defCurrency())}</div>` : ''}
+          ${['gear', 'property'].map(ty => grp(ty).length ? `<div class="k sub">${esc(t('inv_' + ty))}</div><ul class="inv">${grp(ty).sort((a, b) => (b.important ? 1 : 0) - (a.important ? 1 : 0)).map(itHtml).join('')}</ul>` : '').join('')}`;
+      }
       const iv = info.filter(k => c[k]), tv = texts.filter(k => c[k]); if (!iv.length && !tv.length) return '';
       return `<h3 class="facts-h">${esc(t(key))}</h3>${iv.length ? `<div class="kv">${iv.map(k => `<span class="k">${esc(t('ch_' + k))}</span><span>${val(k)}</span>`).join('')}</div>` : ''}
         ${tv.map(k => `${texts.length > 1 || info.length ? `<div class="k sub">${esc(t('ch_' + k))}</div>` : ''}<div class="story-text">${rich(c[k])}</div>`).join('')}`;
@@ -2775,6 +2784,15 @@
         ${c.faction && !facById(c.faction) ? `<option value="${esc(c.faction)}" selected>${esc(c.faction)}</option>` : ''}</select></label>
       <div class="row">${['title', 'organization'].map(fld).join('')}</div>${fld('master')}
       ${area('abilities', 3, 'secAbilities')}
+      <h4>${esc(t('secInventory'))}</h4>
+      <div class="row"><label class="field"><span>${esc(t('invMoney'))}</span><input type="number" id="chMoney" value="${c.money ?? ''}" step="any"></label>
+        <label class="field"><span>${esc(t('invCurrency'))}</span><input id="chCur" value="${esc(c.currency || '')}" placeholder="${esc(defCurrency())}"></label></div>
+      <div class="inv-edit">${(c.inventory || []).map((i, n) => `<div class="inv-row" data-i="${n}">
+        <input class="iv-name" value="${esc(i.name)}" placeholder="${esc(t('invItem'))}"><input class="iv-qty fixed" type="number" value="${esc(i.qty ?? 1)}" min="0" step="any" title="${esc(t('invQty'))}">
+        <select class="iv-type fixed"><option value="gear" ${(i.type || 'gear') === 'gear' ? 'selected' : ''}>${esc(t('invGearShort'))}</option><option value="property" ${i.type === 'property' ? 'selected' : ''}>${esc(t('inv_property'))}</option></select>
+        <label class="chk fixed" title="${esc(t('invImportant'))}"><input type="checkbox" class="iv-imp" ${i.important ? 'checked' : ''}>⭐</label><button class="iv-del fixed danger">✕</button>
+        <input class="iv-loc" value="${esc(i.location || '')}" placeholder="${esc(t('invLocation'))}"><input class="iv-note" value="${esc(i.note || '')}" placeholder="${esc(t('invNote'))}"></div>`).join('')}</div>
+      <button id="ivAdd" style="margin-bottom:8px">＋ ${esc(t('invAdd'))}</button>
       <label class="field"><span>${esc(t('secRelations'))} <span class="dim">(${esc(t('charRelHint'))})</span></span><textarea data-f="relations" rows="4">${esc((c.relations || []).map(r => `${r.name}${r.relation ? ': ' + r.relation : ''}${r.kind && r.kind !== 'other' ? ' [' + t('rel1_' + r.kind) + ']' : ''}`).join('\n'))}</textarea></label>
       ${area('knowledge', 4, 'secKnowledge')}
       <h4>${esc(t('secCurrent'))}</h4>
@@ -2802,6 +2820,16 @@
       else c[k] = v;
       touch();
     }));
+    $('#chMoney').onchange = e => { mark(); c.money = e.target.value === '' ? null : Number(e.target.value); if (c.money == null) delete c.money; touch(); };
+    $('#chCur').onchange = e => { mark(); c.currency = e.target.value.trim(); if (!c.currency) delete c.currency; touch(); };
+    box.querySelectorAll('.inv-row').forEach(row => {
+      const it = c.inventory[+row.dataset.i];
+      const upd = () => { mark(); it.name = row.querySelector('.iv-name').value.trim() || it.name; it.qty = Number(row.querySelector('.iv-qty').value) || 0; it.type = row.querySelector('.iv-type').value;
+        it.important = row.querySelector('.iv-imp').checked; it.location = row.querySelector('.iv-loc').value; it.note = row.querySelector('.iv-note').value; touch(); };
+      row.querySelectorAll('input,select').forEach(el => el.addEventListener('change', upd));
+      row.querySelector('.iv-del').onclick = () => { mark(); c.inventory.splice(+row.dataset.i, 1); touch(); renderChars(true); };
+    });
+    $('#ivAdd').onclick = () => { mark(); (c.inventory ||= []).push({ id: uid('it'), name: t('invNew'), qty: 1, type: 'gear' }); touch(); renderChars(true); const r = box.querySelector('.inv-row:last-child .iv-name'); if (r) { r.focus(); r.select(); } };
     $('#chImg').onclick = () => $('#chImgFile').click();
     $('#chImgFile').onchange = async ev => { const f = ev.target.files[0]; if (!f) return; try { const d = await resizeImage(f, 768); mark(); c.image = d; touch(); renderChars(true); } catch (e) { alert(e.message); } };
     const idl = $('#chImgDel'); if (idl) idl.onclick = () => { mark(); delete c.image; touch(); renderChars(true); };

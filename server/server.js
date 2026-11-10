@@ -409,6 +409,24 @@ function wnText(t, lang, list, year, history) {
 // ---------------------------------------------------------------- Charaktere (tl.characters)
 const CHAR_TEXT = ['title', 'species', 'gender', 'age', 'homeworld', 'organization', 'master', 'location', 'status', 'appearance', 'personality', 'bio', 'abilities', 'knowledge', 'threads', 'notes'];
 const REL_KINDS = ['ally', 'enemy', 'family', 'contact', 'other'];
+const defCurrency = t => ((loadWorlds().find(w => w.id === (t.world || 'starwars')) || {}).type === 'fantasy' ? 'Gold' : 'Credits');
+// Inventar ändern: add/update per Name (qty oder qtyDelta), remove per Name; Menge <= 0 entfernt den Gegenstand
+function applyInventory(c, b) {
+  c.inventory = c.inventory || [];
+  const find = n => c.inventory.find(i => i.name.toLowerCase() === String(n).toLowerCase());
+  for (const it of b.items || b.add || []) {
+    if (!it || !it.name) continue; let i = find(it.name);
+    if (!i) { i = { id: uid('it'), name: String(it.name), qty: 1, type: 'gear' }; c.inventory.push(i); }
+    if (it.newName) i.name = String(it.newName);
+    if (it.qty != null) i.qty = Number(it.qty); if (it.qtyDelta != null) i.qty = (Number(i.qty) || 0) + Number(it.qtyDelta);
+    if (it.type) i.type = it.type === 'property' ? 'property' : 'gear';
+    for (const k of ['location', 'note']) if (it[k] !== undefined) i[k] = String(it[k]);
+    if (it.important !== undefined) i.important = !!it.important;
+  }
+  for (const n of b.remove || []) { const i = find(n); if (i) c.inventory = c.inventory.filter(x => x !== i); }
+  c.inventory = c.inventory.filter(i => !(Number(i.qty) <= 0));
+}
+const loadWorlds = () => listJson('worlds');
 const findChar = (t, n) => { const q = String(n || '').toLowerCase().trim(); return (t.characters || []).find(c => c.id === n || c.name.toLowerCase() === q) || (q ? (t.characters || []).find(c => c.name.toLowerCase().includes(q)) : null) || null; };
 const GROUP_COLORS = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4dd0e1', '#f06292', '#aed581', '#ffd54f', '#90a4ae'];
 function groupFor(t, name, color) {
@@ -424,6 +442,7 @@ function charOut(t, c, full) {
   const base = { id: c.id, name: c.name, group: grp ? grp.name : '', title: c.title || '', faction: fac ? fac.name : (c.faction || ''), location: c.location || '', status: c.status || '', image: c.image || null };
   if (!full) return base;
   return Object.assign(base, { species: c.species || '', gender: c.gender || '', age: c.age || '', homeworld: c.homeworld || '', appearance: c.appearance || '', personality: c.personality || '',
+    money: c.money ?? null, currency: c.currency || '', inventory: (c.inventory || []).map(i => ({ name: i.name, qty: i.qty ?? 1, type: i.type || 'gear', location: i.location || '', important: !!i.important, note: i.note || '' })),
     abilities: c.abilities || '', bio: c.bio || '', notes: c.notes || '', organization: c.organization || '', master: c.master || '', knowledge: c.knowledge || '', threads: c.threads || '', tags: c.tags || [], relations: c.relations || [], gallery: (c.gallery || []).map(g => ({ src: g.src && g.src.startsWith('data:') ? '(eingebettetes Bild)' : g.src, caption: g.caption || '' })), updated: c.updated || null });
 }
 function charText(t, c, lang) {
@@ -444,6 +463,14 @@ function charText(t, c, lang) {
   if (o.relations.length) {
     L.push(`\n## ${lab.rel}`);
     for (const k of REL_KINDS) { const r = o.relations.filter(x => (x.kind || 'other') === k); if (r.length) L.push(`${lab.kinds[k]}: ` + r.map(x => `${x.name}${x.relation ? ' (' + x.relation + ')' : ''}`).join(', ')); }
+  }
+  if (o.money != null || o.inventory.length) {
+    const cur = o.currency || defCurrency(t);
+    L.push(`\n## ${de ? 'Besitz & Inventar' : 'Possessions & inventory'}`);
+    if (o.money != null) L.push(`${de ? 'Geld' : 'Money'}: ${Number(o.money).toLocaleString(de ? 'de-DE' : 'en-GB')} ${cur}`);
+    for (const ty of ['gear', 'property']) { const it = o.inventory.filter(i => i.type === ty); if (!it.length) continue;
+      L.push(ty === 'gear' ? (de ? 'Ausrüstung / trägt bei sich:' : 'Gear / carried:') : (de ? 'Eigentum:' : 'Property:'));
+      for (const i of it) L.push(`- ${i.important ? '⭐ ' : ''}${i.name}${i.qty !== 1 ? ' ×' + i.qty : ''}${i.location ? ' (' + i.location + ')' : ''}${i.note ? ' – ' + i.note : ''}`); }
   }
   if (o.knowledge) L.push(`\n## ${lab.knowledge}\n${o.knowledge}`);
   const now = ['location', 'status'].filter(k => o[k]).map(k => `${lab[k]}: ${o[k]}`);
@@ -647,6 +674,10 @@ async function apiWrite(req, res, url, parts) {
     for (const k of CHAR_TEXT) if (b[k] !== undefined) c[k] = app.includes(k) && c[k] ? c[k] + '\n\n' + String(b[k]) : String(b[k] ?? '');
     if (b.faction !== undefined) { const f = b.faction ? findFaction(t, b.faction) : null; c.faction = f ? f.id : (b.faction || ''); }
     if (Array.isArray(b.tags)) c.tags = b.tags.map(String).filter(Boolean);
+    if (b.money !== undefined) c.money = b.money === null || b.money === '' ? null : Number(b.money);
+    if (b.moneyDelta != null) c.money = (Number(c.money) || 0) + Number(b.moneyDelta);
+    if (b.currency !== undefined) c.currency = String(b.currency);
+    if (b.inventory || b.removeItems) applyInventory(c, { items: b.inventory, remove: b.removeItems });
     if (b.group !== undefined) { const g = groupFor(t, b.group, b.groupColor); c.group = g ? g.id : ''; }
     const rel = r => ({ name: String(r.name), relation: String(r.relation || ''), kind: REL_KINDS.includes(r.kind) ? r.kind : 'other' });
     if (Array.isArray(b.relations)) c.relations = b.relations.filter(r => r && r.name).map(rel);
@@ -916,6 +947,8 @@ function internalCall(method, pathname, params, body, viewer) {
 const S = (props, required = []) => ({ type: 'object', properties: props, required });
 const str = d => ({ type: 'string', description: d });
 const TL = str('Zeitlinie (Name oder ID). Leer = Kanon (schreibgeschützt).'), YR = str('Jahr, z.B. "3640 BBY", "4 ABY" oder "-3640"'), LG = { type: 'string', enum: ['de', 'en'], description: 'Sprache der Antwort' };
+const ITEM = { type: 'object', properties: { name: { type: 'string' }, newName: { type: 'string' }, qty: { type: 'number' }, qtyDelta: { type: 'number' }, type: { type: 'string', enum: ['gear', 'property'], description: 'gear = Ausrüstung/trägt bei sich, property = Eigentum (Schiff, Wohnung …)' },
+  location: { type: 'string', description: 'wo, z.B. "am Gürtel", "auf der Trailblazer"' }, important: { type: 'boolean', description: 'storyrelevant' }, note: { type: 'string' } }, required: ['name'] };
 const REL = { type: 'object', properties: { name: { type: 'string' }, relation: { type: 'string', description: 'z.B. Schwester, Rivale, Informant' }, kind: { type: 'string', enum: ['ally', 'enemy', 'family', 'contact', 'other'] } }, required: ['name'] };
 const MCP_TOOLS = [
   { name: 'list_timelines', title: 'Zeitlinien auflisten', description: 'Alle Welten-Zeitlinien mit ihren Zeitaltern.', ro: true, inputSchema: S({ lang: LG }), run: (a, v) => internalCall('GET', '/api/v1/timelines', a, null, v) },
@@ -974,13 +1007,17 @@ const MCP_TOOLS = [
     run: (a, v) => internalCall('GET', '/api/v1/characters', { timeline: a.timeline, q: a.query, faction: a.faction, place: a.place, group: a.group, lang: a.lang, format: 'text' }, null, v) },
   { name: 'get_character', title: 'Charakter lesen', description: 'Alle Details eines Charakters (Steckbrief, Aussehen, Persönlichkeit, Hintergrund, Beziehungen).', ro: true,
     inputSchema: S({ timeline: TL, name: str('Name oder id'), lang: LG }, ['timeline', 'name']), run: (a, v) => internalCall('GET', '/api/v1/character', { timeline: a.timeline, name: a.name, lang: a.lang, format: 'text' }, null, v) },
-  { name: 'upsert_character', title: 'Charakter anlegen/ändern', description: 'Charakter anlegen oder Felder ändern (nur angegebene Felder werden geändert). Gliederung: Identität (species, age, gender, homeworld), Erscheinungsbild (appearance: Gesicht, Haare, Augen, Körperbau, Kleidung), Persönlichkeit (personality: Züge, Verhalten, Eigenheiten), Hintergrund (bio: Herkunft, Ausbildung, Vergangenheit), Zugehörigkeit (faction, title=Rang, organization, master), Fähigkeiten (abilities: Machtfähigkeiten, Kampfstil, Fachwissen), Beziehungen (relations/addRelations mit kind ally|enemy|family|contact|other), Wissen (knowledge: was die Person über Tim und andere weiß), Aktueller Stand (location, status, threads = laufende Handlungsstränge). append: Liste von Textfeldern, an die angehängt statt ersetzt wird (z.B. ["knowledge","threads"]). Texte dürfen **fett**/*kursiv* und Leerzeilen enthalten.',
+  { name: 'upsert_character', title: 'Charakter anlegen/ändern', description: 'Charakter anlegen oder Felder ändern (nur angegebene Felder werden geändert). Gliederung: Identität (species, age, gender, homeworld), Erscheinungsbild (appearance: Gesicht, Haare, Augen, Körperbau, Kleidung), Persönlichkeit (personality: Züge, Verhalten, Eigenheiten), Hintergrund (bio: Herkunft, Ausbildung, Vergangenheit), Zugehörigkeit (faction, title=Rang, organization, master), Fähigkeiten (abilities: Machtfähigkeiten, Kampfstil, Fachwissen), Besitz & Inventar (money/moneyDelta/currency, inventory mit type gear|property, important = storyrelevant, removeItems), Beziehungen (relations/addRelations mit kind ally|enemy|family|contact|other), Wissen (knowledge: was die Person über Tim und andere weiß), Aktueller Stand (location, status, threads = laufende Handlungsstränge). append: Liste von Textfeldern, an die angehängt statt ersetzt wird (z.B. ["knowledge","threads"]). Texte dürfen **fett**/*kursiv* und Leerzeilen enthalten.',
     inputSchema: S({ timeline: TL, name: str('Name (Schlüssel)'), newName: str('neuer Name'),
       group: str('Gruppe, z.B. "Crew der Trailblazer" (wird bei Bedarf angelegt; leer = keine)'), groupColor: str('Farbe der Gruppe, z.B. "#e57373"'),
       species: str('Spezies'), age: str('Alter, z.B. "34" oder "geb. 3674 BBY"'), gender: str('Geschlecht'), homeworld: str('Herkunftswelt'),
       appearance: str('Erscheinungsbild: Gesicht, Haare, Augen, Körperbau, Kleidung'), personality: str('Charakterzüge, Verhalten, Eigenheiten'), bio: str('Herkunft, Ausbildung, Vergangenheit'),
       faction: str('Fraktion (Name)'), title: str('Rang/Rolle'), organization: str('Organisation/Orden/Einheit'), master: str('Meister oder Mentor'),
-      abilities: str('Machtfähigkeiten, Kampfstil, Fachwissen'), knowledge: str('Was weiß die Person über Tim und andere?'),
+      abilities: str('Machtfähigkeiten, Kampfstil, Fachwissen'),
+      money: { type: 'number', description: 'Geld (setzt den Betrag)' }, moneyDelta: { type: 'number', description: 'Geld ändern, z.B. -500 oder 1200' }, currency: str('Währung (Standard: Credits bzw. Gold)'),
+      inventory: { type: 'array', items: ITEM, description: 'Gegenstände/Eigentum anlegen oder ändern (per Name); qtyDelta ändert die Menge, Menge 0 entfernt' },
+      removeItems: { type: 'array', items: { type: 'string' }, description: 'Gegenstände entfernen (Namen)' },
+      knowledge: str('Was weiß die Person über Tim und andere?'),
       location: str('aktueller Aufenthaltsort'), status: str('z.B. lebt, verletzt, tot, vermisst'), threads: str('laufende Handlungsstränge'), notes: str('sonstige Notizen'),
       tags: { type: 'array', items: { type: 'string' } },
       relations: { type: 'array', items: REL, description: 'ersetzt die komplette Beziehungsliste' },

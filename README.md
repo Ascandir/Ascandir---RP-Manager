@@ -129,6 +129,7 @@ Der Reiter *Charaktere* verwaltet die Figuren einer Zeitlinie. Der Steckbrief is
 | Hintergrund | Herkunft, Ausbildung, Vergangenheit |
 | Zugehörigkeit | Fraktion, Rang, Organisation, Meister |
 | Fähigkeiten | Machtfähigkeiten, Kampfstil, Fachwissen |
+| Besitz & Inventar | Geld (Credits/Gold), Ausrüstung, die der Charakter bei sich trägt, und Eigentum (Schiff, Wohnung …) – storyrelevante Gegenstände mit ⭐ |
 | Beziehungen | Verbündete, Feinde, Familie, Kontakte (farbig markiert) |
 | Wissen | Was weiß die Person über Tim und andere? |
 | Aktueller Stand | Aufenthaltsort, Status, laufende Handlungsstränge |
@@ -137,7 +138,7 @@ Dazu kommen Tags, Notizen, ein Porträt und eine Bildergalerie.
 
 - **Gruppen** (z. B. „Crew der Trailblazer“, „Sith-Orden“) haben eine eigene Farbe. Die Liste ist danach gegliedert und lässt sich filtern; jeder Charakter trägt die Gruppe als farbiges Etikett. Bearbeiten über *⚙ Gruppen*.
 - Aufenthaltsort und Herkunftswelt sind mit der Karte verknüpft; im Infofeld eines Ortes stehen die Charaktere, die dort sind. Namen in Beziehungen und beim Meister sind anklickbar, wenn es den Charakter gibt.
-- **MCP (ChatGPT/Claude):** `list_characters` (Filter u. a. nach Gruppe), `get_character` (kompletter Steckbrief als Text), `upsert_character` (nur angegebene Felder werden geändert; `append` hängt an, z. B. an Wissen oder Handlungsstränge; `addRelations` ergänzt einzelne Beziehungen; `group` legt die Gruppe bei Bedarf an), `add_character_image` (Bild per Link – wird heruntergeladen und dauerhaft unter `images/` im Datenordner gespeichert – oder Base64; `portrait: true` setzt es als Porträt), `delete_character`.
+- **MCP (ChatGPT/Claude):** `list_characters` (Filter u. a. nach Gruppe), `get_character` (kompletter Steckbrief als Text), `upsert_character` (nur angegebene Felder werden geändert; `append` hängt an, z. B. an Wissen oder Handlungsstränge; `addRelations` ergänzt einzelne Beziehungen; `money`/`moneyDelta` setzt bzw. ändert das Geld, `inventory` legt Gegenstände an oder ändert sie (Menge per `qtyDelta`, Menge 0 entfernt), `removeItems` entfernt sie; `group` legt die Gruppe bei Bedarf an), `add_character_image` (Bild per Link – wird heruntergeladen und dauerhaft unter `images/` im Datenordner gespeichert – oder Base64; `portrait: true` setzt es als Porträt), `delete_character`.
 - **REST:** `GET /api/v1/characters`, `GET /api/v1/character?name=…`, `POST/DELETE /api/v1/character`, `POST /api/v1/character/image`.
 - Selbst hochgeladene Bilder werden verkleinert direkt in der Zeitlinien-Datei gespeichert.
 
