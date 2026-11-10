@@ -2699,6 +2699,8 @@
     ['secBackground', [], ['bio']], ['secAffil', ['faction', 'title', 'organization', 'master'], []], ['secAbilities', [], ['abilities']],
     ['secInventory', [], []], ['secRelations', [], []], ['secKnowledge', [], ['knowledge']], ['secCurrent', ['location', 'status'], ['threads']], ['secNotes', [], ['notes']]];
   const REL_KINDS = ['ally', 'enemy', 'family', 'contact', 'other'];
+  const CH_FOLDED = ['secLooks', 'secPersonality', 'secBackground', 'secAbilities'];
+  const charOpen = new Set(); // aufgeklappte Abschnitte (pro Charakter, bis zum Neuladen)
   const defCurrency = () => state.world.type === 'fantasy' ? 'Gold' : 'Credits';
   const REL_COL = { ally: '#81c784', enemy: '#e57373', family: '#ffb74d', contact: '#64b5f6', other: '#90a4ae' };
   const charsAt = o => (state.tl.characters || []).filter(c => { const n = o.name.toLowerCase(); return (c.location || '').toLowerCase() === n || (c.homeworld || '').toLowerCase() === n; });
@@ -2772,15 +2774,21 @@
     const sec = ([key, info, texts]) => {
       if (key === 'secRelations') return relHtml ? `<h3 class="facts-h">${esc(t(key))}</h3><div class="kv">${relHtml}</div>` : '';
       if (key === 'secInventory') {
-        const inv = c.inventory || []; if (c.money == null && !inv.length) return '';
+        const inv = c.inventory || []; if (!inv.length) return '';
         const grp = ty => inv.filter(i => (i.type || 'gear') === ty);
         const itHtml = i => `<li class="${i.important ? 'imp' : ''}">${i.important ? `<span title="${esc(t('invImportant'))}">⭐</span> ` : ''}<b>${esc(i.name)}</b>${(i.qty ?? 1) !== 1 ? ` <span class="qty">×${esc(i.qty)}</span>` : ''}${i.location ? ` <span class="dim">· ${esc(i.location)}</span>` : ''}${i.note ? `<div class="dim small">${rich(i.note)}</div>` : ''}</li>`;
         return `<h3 class="facts-h">${esc(t(key))}</h3>
-          ${c.money != null ? `<div class="money"><a href="#" id="moneyHist" title="${esc(t('moneyHistory'))}">💰 <b>${esc(Number(c.money).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</b> ${esc(c.currency || defCurrency())} <span class="hist-ic">🕘${(c.moneyLog || []).length ? ` ${c.moneyLog.length}` : ''}</span></a></div>` : ''}
           ${['gear', 'property'].map(ty => grp(ty).length ? `<div class="k sub">${esc(t('inv_' + ty))}</div><ul class="inv">${grp(ty).sort((a, b) => (b.important ? 1 : 0) - (a.important ? 1 : 0)).map(itHtml).join('')}</ul>` : '').join('')}`;
       }
-      const iv = info.filter(k => c[k]), tv = texts.filter(k => c[k]); if (!iv.length && !tv.length) return '';
-      return `<h3 class="facts-h">${esc(t(key))}</h3>${iv.length ? `<div class="kv">${iv.map(k => `<span class="k">${esc(t('ch_' + k))}</span><span>${val(k)}</span>`).join('')}</div>` : ''}
+      const iv = info.filter(k => c[k]), tv = texts.filter(k => c[k]);
+      const money = key === 'secIdentity' && c.money != null ? `<div class="money"><a href="#" id="moneyHist" title="${esc(t('moneyHistory'))}">💰 <b>${esc(Number(c.money).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</b> ${esc(c.currency || defCurrency())} <span class="hist-ic">🕘${(c.moneyLog || []).length ? ` ${c.moneyLog.length}` : ''}</span></a></div>` : '';
+      if (!iv.length && !tv.length) return money ? `<h3 class="facts-h">${esc(t(key))}</h3>${money}` : '';
+      // längere Textbereiche sind zugeklappt, Klick auf die Überschrift klappt auf
+      if (CH_FOLDED.includes(key)) {
+        const open = charOpen.has(c.id + ':' + key);
+        return `<h3 class="facts-h ch-fold" data-sec="${key}"><span class="fold-ar">${open ? '▾' : '▸'}</span> ${esc(t(key))}</h3>${open ? tv.map(k => `<div class="story-text">${rich(c[k])}</div>`).join('') : ''}`;
+      }
+      return `<h3 class="facts-h">${esc(t(key))}</h3>${iv.length ? `<div class="kv">${iv.map(k => `<span class="k">${esc(t('ch_' + k))}</span><span>${val(k)}</span>`).join('')}</div>` : ''}${money}
         ${tv.map(k => `${texts.length > 1 || info.length ? `<div class="k sub">${esc(t('ch_' + k))}</div>` : ''}<div class="story-text">${rich(c[k])}</div>`).join('')}`;
     };
     box.innerHTML = `
@@ -2794,6 +2802,7 @@
       ${(c.gallery || []).length ? `<h3 class="facts-h">${esc(t('charGallery'))}</h3><div class="char-gallery">${c.gallery.map(g => `<figure><img src="${esc(g.src)}" alt="" data-zoom="${esc(g.src)}" data-cap="${esc(g.caption || '')}">${g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure>`).join('')}</div>` : ''}`;
     $('#chBack').onclick = () => { charSel = null; renderChars(); };
     const mh = $('#moneyHist'); if (mh) mh.onclick = ev => { ev.preventDefault(); moneyHistory(c); };
+    box.querySelectorAll('.ch-fold').forEach(h => h.onclick = () => { const k = c.id + ':' + h.dataset.sec; charOpen.has(k) ? charOpen.delete(k) : charOpen.add(k); renderChars(true); });
     const eb = $('#chEdit'); if (eb) eb.onclick = () => { charEdit = true; renderChars(true); };
     box.querySelectorAll('[data-zoom]').forEach(im => im.onclick = () => zoomImg(im.dataset.zoom, im.dataset.cap));
     box.querySelectorAll('[data-place]').forEach(a => a.onclick = ev => { ev.preventDefault(); const o = objMap[a.dataset.place] || placeByName(a.textContent.replace('📍', '').trim()); if (o) { centerOn(o, o.atlas ? 3 : 1.4); if (isMobile()) setSheet(false); } });
