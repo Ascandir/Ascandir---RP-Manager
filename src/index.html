@@ -57,13 +57,14 @@
     </section>
     <section>
       <button id="btnPlanner" class="wide planner-btn"></button>
+      <div id="planner" hidden></div>
     </section>
-    <section>
-      <h3 data-i18n="objects"></h3>
+    <section class="lfold folded">
+      <h3 class="ltg" data-i18n="objects"></h3>
       <div id="typeFilter"></div>
     </section>
-    <section>
-      <h3 data-i18n="display"></h3>
+    <section class="lfold folded">
+      <h3 class="ltg" data-i18n="display"></h3>
       <label class="chk"><input type="checkbox" data-opt="influence"><span data-i18n="optInfluence"></span></label>
       <label class="chk"><input type="checkbox" data-opt="routes"><span id="lblRoutes"></span></label>
       <label class="chk sw-only"><input type="checkbox" data-opt="regions"><span data-i18n="optRegions"></span></label>
@@ -72,8 +73,8 @@
       <label class="chk"><input type="checkbox" data-opt="grid"><span data-i18n="optGrid"></span></label>
       <label class="chk"><input type="checkbox" data-opt="names"><span data-i18n="optNames"></span></label>
     </section>
-    <section class="grow">
-      <h3><span data-i18n="factions"></span> <span class="mini-actions"><a href="#" id="facAll" data-i18n="all"></a> · <a href="#" id="facNone" data-i18n="none"></a></span></h3>
+    <section class="grow lfold folded">
+      <h3 class="ltg"><span data-i18n="factions"></span> <span class="mini-actions"><a href="#" id="facAll" data-i18n="all"></a> · <a href="#" id="facNone" data-i18n="none"></a></span></h3>
       <div id="factionFilter"></div>
       <p class="hint" data-i18n="factionsHint"></p>
     </section>
@@ -100,7 +101,6 @@
   <div id="backdrop" hidden></div>
   <aside id="right">
     <div class="sheet-handle"><span></span><button id="sheetClose">✕</button></div>
-    <div id="planner" hidden></div>
     <div id="story" hidden></div>
     <div id="chars" hidden></div>
     <div id="wnotes" hidden></div>

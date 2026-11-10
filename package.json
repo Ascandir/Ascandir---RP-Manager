@@ -1,7 +1,7 @@
 {
   "name": "ascandir-rp-manager",
   "productName": "Ascandir RP-Manager",
-  "version": "0.24.1",
+  "version": "0.24.2",
   "description": "Interaktive Karte für Star Wars und eigene Welten – mit Zeitaltern, Fraktionen und eigenen Zeitlinien",
   "main": "main.js",
   "author": "Ascandir",

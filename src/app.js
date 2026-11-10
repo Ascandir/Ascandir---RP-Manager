@@ -554,10 +554,6 @@
     $('#btnPlanner').textContent = '🧭 ' + t('planner');
     $('#btnPlanner').classList.toggle('active', state.plannerOpen);
     box.hidden = !state.plannerOpen;
-    $('#info').hidden = state.plannerOpen || state.mode === 'story' || state.mode === 'chars' || state.mode === 'world';
-    $('#wnotes').hidden = state.plannerOpen || state.mode !== 'world';
-    $('#chars').hidden = state.plannerOpen || state.mode !== 'chars';
-    $('#story').hidden = state.plannerOpen || state.mode !== 'story';
     if (!state.plannerOpen) return;
     const P = settings.planner, fan = state.world.type === 'fantasy';
     computePlan();
@@ -584,7 +580,7 @@
       <div id="plResult">${planResultHtml(r)}</div>`;
     $('#plClose').onclick = () => { state.plannerOpen = false; state.pick = null; renderPlanner(); renderStory(); renderChars(); renderWorldNotes(); draw(); };
     $$('.pl-in').forEach(inp => inp.addEventListener('change', () => { P.stops[+inp.dataset.i] = inp.value; saveSoon(); renderPlanner(); draw(); }));
-    $$('.pl-pick').forEach(b => b.addEventListener('click', () => { state.pick = state.pick === +b.dataset.i ? null : +b.dataset.i; renderPlanner(); if (state.pick != null) { toast(t('plPickHint')); if (isMobile()) setSheet(false); } }));
+    $$('.pl-pick').forEach(b => b.addEventListener('click', () => { state.pick = state.pick === +b.dataset.i ? null : +b.dataset.i; renderPlanner(); if (state.pick != null) { toast(t('plPickHint')); if (isMobile()) setDrawer(false); } }));
     $$('.pl-del').forEach(b => b.addEventListener('click', () => { P.stops.splice(+b.dataset.i, 1); saveSoon(); renderPlanner(); draw(); }));
     $('#plAdd').onclick = () => { P.stops.splice(P.stops.length - 1, 0, ''); saveSoon(); renderPlanner(); };
     $('#plSwap').onclick = () => { P.stops.reverse(); saveSoon(); renderPlanner(); draw(); };
@@ -618,6 +614,8 @@
     state.view.z = Math.max(0.2, Math.min(6, Math.min(W / (x1 - x0 + 160), H / (y1 - y0 + 160)))); draw();
   }
   $('#btnPlanner').addEventListener('click', () => { state.plannerOpen = !state.plannerOpen; state.pick = null; renderPlanner(); draw(); });
+  // Filter links: auf-/zuklappbar, beim Start zugeklappt
+  $$('#left .lfold > .ltg').forEach(h => h.addEventListener('click', e => { if (e.target.closest('a')) return; h.parentElement.classList.toggle('folded'); }));
 
   function drawHover() {
     if (!state.hover || state.hover === state.selected) return;
@@ -1217,8 +1215,8 @@
     if (!drag) return;
     const d = drag; drag = null; canvas.classList.remove('dragging');
     if (d.kind === 'pan' && !d.moved && e.button === 0 && state.pick != null && d.hit) {
-      settings.planner.stops[state.pick] = d.hit.name; state.pick = null; saveSoon(); renderPlanner(); draw(); if (isMobile()) setSheet(true);
-    } else if (d.kind === 'pan' && !d.moved && e.button === 0) { state.selected = d.hit ? d.hit.id : null; renderInfo(); draw(); if (isMobile()) setSheet(!!d.hit || state.plannerOpen || state.mode === 'edit'); }
+      settings.planner.stops[state.pick] = d.hit.name; state.pick = null; saveSoon(); renderPlanner(); draw(); if (isMobile()) setDrawer(true);
+    } else if (d.kind === 'pan' && !d.moved && e.button === 0) { state.selected = d.hit ? d.hit.id : null; renderInfo(); draw(); if (isMobile()) setSheet(!!d.hit || state.mode === 'edit'); }
     else if (d.kind === 'move') {
       if (!d.moved) { state.undo.pop(); state.selected = d.hit.id; renderInfo(); draw(); }
       else { if (isSW()) d.obj.region = regionAt(d.obj.x, d.obj.y) || d.obj.region; state.selected = d.hit.id; afterEdit(); }
@@ -1584,7 +1582,7 @@
         <p class="hint">${esc(t('atlasHint'))}</p>
         <div class="row">${canEditTl() ? `<button id="atAdopt" class="primary">＋ ${esc(t('atlasAdopt'))}</button>` : ''}<button id="atPlan">🧭 ${esc(t('plAsDest'))}</button></div>`;
       const ad = $('#atAdopt'); if (ad) ad.onclick = () => { pushUndo(); const n = adoptAtlas(o); state.selected = n.id; if (state.mode !== 'edit') setMode('edit'); afterEdit(true); };
-      $('#atPlan').onclick = () => { const P = settings.planner; P.stops[P.stops.length - 1] = o.name; state.plannerOpen = true; saveSoon(); renderPlanner(); draw(); };
+      $('#atPlan').onclick = () => { const P = settings.planner; P.stops[P.stops.length - 1] = o.name; state.plannerOpen = true; saveSoon(); renderPlanner(); if (isMobile()) { setSheet(false); setDrawer(true); } draw(); };
       return;
     }
     if (!editable()) {
@@ -2395,7 +2393,7 @@
   $('#mobFilter').addEventListener('click', () => setDrawer(!document.body.classList.contains('drawer-open')));
   $('#backdrop').addEventListener('click', () => setDrawer(false));
   $('#mobPanel').addEventListener('click', () => setSheet(!document.body.classList.contains('sheet-open')));
-  $('#mobPlanner').addEventListener('click', () => { state.plannerOpen = true; state.pick = null; renderPlanner(); setSheet(true); draw(); });
+  $('#mobPlanner').addEventListener('click', () => { state.plannerOpen = true; state.pick = null; renderPlanner(); setSheet(false); setDrawer(true); draw(); });
   $('#sheetClose').addEventListener('click', () => setSheet(false));
   window.matchMedia('(max-width: 900px)').addEventListener('change', () => { setSheet(false); setDrawer(false); setTimeout(resize, 50); });
 
@@ -2427,8 +2425,8 @@
   }
   function renderStory() {
     const box = $('#story');
-    const show = state.mode === 'story' && !state.plannerOpen;
-    box.hidden = !show; if (state.mode === 'story' && !state.plannerOpen) $('#info').hidden = true;
+    const show = state.mode === 'story';
+    box.hidden = !show; if (show) $('#info').hidden = true;
     if (!show) { storyEditing = false; return; }
     const e = era(), eras = sortedEras(), can = canEditTl() && e;
     const end = e ? eraEnd(e) : null, all = settings.storyScope !== 'era', canS = canEditTl();
@@ -2576,7 +2574,7 @@
     const dl = $('#ruleDel'); if (dl) dl.onclick = () => { const r = state.tl.rules.find(x => x.id === ruleEdit); if (!r || !confirm(t('ruleDelQ', r.title))) return; pushUndo(); state.tl.rules = state.tl.rules.filter(x => x !== r); ruleEdit = null; afterEdit(); rerender(); };
   }
   function renderWorldNotes() {
-    const box = $('#wnotes'), show = state.mode === 'world' && !state.plannerOpen;
+    const box = $('#wnotes'), show = state.mode === 'world';
     box.hidden = !show; if (show) $('#info').hidden = true;
     if (!show) { wnEdit = null; ruleEdit = null; return; }
     if ((wnEdit && $('#wnForm') || ruleEdit && $('#ruleForm')) && !renderWorldNotes.force) return;
@@ -2670,7 +2668,7 @@
   const defCurrency = () => state.world.type === 'fantasy' ? 'Gold' : 'Credits';
   const REL_COL = { ally: '#81c784', enemy: '#e57373', family: '#ffb74d', contact: '#64b5f6', other: '#90a4ae' };
   const charsAt = o => (state.tl.characters || []).filter(c => { const n = o.name.toLowerCase(); return (c.location || '').toLowerCase() === n || (c.homeworld || '').toLowerCase() === n; });
-  function openChar(id) { charSel = id; charEdit = false; if (state.plannerOpen) state.plannerOpen = false; setMode('chars'); }
+  function openChar(id) { charSel = id; charEdit = false; setMode('chars'); }
   const placeByName = n => { const q = String(n || '').toLowerCase().trim(); return q && (state.tl.objects.find(o => o.name.toLowerCase() === q) || (isSW() ? atlasObjs().find(o => o.name.toLowerCase() === q) : null)); };
   function charLink(name) { if (!name) return ''; const o = (state.tl.characters || []).find(x => x.name.toLowerCase() === String(name).toLowerCase()); return o ? `<a href="#" data-cid="${esc(o.id)}">${esc(name)}</a>` : esc(name); }
   function charImgBox(src, cls) { return src ? `<img class="${cls}" src="${esc(src)}" alt="" data-zoom="${esc(src)}">` : `<div class="${cls} ph">👤</div>`; }
@@ -2687,7 +2685,7 @@
     });
   }
   function renderChars(force) {
-    const box = $('#chars'), show = state.mode === 'chars' && !state.plannerOpen;
+    const box = $('#chars'), show = state.mode === 'chars';
     box.hidden = !show; if (show) $('#info').hidden = true;
     if (!show) { charEdit = false; return; }
     if (charEdit && $('#chForm') && !force) return; // Eingaben beim Bearbeiten nicht überschreiben

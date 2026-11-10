@@ -229,7 +229,7 @@ body[data-theme="fantasy"] #toolHint { background: #f7edd6ee; color: #8b1e1e; bo
 
 /* Reiseplaner */
 .planner-btn { font-weight: 600; }
-#planner { padding: 12px 14px; }
+#planner { padding: 10px 0 2px; }
 .pl-row { display: flex; gap: 6px; align-items: center; margin-bottom: 5px; }
 .pl-row input { flex: 1; min-width: 0; }
 .pl-row.picking input { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
@@ -473,3 +473,12 @@ table.money-log th { text-align: left; font-size: 11px; text-transform: uppercas
 table.money-log td { padding: 4px 6px; border-top: 1px solid var(--border, #2a3446); vertical-align: top; }
 table.money-log .num { text-align: right; white-space: nowrap; }
 table.money-log .pos { color: #81c784; } table.money-log .neg { color: #e57373; }
+
+#left .lfold > .ltg { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; justify-content: flex-start; }
+#left .lfold > .ltg::before { content: '▾'; font-size: 10px; opacity: .7; width: 10px; }
+#left .lfold.folded > .ltg::before { content: '▸'; }
+#left .lfold.folded > :not(.ltg) { display: none !important; }
+#left .lfold.folded { flex: 0 0 auto; }
+#left .lfold > .ltg .mini-actions { margin-left: auto; }
+#left #planner .row { flex-wrap: wrap; }
+#left #planner input, #left #planner select { min-width: 0; }
