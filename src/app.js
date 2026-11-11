@@ -555,7 +555,7 @@
     $('#btnPlanner').classList.toggle('active', state.plannerOpen);
     box.hidden = !state.plannerOpen;
     // rechte Seite: Infofeld nur, wenn kein Story-/Charakter-/Welt-Reiter offen ist
-    $('#info').hidden = state.mode === 'story' || state.mode === 'chars' || state.mode === 'world';
+    $('#info').hidden = state.mode === 'story' || state.mode === 'chars' || state.mode === 'world' || state.mode === 'housing';
     if (!state.plannerOpen) return;
     const P = settings.planner, fan = state.world.type === 'fantasy';
     computePlan();
@@ -1301,6 +1301,7 @@
   window.addEventListener('keydown', e => {
     const tag = (e.target.tagName || '').toLowerCase();
     const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
+    if (state.mode === 'housing' && HS && $('#modal').hidden && HS.key(e, typing)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { if (!typing && !isGuest()) { e.preventDefault(); undo(); } return; }
     if (typing || !$('#modal').hidden || state.mode === 'settings') return;
     const step = e.shiftKey ? 10 : 1;
@@ -1863,7 +1864,8 @@
     $('#tabStory').classList.toggle('active', state.mode === 'story');
     $('#tabChars').classList.toggle('active', state.mode === 'chars');
     $('#tabWorld').classList.toggle('active', state.mode === 'world');
-    const curTab = { view: 'tabView', edit: 'tabEdit', story: 'tabStory', chars: 'tabChars', world: 'tabWorld', settings: 'tabSettings' }[state.mode] || 'tabView';
+    $('#tabHousing').classList.toggle('active', state.mode === 'housing');
+    const curTab = { view: 'tabView', edit: 'tabEdit', story: 'tabStory', chars: 'tabChars', housing: 'tabHousing', world: 'tabWorld', settings: 'tabSettings' }[state.mode] || 'tabView';
     $('#btnModes').innerHTML = `<span class="mi mi-${curTab}"></span>${esc(t(curTab))} <span class="dim">▾</span>`;
     $('#btnModes').title = t('menu');
     $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
@@ -2063,9 +2065,9 @@
 
   // ------------------------------------------------------------- Modus & Einstellungen
   function setMode(m) {
-    if (m !== 'view' && m !== 'story' && m !== 'chars' && m !== 'world' && m !== 'settings' && isGuest()) { loginDialog(); return; }
+    if (m !== 'view' && m !== 'story' && m !== 'chars' && m !== 'world' && m !== 'settings' && m !== 'housing' && isGuest()) { loginDialog(); return; }
     state.mode = m;
-    if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars' || m === 'world');
+    if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars' || m === 'world' || m === 'housing');
     $('#settingsView').hidden = m !== 'settings';
     if (m === 'settings') renderSettings();
     renderAll(true);
@@ -2075,6 +2077,7 @@
   $('#tabEdit').addEventListener('click', () => setMode('edit'));
   $('#tabStory').addEventListener('click', () => setMode(state.mode === 'story' ? 'view' : 'story'));
   $('#tabChars').addEventListener('click', () => setMode(state.mode === 'chars' ? 'view' : 'chars'));
+  $('#tabHousing').addEventListener('click', () => setMode(state.mode === 'housing' ? 'view' : 'housing'));
   $('#tabWorld').addEventListener('click', () => setMode(state.mode === 'world' ? 'view' : 'world'));
   $('#eraDesc').addEventListener('click', () => setMode('story'));
   $('#eraName').addEventListener('click', () => setMode('story'));
@@ -2914,11 +2917,16 @@
     $('#chDel').onclick = () => { if (!confirm(t('charDelQ', c.name))) return; pushUndo(); state.tl.characters = state.tl.characters.filter(x => x !== c); charSel = null; charEdit = false; afterEdit(); renderChars(true); };
   }
 
+  // ------------------------------------------------------------- Housing (housing.js)
+  var HS = window.IAM_HOUSING_UI ? window.IAM_HOUSING_UI({
+    lang: () => settings.lang, esc, tl: () => state.tl, mode: () => state.mode, isSW: () => isSW(),
+    canEdit: () => canEditTl(), pushUndo: () => pushUndo(), undo: () => undo(), save: () => saveSoon(), toast: m => toast(m), resizeImage: (f, m, t) => resizeImage(f, m, t)
+  }) : null;
   function renderAll() {
     editVersion++;
     rebuildTree();
     document.body.classList.toggle('is-sw', isSW());
-    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory(); renderChars(); renderWorldNotes();
+    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory(); renderChars(); renderWorldNotes(); if (HS) HS.render();
     lastEraId = era() ? era().id : null; renderYear(); updateToolHint(); draw();
   }
 

@@ -31,7 +31,7 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
 | Vollbild | F11 |
 | Rückgängig (Editor) | Strg+Z |
 
-**Bereichsmenü oben rechts** (Knopf mit dem aktuellen Bereich, z. B. „🗺 Ansicht ▾“): Ansicht, Editor, Story, Charaktere, Welt, Einstellungen und die Sprache DE/EN.
+**Bereichsmenü oben rechts** (Knopf mit dem aktuellen Bereich, z. B. „🗺 Ansicht ▾“): Ansicht, Editor, Story, Charaktere, Housing, Welt, Einstellungen und die Sprache DE/EN.
 - **Ansicht:** Filter für Objekte (Sonnen, Planeten, Monde, Stationen bzw. Hauptstädte, Städte, Dörfer, Festungen, Wahrzeichen), Einflussbereiche, Hyperraumrouten bzw. Routen, Regionen, Sektoren, Raster, Namen und einzelne Fraktionen
 - **Story:** zeigt den Story-Text (RP-Stand) des aktuellen Zeitalters in voller Länge und alle Kapitel/Zeitalter zum Anklicken; mit Bearbeitungsrechten direkt editierbar (Leerzeile = Absatz, `**fett**`, `*kursiv*`)
 - **Editor:** Zeitalter, Fraktionen, Routen und Werkzeuge (Zuweisen, Region, Einfluss malen, Radieren, Objekt anlegen, Route zeichnen)
@@ -141,6 +141,31 @@ Dazu kommen Tags, Notizen, ein Porträt und eine Bildergalerie.
 - **MCP (ChatGPT/Claude):** `list_characters` (Filter u. a. nach Gruppe), `get_character` (kompletter Steckbrief als Text), `upsert_character` (nur angegebene Felder werden geändert; `append` hängt an, z. B. an Wissen oder Handlungsstränge; `addRelations` ergänzt einzelne Beziehungen; `money`/`moneyDelta` setzt bzw. ändert das Geld (mit `moneyReason` als Grund im Verlauf), `inventory` legt Gegenstände an oder ändert sie (Menge per `qtyDelta`, Menge 0 entfernt), `removeItems` entfernt sie; `group` legt die Gruppe bei Bedarf an), `add_character_image` (Bild per Link – wird heruntergeladen und dauerhaft unter `images/` im Datenordner gespeichert – oder Base64; `portrait: true` setzt es als Porträt), `delete_character`.
 - **REST:** `GET /api/v1/characters`, `GET /api/v1/character?name=…`, `POST/DELETE /api/v1/character`, `POST /api/v1/character/image`.
 - Selbst hochgeladene Bilder werden verkleinert direkt in der Zeitlinien-Datei gespeichert.
+
+### Housing (Raumschiffe, Häuser, Basen)
+
+Im Bereich **🏠 Housing** legst du pro Zeitlinie eigene Raumschiffe, Häuser, Basen, Stationen oder Fahrzeuge an. Jedes Objekt kann Besitzer (Charaktere) und einen Ort der Karte haben und besteht aus einem oder mehreren **Decks bzw. Etagen**.
+
+- **Eigener Grundriss im Raster:** Mit **▭ Raum** ein Rechteck aufziehen. Mit **＋▭ Fläche** weitere Rechtecke an den ausgewählten Raum anfügen, so entstehen L- oder U-Formen (keine Rundungen). Wände werden automatisch gezeichnet.
+- **Wände verschieben:** Raum auswählen und eine Kante (blauer Griff) ziehen. Angrenzende Räume wandern mit, mit gedrückter **Alt**-Taste nur der eine Raum. Ganze Räume verschiebst du durch Ziehen.
+- **Vorhandener Grundriss als Vorlage:** In den Deck-Einstellungen **🖼 Bild als Vorlage** wählen (z. B. ein offizieller Deckplan). Das Raster passt sich dem Bild an. Darauf zeichnest du Räume als Flächen nach oder markierst sie mit **📍 Markierung**. Die Deckkraft ist einstellbar.
+- **Räume beschreiben:** Name, Farbe, Beschreibung, Einrichtung, Gegenstände (mit Notiz) und Notizen.
+- Rechte Maustaste bzw. Mausrad schiebt und zoomt, ⌂ zeigt den ganzen Plan. Unten rechts steht das Feld unter der Maus (z. B. „Feld x 12, y 5“), praktisch für Absprachen mit ChatGPT. Strg+Z macht rückgängig.
+- Gespeichert wird in der Zeitlinie (`housing`). Schreibrechte wie bei der Zeitlinie, Kanon bleibt schreibgeschützt.
+
+**ChatGPT (MCP):**
+
+| Werkzeug | Zweck |
+|---|---|
+| `list_housing`, `get_housing` | Übersicht bzw. alles zu einem Objekt (Decks, Räume mit Flächen-Koordinaten, Einrichtung, Gegenstände) |
+| `upsert_housing` | Objekt anlegen oder ändern (Name, Art, Beschreibung, Besitzer, Ort) |
+| `upsert_deck` | Deck/Etage anlegen oder ändern (Name, Rastergröße, Maßeinheit) |
+| `set_deck_image` | Grundriss-Bild per Link oder Base64 setzen. GPT kann online einen Deckplan suchen und den Link übergeben. Bei Webseiten-Links (z. B. Wiki-Dateiseite) nimmt der Server das Haupt- bzw. Vorschaubild |
+| `upsert_room` | Raum anlegen oder ändern: Flächen `[x, y, Breite, Höhe]` im Raster oder Markierung `pin`, dazu Beschreibung, Einrichtung, Gegenstände, Notizen |
+| `move_wall` | Wand eines Raums verschieben (`side` left/right/top/bottom, `by` Felder). Nachbarräume wandern mit |
+| `delete_room`, `delete_deck`, `delete_housing` | Löschen (nur exakter Name oder id) |
+
+Beispiel: *„Such einen Deckplan der Ebon Hawk und leg ihn als Grundriss für mein Schiff in Sith Story RP an. Markiere die Räume und beschreib den Frachtraum.“* oder *„Mach die Lounge zwei Felder breiter.“*
 
 ### Weltbild per ChatGPT
 

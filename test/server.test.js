@@ -42,7 +42,7 @@ async function mcp(tok, name, args) {
 
 test.before(async () => {
   seed();
-  srv = spawn(process.execPath, [path.join(ROOT, 'server', 'server.js')], { env: Object.assign({}, process.env, { PORT: String(PORT), DATA_DIR: DATA, IAM_PASSWORD: 'geheim', IAM_API_TOKEN: TOK.admin, IAM_PUBLIC_VIEW: 'false' }), stdio: ['ignore', 'ignore', 'pipe'] });
+  srv = spawn(process.execPath, [path.join(ROOT, 'server', 'server.js')], { env: Object.assign({}, process.env, { PORT: String(PORT), DATA_DIR: DATA, IAM_PASSWORD: 'geheim', IAM_API_TOKEN: TOK.admin, IAM_PUBLIC_VIEW: 'false', IAM_FETCH_ALLOW: '127.0.0.2' }), stdio: ['ignore', 'ignore', 'pipe'] });
   srv.stderr.on('data', d => process.stderr.write(d));
   for (let i = 0; i < 100; i++) { try { const r = await fetch(BASE + '/api/info'); if (r.ok) return; } catch { } await new Promise(r => setTimeout(r, 100)); }
   throw new Error('Server startet nicht');
@@ -99,4 +99,56 @@ test('Kanon bleibt schreibgeschützt, Orte bleiben erhalten', async () => {
   assert.ok(r.isError);
   const tl = JSON.parse(fs.readFileSync(path.join(DATA, 'timelines', 'Haupt.json'), 'utf8'));
   assert.equal(tl.objects.length, 1); assert.equal(tl.objects[0].name, 'Nordhafen');
+});
+
+// ---------------------------------------------------------------- Housing
+const http = require('node:http');
+let web;
+test('Housing über MCP: Schiff anlegen, Räume, Wand verschieben, lesen', async () => {
+  const h = await mcp(TOK.editor, 'upsert_housing', { timeline: 'Haupt', name: 'Ebon Talon', kind: 'ship', owners: ['Arin'], place: 'Nordhafen', description: 'Leichter Frachter' });
+  assert.ok(!h.isError, h.text); assert.equal(h.data.created, true);
+  const a = await mcp(TOK.editor, 'upsert_room', { timeline: 'Haupt', housing: 'Ebon Talon', room: 'Cockpit', rects: [[2, 10, 6, 8]], description: 'Zwei Sitze', items: [{ name: 'Navicomputer' }] });
+  assert.ok(!a.isError, a.text);
+  const b = await mcp(TOK.editor, 'upsert_room', { timeline: 'Haupt', housing: 'Ebon Talon', room: 'Lounge', rects: [[8, 8, 12, 12], [8, 20, 4, 3]], furnishing: 'Dejarik-Tisch, Sofa' });
+  assert.ok(!b.isError, b.text); assert.equal(b.data.room.area, 156);
+  const w = await mcp(TOK.editor, 'move_wall', { timeline: 'Haupt', housing: 'Ebon Talon', room: 'Cockpit', side: 'right', by: 2 });
+  assert.ok(!w.isError, w.text);
+  assert.deepEqual(w.data.changed.find(x => x.name === 'Cockpit').rects, [[2, 10, 8, 8]]);
+  assert.deepEqual(w.data.changed.find(x => x.name === 'Lounge').rects[0], [10, 8, 10, 12], 'Nachbarwand wandert mit');
+  const ov = await mcp(TOK.editor, 'upsert_room', { timeline: 'Haupt', housing: 'Ebon Talon', room: 'Kabine', rects: [[15, 10, 3, 3]] });
+  assert.match(ov.data.warning, /Lounge/);
+  const bad = await mcp(TOK.editor, 'upsert_room', { timeline: 'Haupt', housing: 'Ebon Talon', room: 'Zu groß', rects: [[38, 0, 5, 5]] });
+  assert.ok(bad.isError && /Rand/.test(bad.text));
+  const tooFar = await mcp(TOK.editor, 'move_wall', { timeline: 'Haupt', housing: 'Ebon Talon', room: 'Cockpit', side: 'right', by: 15 });
+  assert.ok(tooFar.isError);
+  const g = await mcp(TOK.viewer, 'get_housing', { timeline: 'Haupt', housing: 'Ebon Talon' });
+  assert.match(g.text, /Besitzer: Arin/); assert.match(g.text, /Ort: Nordhafen/); assert.match(g.text, /Navicomputer/); assert.match(g.text, /überlappende/);
+  const ls = await mcp(TOK.viewer, 'list_housing', { timeline: 'Haupt' });
+  assert.match(ls.text, /Ebon Talon/);
+  const del = await mcp(TOK.editor, 'delete_room', { timeline: 'Haupt', housing: 'Ebon Talon', room: 'Kabine' });
+  assert.ok(!del.isError);
+  const vw = await rpc(TOK.viewer, 'tools/list');
+  assert.ok(!vw.tools.some(t => t.name === 'upsert_room'), 'Leser kann nicht ändern');
+});
+
+test('Housing: Grundriss-Bild per Base64 und per Webseiten-Link (Vorschaubild)', async () => {
+  const png = Buffer.from(PNG.split(',')[1], 'base64');
+  web = http.createServer((req, res) => {
+    if (req.url === '/plan.png') { res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(png); }
+    res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html><head><meta property="og:image" content="/plan.png"></head><body>Deckplan</body></html>');
+  });
+  await new Promise(r => web.listen(0, '127.0.0.2', r));
+  const base = `http://127.0.0.2:${web.address().port}`;
+  const a = await mcp(TOK.editor, 'set_deck_image', { timeline: 'Haupt', housing: 'Ebon Talon', data: PNG });
+  assert.ok(!a.isError, a.text); assert.match(a.data.image.src, /^images\//);
+  const page = await mcp(TOK.editor, 'set_deck_image', { timeline: 'Haupt', housing: 'Ebon Talon', url: base + '/wiki/Datei:Plan' });
+  assert.ok(!page.isError, page.text); assert.equal(page.data.image.w, 1);
+  const pin = await mcp(TOK.editor, 'upsert_room', { timeline: 'Haupt', housing: 'Ebon Talon', room: 'Frachtraum', pin: [20, 20], description: 'Laderaum' });
+  assert.ok(!pin.isError, pin.text);
+  const clr = await mcp(TOK.editor, 'set_deck_image', { timeline: 'Haupt', housing: 'Ebon Talon', clear: true });
+  assert.ok(!clr.isError);
+  web.close();
+  const tl = JSON.parse(fs.readFileSync(path.join(DATA, 'timelines', 'Haupt.json'), 'utf8'));
+  assert.equal(tl.housing.length, 1); assert.equal(tl.housing[0].decks[0].image, null);
+  assert.equal(tl.objects.length, 1, 'Orte unverändert'); assert.equal(tl.characters.length, 1, 'Charaktere unverändert');
 });

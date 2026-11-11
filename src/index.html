@@ -46,6 +46,7 @@
           <button id="tabEdit" data-i18n="tabEdit"></button>
           <button id="tabStory" data-i18n="tabStory"></button>
           <button id="tabChars" data-i18n="tabChars"></button>
+          <button id="tabHousing" data-i18n="tabHousing"></button>
           <button id="tabWorld" data-i18n="tabWorld"></button>
           <button id="tabSettings" data-i18n="tabSettings"></button>
           <div class="menu-sep"></div>
@@ -102,6 +103,7 @@
       <button id="zoomFit" data-i18n-title="zoomFit">⌂</button>
     </div>
     <div id="settingsView" hidden></div>
+    <div id="housingView" hidden><canvas id="hvCanvas"></canvas><div id="hvTools"></div></div>
   </main>
 
   <div id="backdrop" hidden></div>
@@ -110,6 +112,7 @@
     <div id="story" hidden></div>
     <div id="chars" hidden></div>
     <div id="wnotes" hidden></div>
+    <div id="housing" hidden></div>
     <div id="editor" hidden></div>
     <div id="info"></div>
   </aside>
@@ -153,6 +156,8 @@
   <script src="worlds/starwars-atlas.js"></script>
   <script src="worlds/starwars.js"></script>
   <script src="worlds/starwars-facts.js"></script>
+  <script src="housing-core.js"></script>
+  <script src="housing.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

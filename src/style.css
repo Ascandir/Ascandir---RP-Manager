@@ -513,3 +513,32 @@ body[data-theme="scifi"] #topbar #modeMenu > button.active { color: #1a1205 !imp
 #tabChars::before, .mi-tabChars::before { content: "👤"; }
 #tabWorld::before, .mi-tabWorld::before { content: "🌍"; }
 #tabSettings::before, .mi-tabSettings::before { content: "⚙"; }
+#tabHousing::before, .mi-tabHousing::before { content: "🏠"; }
+/* ---------------------------------------------------------------- Housing */
+#housingView { position: absolute; inset: 0; background: var(--bg); z-index: 6; overflow: hidden; }
+#housingView[hidden] { display: none; }
+#hvCanvas { display: block; touch-action: none; }
+#hvTools { position: absolute; top: 8px; left: 10px; right: 10px; pointer-events: none; }
+#hvTools .hv-row { display: inline-flex; gap: 4px; flex-wrap: wrap; pointer-events: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
+#hvTools .hv-row button { padding: 4px 9px; }
+#hvTools .hv-hint { margin-top: 6px; font-size: 12px; color: var(--dim); background: color-mix(in srgb, var(--panel) 85%, transparent); display: inline-block; padding: 3px 8px; border-radius: 6px; max-width: 760px; }
+#housing { padding: 12px 14px 30px; }
+#housing label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--dim); margin: 5px 0; }
+#housing label > input, #housing label > select, #housing label > textarea { color: var(--text); width: 100%; box-sizing: border-box; }
+#housing .hs-head { display: flex; gap: 4px; margin-bottom: 6px; }
+#housing .hs-head select { flex: 1; min-width: 0; }
+#housing .hs-new { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+#housing .hs-new input { flex: 1; min-width: 120px; }
+#housing .hs-sec { border-top: 1px solid var(--line); padding: 6px 0; }
+#housing .hs-sec > summary { cursor: pointer; font-weight: 600; user-select: none; }
+#housing .hs-decks, #housing .hs-rooms { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+#housing .hs-rooms button { display: inline-flex; align-items: center; gap: 6px; }
+#housing .hs-chip { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0,0,0,.35); }
+#housing .hs-sub { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; margin: 10px 0 3px; }
+#housing .hs-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#housing .hs-two input[type=color] { height: 30px; padding: 1px; }
+#housing .hs-room { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 6px; }
+#housing .hs-item, #housing .hs-area { display: flex; gap: 4px; align-items: center; margin: 3px 0; }
+#housing .hs-item input:first-child { flex: 1.2; min-width: 0; } #housing .hs-item input:nth-child(2) { flex: 1; min-width: 0; }
+#housing .hs-area span { flex: 1; }
+#housing .small { font-size: 11px; }

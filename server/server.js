@@ -26,6 +26,7 @@ const UPDATE_HOOK_TOKEN = process.env.IAM_UPDATE_WEBHOOK_TOKEN || '';
 const PUBLIC_VIEW = !/^(0|false|no)$/i.test(process.env.IAM_PUBLIC_VIEW || 'true'); // Gäste dürfen ansehen
 const VERSION = (() => { try { return require(path.join(__dirname, '..', 'package.json')).version; } catch { return 'docker'; } })();
 const DIRS = ['worlds', 'timelines'];
+const HOUSING = require(path.join(SRC_DIR, 'housing-core.js'));
 for (const d of DIRS) fs.mkdirSync(path.join(DATA_DIR, d), { recursive: true });
 
 // ---------------------------------------------------------------- Benutzer & Rechte
@@ -523,8 +524,9 @@ async function safeFetch(u, hops = 0) {
   const host = url.hostname.replace(/^\[|\]$/g, '');
   const addrs = net.isIP(host) ? [host] : (await dnsP.lookup(host, { all: true }).catch(() => [])).map(a => a.address);
   if (!addrs.length) throw Object.assign(new Error('Adresse nicht gefunden: ' + host), { code: 400 });
-  if (addrs.some(privateIp)) throw Object.assign(new Error('Bilder aus dem lokalen Netz können nicht geladen werden – bitte öffentliche URL oder Base64 verwenden'), { code: 400 });
-  const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(20000) });
+  const allow = (process.env.IAM_FETCH_ALLOW || '').split(',').map(x => x.trim()).filter(Boolean); // nur für Tests
+  if (addrs.some(a => privateIp(a) && !allow.includes(a))) throw Object.assign(new Error('Bilder aus dem lokalen Netz können nicht geladen werden – bitte öffentliche URL oder Base64 verwenden'), { code: 400 });
+  const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(20000), headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AscandirRP-Manager/1.0; +https://github.com/Ascandir)', Accept: 'image/png,image/jpeg,image/webp,image/gif,image/*;q=0.9,text/html;q=0.5,*/*;q=0.3' } });
   if (r.status >= 300 && r.status < 400 && r.headers.get('location')) {
     if (hops >= 4) throw Object.assign(new Error('zu viele Weiterleitungen'), { code: 400 });
     return safeFetch(new URL(r.headers.get('location'), url).toString(), hops + 1);
@@ -538,10 +540,23 @@ async function storeImageInfo(b) {
     const m = String(b.data).match(/^data:[^;,]*;base64,(.*)$/s);
     buf = Buffer.from((m ? m[1] : String(b.data)).replace(/\s+/g, ''), 'base64');
   } else if (b.url) {
-    let r; try { r = await safeFetch(String(b.url)); } catch (e) { throw Object.assign(new Error('image download failed: ' + e.message), { code: 400 }); }
-    if (!r.ok) throw Object.assign(new Error('image download failed: HTTP ' + r.status), { code: 400 });
-    if (+r.headers.get('content-length') > IMG_MAX) throw Object.assign(new Error('image larger than 10 MB'), { code: 400 });
-    buf = Buffer.from(await r.arrayBuffer());
+    const get = async u => {
+      let r; try { r = await safeFetch(u); } catch (e) { throw Object.assign(new Error('image download failed: ' + e.message), { code: 400 }); }
+      if (!r.ok) throw Object.assign(new Error('image download failed: HTTP ' + r.status + (r.status === 403 ? ' (die Seite erlaubt keine Downloads – bitte direkten Bildlink oder Base64 verwenden)' : '')), { code: 400 });
+      if (+r.headers.get('content-length') > IMG_MAX) throw Object.assign(new Error('image larger than 10 MB'), { code: 400 });
+      return { buf: Buffer.from(await r.arrayBuffer()), type: r.headers.get('content-type') || '' };
+    };
+    let got = await get(String(b.url));
+    // Link zu einer Webseite statt zum Bild: Vorschaubild (og:image / twitter:image) bzw. bei Wikis das Originalbild nehmen
+    if (!sniffImage(got.buf) && /html/i.test(got.type)) {
+      const html = got.buf.toString('utf8', 0, Math.min(got.buf.length, 2e6));
+      const meta = k => { const m = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${k}["'][^>]*>`, 'i')); const c = m && m[0].match(/content=["']([^"']+)["']/i); return c && c[1]; };
+      const wiki = (html.match(/<a[^>]+href=["']([^"']+)["'][^>]*class=["'][^"']*internal[^"']*["']/i) || html.match(/<div class="fullImageLink"[^>]*>\s*<a href=["']([^"']+)["']/i) || [])[1];
+      const cand = wiki || meta('og:image') || meta('og:image:url') || meta('twitter:image');
+      if (!cand) throw Object.assign(new Error('Die URL ist eine Webseite ohne erkennbares Bild – bitte den direkten Bildlink (endet meist auf .png/.jpg) verwenden'), { code: 400 });
+      got = await get(new URL(cand.replace(/&amp;/g, '&'), String(b.url)).toString());
+    }
+    buf = got.buf;
   } else throw Object.assign(new Error('url or data required'), { code: 400 });
   if (buf.length > IMG_MAX) throw Object.assign(new Error('image larger than 10 MB'), { code: 400 });
   const info = sniffImage(buf);
@@ -764,6 +779,87 @@ async function apiWrite(req, res, url, parts) {
     const c = findChar(t, b.id || b.name || q.get('name')); if (!c || (c.name.toLowerCase() !== String(b.name || q.get('name') || '').toLowerCase() && c.id !== b.id)) return send(res, 404, { error: 'character not found (exact name or id)' });
     t.characters = t.characters.filter(x => x !== c); saveTimeline(t); return send(res, 200, { ok: true });
   }
+  // ---------------------------------------------------------------- Housing (Raumschiffe, Häuser, Basen)
+  if (ep.startsWith('housing')) {
+    const H = HOUSING, hErr = e => e instanceof H.HousingError ? send(res, e.code, { error: e.message }) : Promise.reject(e);
+    t.housing = H.normalize(t.housing);
+    const now = new Date().toISOString();
+    const getH = () => { const h = H.findBy(t.housing, b.housing || b.id || b.name); if (!h) throw new H.HousingError('housing not found (Name oder id)', 404); return h; };
+    const getD = h => { const d = b.deck ? H.findBy(h.decks, b.deck) : h.decks[0]; if (!d) throw new H.HousingError('deck not found', 404); return d; };
+    try {
+      if (ep === 'housing' && (req.method === 'POST' || req.method === 'PATCH')) {
+        let h = b.id ? t.housing.find(x => x.id === b.id) : H.findBy(t.housing, b.name);
+        if (h && !b.id && h.name.toLowerCase() !== String(b.name || '').toLowerCase()) h = null; // nur exakter Name zählt als vorhanden
+        const created = !h;
+        if (!h) { if (!b.name) return send(res, 400, { error: 'name required' }); if (t.housing.length >= H.LIMITS.housing) return send(res, 413, { error: 'zu viele Einträge' }); h = H.newHousing({ name: b.name, kind: b.kind }); t.housing.push(h); }
+        if (b.newName) h.name = String(b.newName).slice(0, H.LIMITS.name);
+        if (b.kind && H.KINDS.includes(b.kind)) h.kind = b.kind;
+        if (b.description != null) h.description = String(b.description).slice(0, H.LIMITS.text);
+        if (Array.isArray(b.owners)) {
+          const ids = []; for (const n of b.owners) { const c = findChar(t, n); if (!c) throw new H.HousingError(`Charakter „${n}“ nicht gefunden`, 404); ids.push(c.id); }
+          h.owners = [...new Set(ids)];
+        }
+        if (b.place !== undefined) { if (!b.place) h.place = ''; else { const o = findPlace(t, b.place); if (!o) throw new H.HousingError(`Ort „${b.place}“ nicht gefunden`, 404); h.place = o.id; } }
+        h.updated = now; saveTimeline(t);
+        return send(res, created ? 201 : 200, { ok: true, created, id: h.id, name: h.name, decks: h.decks.map(d => ({ id: d.id, name: d.name, cols: d.cols, rows: d.rows })) });
+      }
+      if (ep === 'housing' && req.method === 'DELETE') {
+        const h = t.housing.find(x => x.id === b.id || (b.name && x.name.toLowerCase() === String(b.name).toLowerCase()));
+        if (!h) return send(res, 404, { error: 'housing not found (exakter Name oder id)' });
+        t.housing = t.housing.filter(x => x !== h); saveTimeline(t); return send(res, 200, { ok: true, deleted: h.id });
+      }
+      if (ep === 'housing/deck' && (req.method === 'POST' || req.method === 'PATCH')) {
+        const h = getH(); let d = b.deckId ? h.decks.find(x => x.id === b.deckId) : (b.deck ? h.decks.find(x => x.id === b.deck || x.name.toLowerCase() === String(b.deck).toLowerCase()) : null);
+        const created = !d;
+        if (!d) { if (h.decks.length >= H.LIMITS.decks) return send(res, 413, { error: 'zu viele Decks' }); d = H.newDeck({ name: b.newName || b.deck || 'Deck ' + (h.decks.length + 1), cols: b.cols, rows: b.rows, unit: b.unit }); h.decks.push(d); }
+        else H.applyDeck(d, { name: b.newName, cols: b.cols, rows: b.rows, unit: b.unit, imageOpacity: b.imageOpacity });
+        if (created && b.imageOpacity != null) H.applyDeck(d, { imageOpacity: b.imageOpacity });
+        h.updated = now; saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, deck: { id: d.id, name: d.name, cols: d.cols, rows: d.rows } });
+      }
+      if (ep === 'housing/deck' && req.method === 'DELETE') {
+        const h = getH(), d = h.decks.find(x => x.id === b.deck || x.name.toLowerCase() === String(b.deck || '').toLowerCase());
+        if (!d) return send(res, 404, { error: 'deck not found (exakter Name oder id)' });
+        if (h.decks.length === 1) return send(res, 409, { error: 'Das letzte Deck kann nicht gelöscht werden' });
+        h.decks = h.decks.filter(x => x !== d); h.updated = now; saveTimeline(t); return send(res, 200, { ok: true, deleted: d.id });
+      }
+      if (ep === 'housing/deck/image') {
+        const h = getH(), d = getD(h);
+        if (req.method === 'DELETE' || b.clear) { H.setImage(d, null); h.updated = now; saveTimeline(t); return send(res, 200, { ok: true, removed: true }); }
+        const img = await storeImageInfo(b); VIEWER = viewer;
+        H.setImage(d, img, b.fitGrid !== false);
+        if (b.imageOpacity != null) H.applyDeck(d, { imageOpacity: b.imageOpacity });
+        h.updated = now; saveTimeline(t); return send(res, 201, { ok: true, deck: d.id, image: d.image, cols: d.cols, rows: d.rows });
+      }
+      if (ep === 'housing/room' && (req.method === 'POST' || req.method === 'PATCH')) {
+        const h = getH(), d = getD(h);
+        let r = b.roomId ? d.rooms.find(x => x.id === b.roomId) : (b.room ? d.rooms.find(x => x.id === b.room || x.name.toLowerCase() === String(b.room).toLowerCase()) : null);
+        if (b.roomId && !r) return send(res, 404, { error: 'room not found (id)' });
+        const created = !r;
+        if (!r) {
+          if (d.rooms.length >= H.LIMITS.rooms) return send(res, 413, { error: 'zu viele Räume' });
+          r = { id: H.uid('rm'), name: String(b.newName || b.room || b.name || 'Raum'), color: H.COLORS[d.rooms.length % H.COLORS.length], rects: [], pin: null, description: '', furnishing: '', items: [], notes: '' };
+        }
+        const draft = JSON.parse(JSON.stringify(r));
+        H.applyRoom(d, draft, Object.assign({}, b, { name: b.newName != null ? b.newName : (created ? draft.name : undefined) }));
+        if (created) d.rooms.push(draft); else Object.assign(r, draft);
+        h.updated = now; saveTimeline(t);
+        const ov = H.overlaps(d).filter(p => p.includes(draft.id)).map(p => d.rooms.find(x => x.id === p.find(id => id !== draft.id)).name);
+        return send(res, created ? 201 : 200, Object.assign({ ok: true, created, room: { id: draft.id, name: draft.name, rects: draft.rects, pin: draft.pin, area: H.areaOf(draft) } }, ov.length ? { warning: 'überlappt mit: ' + ov.join(', ') } : {}));
+      }
+      if (ep === 'housing/room' && req.method === 'DELETE') {
+        const h = getH(), d = getD(h), r = d.rooms.find(x => x.id === b.room || x.name.toLowerCase() === String(b.room || '').toLowerCase());
+        if (!r) return send(res, 404, { error: 'room not found (exakter Name oder id)' });
+        d.rooms = d.rooms.filter(x => x !== r); h.updated = now; saveTimeline(t); return send(res, 200, { ok: true, deleted: r.id });
+      }
+      if (ep === 'housing/wall' && req.method === 'POST') {
+        const h = getH(), d = getD(h), r = H.findBy(d.rooms, b.room); if (!r) return send(res, 404, { error: 'room not found' });
+        const touched = H.moveWall(d, r, b.side, b.by, b.neighbors !== false);
+        h.updated = now; saveTimeline(t);
+        return send(res, 200, { ok: true, changed: touched.map(id => { const x = d.rooms.find(q => q.id === id); return { id, name: x.name, rects: x.rects }; }) });
+      }
+    } catch (e) { return hErr(e); }
+    return send(res, 404, { error: 'unknown endpoint' });
+  }
   if (ep === 'story' && (req.method === 'POST' || req.method === 'PATCH')) {
     const f = yearFmt(t, lang); t.story = t.story || [];
     let e = b.id ? t.story.find(x => x.id === b.id) : null;
@@ -917,6 +1013,8 @@ async function apiV1(req, res, url) {
       'POST /api/v1/story/order': 'Story-Abschnitte sortieren (ids, adjustYears)',
       'POST /api/v1/story | PATCH /api/v1/story | DELETE /api/v1/story': 'Story-Abschnitt anlegen (title, text, year, places) / ändern (id, append) / löschen (id)',
       'PUT /api/v1/timeline?timeline=': 'Komplette Zeitlinie ersetzen',
+      'GET /api/v1/housings?timeline= | GET /api/v1/housing?timeline=&name=&format=text': 'Housing (Raumschiffe, Häuser) lesen',
+      'POST|DELETE /api/v1/housing, /housing/deck, /housing/deck/image, /housing/room · POST /api/v1/housing/wall': 'Housing, Decks, Grundriss-Bild, Räume ändern; Wand verschieben (room, side, by)',
       'POST /api/v1/world/image | DELETE /api/v1/world/image': 'Weltbild einer eigenen Welt setzen (world, url oder data, opacity) / entfernen'
     },
     hints: { year: 'z.B. "3640 VSY", "3640 BBY", "-3640", "4 NSY"', timeline: 'ID, Name oder Dateiname; leer = Kanon' }
@@ -952,6 +1050,18 @@ async function apiV1(req, res, url) {
     if (q.get('format') === 'text') return send(res, 200, wnText(t, lang, list, year, q.get('history') === '1' || q.get('history') === 'true'), 'text/plain; charset=utf-8');
     const f = yearFmt(t, lang);
     return send(res, 200, { timeline: t.name, year, yearLabel: year != null ? fmtYear(year, f) : null, notes: list.map(n => { const r = wnAt(n, year); return r ? { id: n.id, title: n.title, category: n.category, places: n.places || [], until: n.until ?? null, text: r.text, certainty: r.certainty, since: r.year, sinceLabel: r.year != null ? fmtYear(r.year, f) : null, revisions: wnRevs(n).length } : null; }).filter(Boolean) });
+  }
+  if (ep === 'housings' || ep === 'housing') {
+    const t = tl(), list = HOUSING.normalize(JSON.parse(JSON.stringify(t.housing || [])));
+    const ctx = { charName: id => { const c = (t.characters || []).find(x => x.id === id); return c && c.name; }, placeName: id => { const o = t.objects.find(x => x.id === id); return o && o.name; } };
+    if (ep === 'housings') {
+      const out = list.map(h => ({ id: h.id, name: h.name, kind: h.kind, owners: h.owners.map(id => ctx.charName(id) || id), place: h.place ? ctx.placeName(h.place) || h.place : '', decks: h.decks.map(d => ({ id: d.id, name: d.name, rooms: d.rooms.length, image: !!d.image })) }));
+      if (q.get('format') === 'text') return send(res, 200, out.length ? out.map(h => `- ${h.name} [id: ${h.id}] (${h.kind})${h.owners.length ? ' – ' + h.owners.join(', ') : ''}${h.place ? ' @ ' + h.place : ''} · ${h.decks.map(d => d.name + ': ' + d.rooms + ' Räume').join(', ')}`).join('\n') : (lang === 'en' ? 'No housing yet.' : 'Noch keine Unterkünfte/Schiffe.'), 'text/plain; charset=utf-8');
+      return send(res, 200, { timeline: t.name, housing: out });
+    }
+    const h = HOUSING.findBy(list, q.get('name') || q.get('id')); if (!h) return send(res, 404, { error: 'housing not found' });
+    if (q.get('format') === 'text') return send(res, 200, HOUSING.textOf(h, ctx, lang), 'text/plain; charset=utf-8');
+    return send(res, 200, h);
   }
   if (ep === 'characters') {
     const t = tl(), qq = (q.get('q') || '').toLowerCase(), fq = (q.get('faction') || '').toLowerCase(), pq = (q.get('place') || '').toLowerCase();
@@ -1104,6 +1214,35 @@ const MCP_TOOLS = [
     inputSchema: S({ timeline: TL, name: str('Charakter'), url: str('https-Link zum Bild'), data: str('alternativ: Base64 oder data:-URL'), caption: str('Bildunterschrift'), portrait: { type: 'boolean' } }, ['timeline', 'name']),
     run: a => internalCall('POST', '/api/v1/character/image', {}, a) },
   { name: 'delete_character', title: 'Charakter löschen', description: 'Charakter löschen (exakter Name oder id).', inputSchema: S({ timeline: TL, name: str('exakter Name oder id') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/character', {}, Object.assign({}, a, { id: a.name })) },
+  // Housing
+  { name: 'list_housing', title: 'Housing auflisten', description: 'Raumschiffe, Häuser, Basen usw. einer Zeitlinie mit Besitzern, Ort und Decks.', ro: true,
+    inputSchema: S({ timeline: TL, lang: LG }, ['timeline']), run: (a, v) => internalCall('GET', '/api/v1/housings', { timeline: a.timeline, lang: a.lang, format: 'text' }, null, v) },
+  { name: 'get_housing', title: 'Housing lesen', description: 'Komplettes Objekt mit allen Decks und Räumen: Flächen im Raster ([x, y, Breite, Höhe], 0/0 = oben links), Beschreibung, Einrichtung, Gegenstände, Notizen. Vor Änderungen aufrufen.', ro: true,
+    inputSchema: S({ timeline: TL, housing: str('Name oder id'), lang: LG }, ['timeline', 'housing']), run: (a, v) => internalCall('GET', '/api/v1/housing', { timeline: a.timeline, name: a.housing, lang: a.lang, format: 'text' }, null, v) },
+  { name: 'upsert_housing', title: 'Housing anlegen/ändern', description: 'Raumschiff, Haus, Basis o.ä. anlegen oder ändern (nur angegebene Felder). Neu angelegte Objekte haben ein erstes Deck mit Raster 40×28. owners = Charakternamen, place = Ort der Karte.',
+    inputSchema: S({ timeline: TL, name: str('Name (Schlüssel), z.B. "Ebon Talon"'), newName: str('neuer Name'), kind: { type: 'string', enum: HOUSING.KINDS, description: 'ship = Raumschiff, house = Haus, base, station, vehicle, other' }, description: str('Beschreibung'), owners: { type: 'array', items: { type: 'string' }, description: 'Namen der Besitzer (Charaktere)' }, place: str('Ort, an dem es sich befindet (leer = keiner)') }, ['timeline', 'name']),
+    run: a => internalCall('POST', '/api/v1/housing', {}, a) },
+  { name: 'upsert_deck', title: 'Deck/Etage anlegen/ändern', description: 'Deck bzw. Etage anlegen oder ändern: Name, Rastergröße (cols × rows Felder), Maßeinheit (z.B. "1 m"), Deckkraft des Grundriss-Bildes.',
+    inputSchema: S({ timeline: TL, housing: str('Name oder id'), deck: str('Name oder id des Decks (neu, falls nicht vorhanden)'), newName: str('neuer Name'), cols: { type: 'number', description: 'Breite in Feldern (4–200)' }, rows: { type: 'number', description: 'Höhe in Feldern (4–200)' }, unit: str('z.B. "1 m" oder "1,5 m"'), imageOpacity: { type: 'number', description: '0–1' } }, ['timeline', 'housing', 'deck']),
+    run: a => internalCall('POST', '/api/v1/housing/deck', {}, a) },
+  { name: 'set_deck_image', title: 'Grundriss-Bild setzen', description: 'Setzt ein Bild als Grundriss-Vorlage unter das Raster eines Decks. Typischer Ablauf: per Websuche einen passenden Grundriss/Deckplan finden (z.B. „<Schiffsklasse> deck plan“), dann hier die URL übergeben – am besten den direkten Bildlink; bei einer Webseiten-URL (z.B. Wiki-Dateiseite) nimmt der Server das Haupt- bzw. Vorschaubild. Danach Räume mit upsert_room als Flächen oder Markierungen (pin) passend zum Bild eintragen (öffentliche URL oder Base64; PNG/JPEG/WebP/GIF, max. 10 MB). Das Raster wird ans Seitenverhältnis angepasst (fitGrid=false verhindert das). Darauf lassen sich Räume als Flächen oder Markierungen (pin) einzeichnen. clear=true entfernt das Bild.',
+    inputSchema: S({ timeline: TL, housing: str('Name oder id'), deck: str('Deck (leer = erstes)'), url: str('öffentliche https-URL'), data: str('alternativ Base64/data:-URL'), fitGrid: { type: 'boolean' }, imageOpacity: { type: 'number' }, clear: { type: 'boolean' } }, ['timeline', 'housing']),
+    run: a => internalCall(a.clear ? 'DELETE' : 'POST', '/api/v1/housing/deck/image', {}, a) },
+  { name: 'upsert_room', title: 'Raum anlegen/ändern', description: 'Raum anlegen oder ändern (nur angegebene Felder). Form: rects = Liste rechteckiger Flächen [x, y, Breite, Höhe] in Rasterfeldern (mehrere Flächen ergeben L-/U-Formen, ersetzt die bisherige Form), addRects hängt Flächen an; pin = [x, y] markiert einen Raum auf einem Grundriss-Bild ohne eigene Fläche. Inhalt: description (Beschreibung/Atmosphäre), furnishing (Einrichtung), items (Gegenstände [{name, note}], ersetzt die Liste), notes. Texte dürfen **fett**/*kursiv* enthalten.',
+    inputSchema: S({ timeline: TL, housing: str('Name oder id'), deck: str('Deck (leer = erstes)'), room: str('Raumname (Schlüssel) oder id; neu, falls nicht vorhanden'), newName: str('neuer Name'), color: str('#rrggbb'),
+      rects: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: '[[x, y, Breite, Höhe], …]' }, addRects: { type: 'array', items: { type: 'array', items: { type: 'number' } } },
+      pin: { type: 'array', items: { type: 'number' }, description: '[x, y]' }, description: str('Beschreibung'), furnishing: str('Einrichtung'), notes: str('Notizen'),
+      items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, note: { type: 'string' } }, required: ['name'] } } }, ['timeline', 'housing', 'room']),
+    run: a => internalCall('POST', '/api/v1/housing/room', {}, a) },
+  { name: 'move_wall', title: 'Wand verschieben', description: 'Verschiebt eine Außenwand eines Raums: side = left|right|top|bottom, by = Felder (positiv = nach rechts bzw. unten, negativ = nach links bzw. oben). Angrenzende Räume werden standardmäßig mitgezogen (neighbors=false nur diesen Raum ändern). Beispiel: Küche um 2 Felder nach rechts vergrößern → side "right", by 2.',
+    inputSchema: S({ timeline: TL, housing: str('Name oder id'), deck: str('Deck (leer = erstes)'), room: str('Raum'), side: { type: 'string', enum: ['left', 'right', 'top', 'bottom'] }, by: { type: 'number' }, neighbors: { type: 'boolean' } }, ['timeline', 'housing', 'room', 'side', 'by']),
+    run: a => internalCall('POST', '/api/v1/housing/wall', {}, a) },
+  { name: 'delete_room', title: 'Raum löschen', description: 'Löscht einen Raum (exakter Name oder id).', destructive: true,
+    inputSchema: S({ timeline: TL, housing: str('Name oder id'), deck: str('Deck (leer = erstes)'), room: str('exakter Name oder id') }, ['timeline', 'housing', 'room']), run: a => internalCall('DELETE', '/api/v1/housing/room', {}, a) },
+  { name: 'delete_deck', title: 'Deck löschen', description: 'Löscht ein Deck samt Räumen (exakter Name oder id; das letzte Deck bleibt immer).', destructive: true,
+    inputSchema: S({ timeline: TL, housing: str('Name oder id'), deck: str('exakter Name oder id') }, ['timeline', 'housing', 'deck']), run: a => internalCall('DELETE', '/api/v1/housing/deck', {}, a) },
+  { name: 'delete_housing', title: 'Housing löschen', description: 'Löscht ein Raumschiff/Haus komplett (exakter Name oder id). Nur auf ausdrücklichen Wunsch.', destructive: true,
+    inputSchema: S({ timeline: TL, name: str('exakter Name oder id') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/housing', {}, { timeline: a.timeline, name: a.name, id: a.name }) },
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
   { name: 'set_control', title: 'Kontrolle setzen', description: 'Legt fest, welche Fraktion einen Ort ab dem Zeitalter des angegebenen Jahres kontrolliert (faction leer = neutral).', inputSchema: S({ timeline: TL, place: str('Ort'), faction: str('Fraktion'), year: YR, era: str('oder Name des Zeitalters') }, ['timeline', 'place']), run: a => internalCall('POST', '/api/v1/control', {}, a) },
   { name: 'set_world_image', title: 'Weltbild setzen', description: 'Setzt ein Bild (z.B. eine gemalte Kontinentkarte als PNG/JPEG) als Hintergrund einer eigenen Welt; es wird eingepasst. Nur für Admins der Welt. clear=true entfernt das Weltbild.',
@@ -1116,7 +1255,7 @@ const MCP_INSTRUCTIONS = 'Ascandir RP-Manager: interaktive Karte (Star Wars u. e
   'WICHTIG: Jede Zeitlinie kann feste Weltregeln haben (list_rules). Sie gelten immer, haben Vorrang vor allem anderen und werden zu Beginn mit list_rules oder get_summary gelesen; ändern nur auf ausdrücklichen Wunsch des Nutzers. ' +
   'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
-  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
+  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Housing (Raumschiffe, Häuser, Basen) pro Zeitlinie: list_housing/get_housing lesen, upsert_housing, upsert_deck, set_deck_image (Grundriss-Bild), upsert_room (Räume als Rasterflächen oder Markierung, mit Beschreibung, Einrichtung, Gegenständen), move_wall (Wände verschieben); vorher get_housing aufrufen. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
 async function handleMcp(req, res, url, tv) {
   // tv = Betrachter aus dem Token (null = Gast). Sichtbar ist nur, was dieser Benutzer sehen darf.
   const viewerOf = () => tv || whoIs({ headers: {} }, null);
