@@ -87,6 +87,30 @@
     if (y >= 0 && f.pos) return `${y.toLocaleString(loc)} ${f.pos}`;
     return y.toLocaleString(loc);
   }
+  // ------------------------------------------------------------- Kalender der Zeitlinie (Monate/Tage, calendar.js)
+  const CAL = window.IAM_CAL;
+  function cal() { try { return CAL.normCal(state.tl && state.tl.calendar, settings.lang); } catch { return CAL.normCal(null, settings.lang); } }
+  const calOn = () => !!(CAL && state.tl && CAL.on(cal()));
+  const fmtD = o => !o || o.year == null ? '' : CAL ? CAL.fmt(cal(), o.year, o.month, o.day, fmtYear) : fmtYear(o.year);
+  const dkey = o => (o.year || 0) * 10000 + (o.month || 0) * 100 + (o.day || 0);
+  // Eingabefelder für Monat/Tag neben einem Jahresfeld (nur bei aktivem Kalender)
+  function mdFields(pre, o) {
+    if (!calOn()) return '';
+    const c = cal(), m = o && o.month || '', d = o && o.day || '';
+    return `<label class="field md-f"><span>${esc(t('calMonth'))}</span><select id="${pre}M"><option value="">–</option>${c.months.map((x, i) => `<option value="${i + 1}" ${+m === i + 1 ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+      <label class="field md-d"><span>${esc(t('calDay'))}</span><input id="${pre}D" type="number" min="1" max="400" value="${d}"></label>`;
+  }
+  // Jahr (Text, darf auch ein ganzes Datum sein) + Monat/Tag lesen; wirft bei ungültigen Angaben
+  function readDate(yearInput, pre) {
+    const raw = yearInput.trim(); let p = raw ? (CAL ? CAL.parse(cal(), raw, parseYear) : { year: parseYear(raw) }) : null;
+    if (raw && (!p || p.year == null)) throw new Error(t('calBadDate'));
+    if (!calOn() || !$('#' + pre + 'M')) return p;
+    const mv = $('#' + pre + 'M').value, dv = $('#' + pre + 'D').value;
+    if (p && p.month && !mv) return p;
+    const md = CAL.normMD(cal(), mv || null, dv || null);
+    return Object.assign(p || {}, md);
+  }
+  const setMDc = (o, p) => { if (!p) return; if (p.month) o.month = p.month; else delete o.month; if (p.day) o.day = p.day; else delete o.day; };
   function parseYear(str) {
     const s = String(str).trim().replace(/[.,\s](?=\d{3}\b)/g, '');
     const m = s.match(/^([+-]?\d+)\s*(.*)$/); if (!m) return null;
@@ -2247,6 +2271,40 @@
   $('#eraName').addEventListener('click', () => setMode('story'));
   $('#tabSettings').addEventListener('click', () => setMode(state.mode === 'settings' ? 'view' : 'settings'));
 
+  // Kalender der aktuellen Zeitlinie (Einstellungen): an/aus, Vorlage, eigene Monate
+  let calDraft = null;
+  function renderCalendarCard() {
+    const box = $('#calCard'); if (!box || !CAL) return;
+    const tl = state.tl, ed = !tl.readonly && canEditTl(tl), dis = ed ? '' : 'disabled';
+    if (!calDraft || calDraft.tl !== tl.id) calDraft = Object.assign({ tl: tl.id }, JSON.parse(JSON.stringify(cal())));
+    const d = calDraft, total = d.months.reduce((n, m) => n + (+m.days || 0), 0);
+    box.innerHTML = `<h3>📅 ${esc(t('calTitle'))}: ${esc(tl.name)}</h3>
+      <p class="hint">${esc(t('calHint'))}</p>
+      ${tl.readonly ? `<p class="hint">${esc(t('calReadonly'))}</p>` : ''}
+      <label class="chk"><input type="checkbox" id="calOn" ${d.enabled ? 'checked' : ''} ${dis}> ${esc(t('calEnable'))}</label>
+      <div ${d.enabled ? '' : 'hidden'}>
+        <label class="field"><span>${esc(t('calPreset'))}</span><select id="calPreset" ${dis}>${['gsc', 'gsc10', 'gregorian', 'custom'].map(k => `<option value="${k}" ${d.preset === k ? 'selected' : ''}>${esc(t('calP_' + k))}</option>`).join('')}</select></label>
+        <div class="cal-months">${d.months.map((m, i) => `<div class="cal-row"><span class="dim">${i + 1}.</span><input data-cmn="${i}" value="${esc(m.name)}" maxlength="40" ${dis}><input data-cmd="${i}" type="number" min="1" max="400" value="${m.days}" ${dis}><span class="dim small">${esc(t('calDays'))}</span>${ed ? `<button data-cmx="${i}" class="fixed" title="${esc(t('delete'))}">✕</button>` : ''}</div>`).join('')}</div>
+        ${ed ? `<button id="calAdd">＋ ${esc(t('calAddMonth'))}</button>` : ''}
+        <p class="hint">${esc(t('calTotal', String(total), String(d.months.length)))}</p>
+      </div>
+      ${ed ? `<div class="row"><button id="calSave" class="primary">${esc(t('save'))}</button></div>` : ''}`;
+    const on = (id, ev, fn) => { const el = $('#' + id); if (el) el[ev] = fn; };
+    on('calOn', 'onchange', e => { d.enabled = e.target.checked; renderCalendarCard(); });
+    on('calPreset', 'onchange', e => { d.preset = e.target.value; if (d.preset !== 'custom') d.months = CAL.PRESETS[d.preset](settings.lang); renderCalendarCard(); });
+    box.querySelectorAll('[data-cmn]').forEach(i => i.onchange = () => { d.months[+i.dataset.cmn].name = i.value; d.preset = 'custom'; renderCalendarCard(); });
+    box.querySelectorAll('[data-cmd]').forEach(i => i.onchange = () => { d.months[+i.dataset.cmd].days = +i.value; d.preset = 'custom'; renderCalendarCard(); });
+    box.querySelectorAll('[data-cmx]').forEach(b => b.onclick = () => { if (d.months.length > 1) d.months.splice(+b.dataset.cmx, 1); d.preset = 'custom'; renderCalendarCard(); });
+    on('calAdd', 'onclick', () => { d.months.push({ name: (settings.lang === 'en' ? 'Month ' : 'Monat ') + (d.months.length + 1), days: 30 }); d.preset = 'custom'; renderCalendarCard(); });
+    on('calSave', 'onclick', () => {
+      let c; try { c = CAL.normCal({ enabled: d.enabled, preset: d.preset, months: d.months }, settings.lang); } catch (e) { toast(e.message); return; }
+      pushUndo(); tl.calendar = c;
+      // Einträge, deren Monat/Tag es im neuen Kalender nicht gibt, behalten nur das Jahr
+      const fix = o => { if (!o || !o.month) return; const m = c.months[o.month - 1]; if (!m) { delete o.month; delete o.day; } else if (o.day > m.days) o.day = m.days; };
+      if (c.enabled) { (tl.story || []).forEach(fix); (tl.worldNotes || []).forEach(n => (n.revs || []).forEach(fix)); (tl.characters || []).forEach(ch => (ch.moneyLog || []).forEach(fix)); }
+      calDraft = null; afterEdit(true); toast(t('calSaved')); renderCalendarCard();
+    });
+  }
   function renderSettings() {
     const v = $('#settingsView'), w = state.world, info = state.appInfo;
     const tlCount = timelinesOfWorld(w).filter(x => !x.readonly).length;
@@ -2288,6 +2346,7 @@
         <h4 style="margin-top:14px">${esc(t('dangerZone'))}</h4>
         <button id="setDelWorld" class="danger">${esc(t('deleteWorld'))}</button>`}
       </section>
+      <section class="card" id="calCard"></section>
       ${FS && FS.server && srvInfo() && srvInfo().loginRequired && (isWorldAdmin(w) || timelinesOfWorld(w).some(x => !x.readonly && canAdminTl(x))) ? `<section class="card"><h3>👥 ${esc(t('worldPerms', worldName(w)))}</h3>
         <p class="hint">${esc(t('worldPermsHint'))}</p><div id="wpermBox" class="hint">…</div></section>` : ''}
       ${FS && FS.server && srvInfo() && srvInfo().user ? `<section class="card"><h3>🔑 ${esc(t('myApiTitle'))}</h3>
@@ -2311,6 +2370,7 @@
     const lo = $('#setLogout'); if (lo) lo.addEventListener('click', () => FS.logout().then(() => location.reload()));
     const li = $('#setLogin'); if (li) li.addEventListener('click', () => loginDialog());
     renderStorage();
+    renderCalendarCard();
     const so = $('#srvOn'); if (so) so.onclick = async () => {
       const u = $('#srvUrl').value.trim(); if (!u) return;
       try { const r = await fetch(u.replace(/\/?$/, '/') + 'api/info'); const j = await r.json(); if (!j.server) throw new Error('kein RP-Manager-Server'); }
@@ -2612,7 +2672,7 @@
   const storyOf = (from, to) => (state.tl.story || []).filter(x => (from == null || x.year >= from) && (to == null || x.year <= to))
     .sort((a, b) => chapRank(a) - chapRank(b) || storySortFn(a, b));
   const chapRank = x => { const l = chapters(), i = l.findIndex(c => c.id === x.chapter); return i; };
-  const storySortFn = (a, b) => a.year - b.year || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.created || '').localeCompare(String(b.created || ''));
+  const storySortFn = (a, b) => a.year - b.year || ((a.month || 0) * 100 + (a.day || 0)) - ((b.month || 0) * 100 + (b.day || 0)) || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.created || '').localeCompare(String(b.created || ''));
   const chapters = () => (state.tl.chapters ||= []).slice().sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
   let chapEdit = null;
   // Zugeklappte Abschnitte/Kapitel (pro Betrachter im Browser gespeichert)
@@ -2640,15 +2700,15 @@
     const chapOpts = sel => `<option value="">${esc(t('chapNone'))}</option>${chs.map((c, i) => `<option value="${esc(c.id)}" ${c.id === sel ? 'selected' : ''}>${i + 1}. ${esc(c.title)}</option>`).join('')}`;
     const secForm = (x, chap) => `<div class="story-sec editing">
       <input id="secTitle" placeholder="${esc(t('storySecTitle'))}" value="${esc(x ? x.title : '')}">
-      <div class="row"><label class="field"><span>${esc(t('storySecYear'))}</span><input id="secYear" value="${esc(fmtYear(x ? x.year : (secs.length ? secs[secs.length - 1].year : state.year)))}"></label>
+      <div class="row"><label class="field"><span>${esc(t('storySecYear'))}</span><input id="secYear" value="${esc(fmtYear(x ? x.year : (secs.length ? secs[secs.length - 1].year : state.year)))}"></label>${mdFields('sec', x || (secs.length ? secs[secs.length - 1] : null))}
         <label class="field"><span>${esc(t('chapter'))}</span><select id="secChap">${chapOpts(x ? x.chapter : chap)}</select></label></div>
       <label class="field"><span>${esc(t('storySecPlaces'))}</span><input id="secPlaces" value="${esc(x ? (x.places || []).join(', ') : '')}"></label>
       <textarea id="secText" class="story-edit" placeholder="${esc(t('storyFmt'))}">${esc(x ? x.text : '')}</textarea>
       <div class="row"><button id="secSave" class="primary">${esc(t('ok'))}</button><button id="secCancel">${esc(t('cancel'))}</button></div></div>`;
-    const sameGrp = (q, x) => q !== x && q.year === x.year && (q.chapter || '') === (x.chapter || '');
+    const sameGrp = (q, x) => q !== x && q.year === x.year && (q.month || 0) === (x.month || 0) && (q.day || 0) === (x.day || 0) && (q.chapter || '') === (x.chapter || '');
     const secHtml = x => secEdit === x.id ? secForm(x) : `
         <article class="story-sec${fold.has(x.id) ? ' folded' : ''}" data-sid="${esc(x.id)}">
-          <div class="sec-head"><span class="fold-tg fold-ar" title="${esc(t('foldToggle'))}">${fold.has(x.id) ? '▸' : '▾'}</span><b class="fold-tg">${esc(x.title)}</b><span class="y">${esc(fmtYear(x.year))}</span>
+          <div class="sec-head"><span class="fold-tg fold-ar" title="${esc(t('foldToggle'))}">${fold.has(x.id) ? '▸' : '▾'}</span><b class="fold-tg">${esc(x.title)}</b><span class="y">${esc(fmtD(x))}</span>
             ${canS && !fold.has(x.id) ? `<span class="sec-btns"><button class="fixed sec-up" title="${esc(t('storyUp'))}" ${secs.some(q => sameGrp(q, x) && storySortFn(q, x) < 0) ? '' : 'disabled'}>↑</button><button class="fixed sec-dn" title="${esc(t('storyDown'))}" ${secs.some(q => sameGrp(q, x) && storySortFn(q, x) > 0) ? '' : 'disabled'}>↓</button><button class="fixed sec-ed" title="${esc(t('storyEdit'))}">✎</button><button class="fixed danger sec-del" title="${esc(t('delete'))}">✕</button></span>` : ''}</div>
           ${fold.has(x.id) ? '' : `${(x.places || []).length ? `<div class="dim sec-pl">📍 ${esc(x.places.join(', '))}</div>` : ''}
           <div class="story-text">${rich(x.text || '')}</div>`}
@@ -2673,7 +2733,7 @@
       <div class="story-head">
         <div class="story-kicker">📖 ${esc(t('tabStory'))} · ${esc(state.tl.name)}</div>
         <h2>${esc(e ? e.name : t('noEra'))}</h2>
-        ${e ? `<div class="story-years">${esc(fmtYear(e.year))}${end != null ? ' – ' + esc(fmtYear(end)) : ''} · ${esc(t('storyNow'))} ${esc(fmtYear(state.year))}</div>` : ''}
+        ${e ? `<div class="story-years">${esc(fmtYear(e.year))}${end != null ? ' – ' + esc(fmtYear(end)) : ''} · ${esc(t('storyNow'))} ${esc(fmtYear(state.year))}${calOn() && (state.tl.story || []).length ? ` · 📅 ${esc(t('calRpDate'))}: <b>${esc(fmtD(storyOf(null, null).slice(-1)[0]))}</b>` : ''}</div>` : ''}
       </div>
       ${storyEditing ? `<textarea id="storyText" class="story-edit">${esc(e.desc || '')}</textarea>
         <div class="row"><button id="storySave" class="primary">${esc(t('ok'))}</button><button id="storyCancel">${esc(t('cancel'))}</button></div>
@@ -2709,14 +2769,16 @@
     box.querySelectorAll('.sec-dn').forEach(b => b.onclick = () => moveSection(sid(b), 1));
     box.querySelectorAll('.sec-del').forEach(b => b.onclick = () => { const x = (state.tl.story || []).find(q => q.id === sid(b)); if (!x || !confirm(t('storyDelQ', x.title))) return; pushUndo(); state.tl.story = state.tl.story.filter(q => q !== x); afterEdit(); renderStory(); });
     const ss = $('#secSave'); if (ss) ss.onclick = () => {
-      const y = parseYear($('#secYear').value); const title = $('#secTitle').value.trim(), text = $('#secText').value;
+      let pd; try { pd = readDate($('#secYear').value, 'sec'); } catch (err) { toast(err.message); return; }
+      const y = pd && pd.year != null ? pd.year : null; const title = $('#secTitle').value.trim(), text = $('#secText').value;
       if (!title && !text.trim()) return;
       pushUndo(); const list = (state.tl.story ||= []), now = new Date().toISOString();
       let x = list.find(q => q.id === secEdit);
       if (!x) { x = { id: uid('st'), created: now, places: [] }; list.push(x); } else x.updated = now;
-      const oldY = x.year, oldC = x.chapter || ''; x.title = title || t('storySection') + ' ' + list.length; x.text = text; x.year = y != null ? y : state.year;
+      const oldK = x.year != null ? dkey(x) : null, oldC = x.chapter || ''; x.title = title || t('storySection') + ' ' + list.length; x.text = text; x.year = y != null ? y : state.year;
+      if (calOn()) setMDc(x, pd || { month: null, day: null });
       x.chapter = $('#secChap').value;
-      if (oldY !== x.year || oldC !== x.chapter) x.order = Math.max(-1, ...list.filter(q => q !== x && q.year === x.year && (q.chapter || '') === (x.chapter || '')).map(q => q.order ?? -1)) + 1;
+      if (oldK !== dkey(x) || oldC !== x.chapter) x.order = Math.max(-1, ...list.filter(q => q !== x && dkey(q) === dkey(x) && (q.chapter || '') === (x.chapter || '')).map(q => q.order ?? -1)) + 1;
       x.places = $('#secPlaces').value.split(',').map(v => v.trim()).filter(Boolean);
       secEdit = null; afterEdit(); renderStory();
     };
@@ -2733,12 +2795,13 @@
   let wnEdit = null, wnQ = '';
   function wnRevs(n) {
     if (!Array.isArray(n.revs)) { n.revs = [{ year: null, text: n.text || '', certainty: n.certainty || 'confirmed', updated: n.updated || n.created || null }]; delete n.text; delete n.certainty; }
-    n.revs.sort((a, b) => (a.year ?? -Infinity) - (b.year ?? -Infinity)); return n.revs;
+    n.revs.sort((a, b) => (a.year == null ? -Infinity : dkey(a)) - (b.year == null ? -Infinity : dkey(b))); return n.revs;
   }
   function wnAt(n, year) {
     const r = wnRevs(n); if (year == null) return r[r.length - 1];
     if (n.until != null && year > n.until) return null;
-    let cur = null; for (const x of r) if (x.year == null || x.year <= year) cur = x; return cur;
+    const lim = year * 10000 + 9999; // Jahresansicht: Stand am Ende des Jahres
+    let cur = null; for (const x of r) if (x.year == null || dkey(x) <= lim) cur = x; return cur;
   }
   const wnRank = c => { const i = WN_CATS_DE.findIndex(x => x.toLowerCase() === String(c || '').toLowerCase()); return i < 0 ? 100 : i; };
   const wnSort = (a, b) => wnRank(a.category) - wnRank(b.category) || String(a.category || '').localeCompare(String(b.category || '')) || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.title).localeCompare(String(b.title));
@@ -2799,7 +2862,7 @@
       <div class="row"><label class="field"><span>${esc(t('wnCategory'))}</span><input id="wnCat" list="wnCatList" value="${esc(n ? n.category : (wnEdit && wnEdit.startsWith('new:') ? wnEdit.slice(4) : WN_CATS_DE[0]))}"></label>
         <label class="field"><span>${esc(t('wnCertainty'))}</span><select id="wnCert">${Object.keys(WN_CERT).map(k => `<option value="${k}" ${(r ? r.certainty || 'confirmed' : 'confirmed') === k ? 'selected' : ''}>${esc(t('wn_' + k))}</option>`).join('')}</select></label></div>
       <datalist id="wnCatList">${allCats.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
-      <div class="row"><label class="field"><span>${esc(t('wnFrom'))}</span><input id="wnYear" value="${esc(n ? (byYear ? fmtYear(state.year) : (r && r.year != null ? fmtYear(r.year) : '')) : fmtYear(state.year))}" placeholder="${esc(t('wnAlways'))}"></label>
+      <div class="row"><label class="field"><span>${esc(t('wnFrom'))}</span><input id="wnYear" value="${esc(n ? (byYear ? fmtYear(state.year) : (r && r.year != null ? fmtYear(r.year) : '')) : fmtYear(state.year))}" placeholder="${esc(t('wnAlways'))}"></label>${mdFields('wn', n && !byYear ? r : null)}
         <label class="field"><span>${esc(t('wnUntil'))}</span><input id="wnUntil" value="${esc(n && n.until != null ? fmtYear(n.until) : '')}" placeholder="${esc(t('wnOpen'))}"></label></div>
       <p class="hint" style="margin:0">${esc(t('wnYearHint'))}</p>
       <label class="field"><span>${esc(t('storySecPlaces'))}</span><input id="wnPlaces" value="${esc(n ? (n.places || []).join(', ') : '')}"></label>
@@ -2810,9 +2873,9 @@
         <div class="sec-head"><span class="fold-tg fold-ar">${fold.has(n.id) ? '▸' : '▾'}</span><b class="fold-tg">${esc(n.title)}</b>
           <span class="cert" style="--gc:${WN_CERT[r.certainty] || WN_CERT.confirmed}">${esc(t('wn_' + (r.certainty || 'confirmed')))}</span>
           ${can && !fold.has(n.id) ? `<span class="sec-btns"><button class="fixed wn-ed" title="${esc(t('storyEdit'))}">✎</button></span>` : ''}</div>
-        ${fold.has(n.id) ? '' : `<div class="dim sec-pl">${r.year != null ? `⏱ ${esc(t('wnSince'))} ${esc(fmtYear(r.year))}` : `⏱ ${esc(t('wnAlways'))}`}${n.until != null ? ` · ${esc(t('wnUntil'))} ${esc(fmtYear(n.until))}` : ''}${(n.places || []).length ? ` · 📍 ${n.places.map(p => { const o = placeByName(p); return o ? `<a href="#" data-place="${esc(o.id)}">${esc(p)}</a>` : esc(p); }).join(', ')}` : ''}</div>
+        ${fold.has(n.id) ? '' : `<div class="dim sec-pl">${r.year != null ? `⏱ ${esc(t('wnSince'))} ${esc(fmtD(r))}` : `⏱ ${esc(t('wnAlways'))}`}${n.until != null ? ` · ${esc(t('wnUntil'))} ${esc(fmtYear(n.until))}` : ''}${(n.places || []).length ? ` · 📍 ${n.places.map(p => { const o = placeByName(p); return o ? `<a href="#" data-place="${esc(o.id)}">${esc(p)}</a>` : esc(p); }).join(', ')}` : ''}</div>
           <div class="story-text">${rich(r.text || '')}</div>
-          ${revs.length > 1 ? `<div class="wn-hist"><a href="#" class="wn-htg">${fold.has(hk) ? '▾' : '▸'} ${esc(t('wnHistory'))} (${revs.length})</a>${fold.has(hk) ? revs.slice().reverse().map(h => `<div class="wn-rev${h === r ? ' cur' : ''}"><span class="y">${esc(h.year != null ? fmtYear(h.year) : t('wnAlways'))}</span> <span class="cert" style="--gc:${WN_CERT[h.certainty] || WN_CERT.confirmed}">${esc(t('wn_' + (h.certainty || 'confirmed')))}</span><div class="story-text">${rich(h.text || '')}</div></div>`).join('') : ''}</div>` : ''}
+          ${revs.length > 1 ? `<div class="wn-hist"><a href="#" class="wn-htg">${fold.has(hk) ? '▾' : '▸'} ${esc(t('wnHistory'))} (${revs.length})</a>${fold.has(hk) ? revs.slice().reverse().map(h => `<div class="wn-rev${h === r ? ' cur' : ''}"><span class="y">${esc(h.year != null ? fmtD(h) : t('wnAlways'))}</span> <span class="cert" style="--gc:${WN_CERT[h.certainty] || WN_CERT.confirmed}">${esc(t('wn_' + (h.certainty || 'confirmed')))}</span><div class="story-text">${rich(h.text || '')}</div></div>`).join('') : ''}</div>` : ''}
           ${r.updated ? `<div class="dim upd">${esc(t('wnUpdated'))} ${esc(new Date(r.updated).toLocaleDateString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</div>` : ''}`}
       </article>`; };
     box.innerHTML = `
@@ -2846,13 +2909,14 @@
       const title = $('#wnTitle').value.trim(); if (!title) { $('#wnTitle').focus(); return; }
       pushUndo(); let n = list.find(x => x.id === wnEdit);
       if (!n) { n = { id: uid('wn'), created: new Date().toISOString(), revs: [] }; list.push(n); }
-      const now = new Date().toISOString(), yv = $('#wnYear').value.trim(), y = yv ? parseYear(yv) : null, uv = $('#wnUntil').value.trim();
+      let pd; try { pd = readDate($('#wnYear').value, 'wn'); } catch (err) { toast(err.message); return; }
+      const now = new Date().toISOString(), y = pd && pd.year != null ? pd.year : null, uv = $('#wnUntil').value.trim(), wm = y != null && pd.month || null, wd = y != null && pd.day || null;
       n.title = title; n.category = $('#wnCat').value.trim() || WN_CATS_DE[0];
       n.places = $('#wnPlaces').value.split(',').map(v => v.trim()).filter(Boolean); n.updated = now;
       n.until = uv ? parseYear(uv) : null; if (n.until == null) delete n.until;
       // Stand für dieses Jahr ändern oder neuen Stand ab diesem Jahr anlegen
       const revs = wnRevs(n);
-      let r = revs.find(x => (x.year ?? null) === (y ?? null)); if (!r) { r = { year: y ?? null }; revs.push(r); }
+      let r = revs.find(x => (x.year ?? null) === (y ?? null) && (x.month || null) === wm && (x.day || null) === wd); if (!r) { r = { year: y ?? null }; setMDc(r, { month: wm, day: wd }); revs.push(r); }
       r.text = $('#wnText').value; r.certainty = $('#wnCert').value; r.updated = now; wnRevs(n);
       wnEdit = null; afterEdit(); renderWorldNotes.force = true; renderWorldNotes();
     };
@@ -2986,7 +3050,7 @@
     modal(t('moneyHistTitle', c.name), `<p class="hint" style="margin-top:0">${esc(t('moneyNow'))}: <b>${c.money != null ? esc(nf(c.money)) + ' ' + esc(cur) : '–'}</b></p>
       ${log.length ? `<div class="perm-scroll"><table class="money-log"><tr><th>${esc(t('mlWhen'))}</th><th>${esc(t('mlYear'))}</th><th class="num">${esc(t('mlChange'))}</th><th class="num">${esc(t('mlBalance'))}</th><th>${esc(t('mlReason'))}</th></tr>
         ${log.map(m => `<tr><td class="dim">${esc(new Date(m.at).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE', { dateStyle: 'short', timeStyle: 'short' }))}</td>
-          <td>${m.year != null ? esc(fmtYear(m.year)) : ''}</td>
+          <td>${m.year != null ? esc(fmtD(m)) : ''}</td>
           <td class="num ${m.delta > 0 ? 'pos' : m.delta < 0 ? 'neg' : ''}">${m.delta != null ? (m.delta > 0 ? '+' : '') + esc(nf(m.delta)) : '–'}</td>
           <td class="num">${m.balance != null ? esc(nf(m.balance)) : '–'}</td>
           <td>${esc(m.reason || '')}${m.by ? ` <span class="dim">· ${esc(m.by)}</span>` : ''}</td></tr>`).join('')}</table></div>` : `<p class="hint">${esc(t('moneyNoLog'))}</p>`}`,
@@ -2994,7 +3058,8 @@
   }
   function logMoney(c, before, reason) {
     if ((c.money ?? null) === (before ?? null)) return;
-    (c.moneyLog ||= []).push({ at: new Date().toISOString(), year: (state.tl.story || []).length ? storyOf(null, null).slice(-1)[0].year : state.year,
+    const lastSec = (state.tl.story || []).length ? storyOf(null, null).slice(-1)[0] : null;
+    (c.moneyLog ||= []).push({ at: new Date().toISOString(), year: lastSec ? lastSec.year : state.year, ...(lastSec && lastSec.month ? { month: lastSec.month } : {}), ...(lastSec && lastSec.day ? { day: lastSec.day } : {}),
       delta: c.money == null ? null : (Number(c.money) || 0) - (Number(before) || 0), balance: c.money ?? null, reason: reason || '', by: (srvInfo() && srvInfo().user && srvInfo().user.name) || '' });
     if (c.moneyLog.length > 500) c.moneyLog.splice(0, c.moneyLog.length - 500);
   }

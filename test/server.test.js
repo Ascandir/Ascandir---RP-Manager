@@ -200,3 +200,50 @@ test('Konfliktzonen: Grenzstreifen und Fläche um mehrere Orte', async () => {
   const s2 = await mcp(TOK.viewer, 'get_summary', { timeline: 'Haupt', year: '2 n.K.', places: ['Ostfeste'] });
   assert.match(s2.text, /Grenzkrieg.*Grenzstreifen \(ganze gemeinsame Grenze\).*Sith vs\. Republik/); assert.match(s2.text, /Liegt in Konfliktzone: .*Grenzgefechte Ost/);
 });
+
+// ---------------------------------------------------------------- Kalender (Monate/Tage)
+test('Kalender: aktivieren, Story/Weltnotizen/Geld mit Tag und Monat', async () => {
+  const off = await mcp(TOK.editor, 'add_story_entry', { timeline: 'Haupt', title: 'Ohne Kalender', text: 'x', year: '10 n.K.', month: 'Elona', day: 3 });
+  assert.ok(off.isError && /kein Kalender/.test(off.text), 'ohne aktiven Kalender keine Monate');
+  const bad = await mcp(TOK.editor, 'set_calendar', { timeline: 'Haupt', months: [{ name: 'Leer', days: 0 }] });
+  assert.ok(bad.isError);
+  const cal = await mcp(TOK.editor, 'set_calendar', { timeline: 'Haupt', preset: 'gsc' });
+  assert.ok(!cal.isError, cal.text); assert.equal(cal.data.daysPerYear, 368); assert.equal(cal.data.enabled, true);
+  const a = await mcp(TOK.editor, 'add_story_entry', { timeline: 'Haupt', title: 'Ankunft', text: 'Wir landen.', year: '10 n.K.', month: 'Kelona', day: 12 });
+  assert.ok(!a.isError, a.text); assert.equal(a.data.section.yearLabel, '12. Kelona 10 n.K.');
+  const b = await mcp(TOK.editor, 'add_story_entry', { timeline: 'Haupt', title: 'Vorher', text: 'Abflug.', year: '3. Elona 10 n.K.' });
+  assert.ok(!b.isError, b.text); assert.equal(b.data.section.yearLabel, '3. Elona 10 n.K.');
+  const tooBig = await mcp(TOK.editor, 'add_story_entry', { timeline: 'Haupt', title: 'X', text: 'x', year: '10 n.K.', month: 'Elona', day: 36 });
+  assert.ok(tooBig.isError && /1…35/.test(tooBig.text));
+  const ls = await mcp(TOK.viewer, 'list_story', { timeline: 'Haupt' });
+  assert.ok(ls.text.indexOf('Vorher') < ls.text.indexOf('Ankunft'), 'nach Tag/Monat sortiert');
+  const upd = await mcp(TOK.editor, 'update_story_entry', { timeline: 'Haupt', id: b.data.section.id, month: 'Welona', day: 1 });
+  assert.equal(upd.data.section.yearLabel, '1. Welona 10 n.K.');
+  const s = await mcp(TOK.viewer, 'get_summary', { timeline: 'Haupt' });
+  assert.match(s.text, /aktuelles RP-Datum \(neuester Story-Abschnitt\): 1\. Welona 10 n\.K\./);
+  // Weltnotiz: zwei Stände im selben Jahr
+  await mcp(TOK.editor, 'upsert_world_note', { timeline: 'Haupt', title: 'Hafenlage', text: 'ruhig', year: '10 n.K.', month: 'Elona', day: 1 });
+  await mcp(TOK.editor, 'upsert_world_note', { timeline: 'Haupt', title: 'Hafenlage', text: 'blockiert', year: '10 n.K.', month: 'Selona', day: 20 });
+  const w1 = await mcp(TOK.viewer, 'list_world_notes', { timeline: 'Haupt', year: '10 n.K.', month: 'Kelona', day: 5 });
+  assert.match(w1.text, /ruhig/); assert.doesNotMatch(w1.text, /blockiert/);
+  const w2 = await mcp(TOK.viewer, 'list_world_notes', { timeline: 'Haupt', year: '10 n.K.', history: true });
+  assert.match(w2.text, /blockiert.*seit 20\. Selona 10 n\.K\.|seit 20\. Selona 10 n\.K\..*blockiert/s); assert.match(w2.text, /1\. Elona 10 n\.K\.: \[gesichert\] ruhig/);
+  // Geld mit Datum
+  const m = await mcp(TOK.editor, 'upsert_character', { timeline: 'Haupt', name: 'Arin', moneyDelta: 500, moneyReason: 'Belohnung', moneyMonth: 'Telona', moneyDay: 2 });
+  assert.ok(!m.isError, m.text);
+  const ch = await mcp(TOK.viewer, 'get_character', { timeline: 'Haupt', name: 'Arin' });
+  assert.match(ch.text, /\+500 \(Belohnung\) – 2\. Telona/);
+  // Kalender wechseln: nicht vorhandene Monate fallen weg, Jahr bleibt
+  const g = await mcp(TOK.editor, 'set_calendar', { timeline: 'Haupt', preset: 'custom', months: [{ name: 'Frost', days: 30 }, { name: 'Glut', days: 30 }] });
+  assert.ok(!g.isError, g.text); assert.ok(g.data.adjustedEntries > 0);
+  const gc = await mcp(TOK.viewer, 'get_calendar', { timeline: 'Haupt' });
+  assert.match(gc.text, /Frost/);
+  const tl = JSON.parse(fs.readFileSync(path.join(DATA, 'timelines', 'Haupt.json'), 'utf8'));
+  assert.ok(tl.story.every(e => e.year === 10 && (!e.month || e.month <= 2)));
+  const offAgain = await mcp(TOK.editor, 'set_calendar', { timeline: 'Haupt', enabled: false });
+  assert.equal(offAgain.data.enabled, false);
+  const plain = await mcp(TOK.viewer, 'list_story', { timeline: 'Haupt' });
+  assert.match(plain.text, /\(10 n\.K\./, 'ohne Kalender wieder nur Jahre');
+  const canon = await mcp(TOK.admin, 'set_calendar', { timeline: 'Kanon', preset: 'gsc' });
+  assert.ok(canon.isError, 'Kanon bleibt schreibgeschützt');
+});

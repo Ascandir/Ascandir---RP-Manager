@@ -547,3 +547,9 @@ body[data-theme="scifi"] #topbar #modeMenu > button.active { color: #1a1205 !imp
 .cf-list { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
 .cf-list button { text-align: left; }
 .cf-list button.dim { opacity: .6; }
+/* Kalender */
+.cal-months { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; max-height: 360px; overflow: auto; }
+.cal-row { display: grid; grid-template-columns: 26px 1fr 70px auto 28px; gap: 6px; align-items: center; }
+.cal-row input { min-width: 0; }
+.field.md-f { flex: 1.2; } .field.md-d { flex: 0 0 70px; }
+.field.md-d input { width: 100%; }

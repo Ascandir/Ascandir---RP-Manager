@@ -27,6 +27,7 @@ const PUBLIC_VIEW = !/^(0|false|no)$/i.test(process.env.IAM_PUBLIC_VIEW || 'true
 const VERSION = (() => { try { return require(path.join(__dirname, '..', 'package.json')).version; } catch { return 'docker'; } })();
 const DIRS = ['worlds', 'timelines'];
 const HOUSING = require(path.join(SRC_DIR, 'housing-core.js'));
+const CAL = require(path.join(SRC_DIR, 'calendar.js'));
 for (const d of DIRS) fs.mkdirSync(path.join(DATA_DIR, d), { recursive: true });
 
 // ---------------------------------------------------------------- Benutzer & Rechte
@@ -199,6 +200,21 @@ function yearFmt(tl, lang) {
   const w = listJson('worlds').find(x => x.id === tl.world); return (w && w.yearFmt) || { neg: '', pos: '' };
 }
 function fmtYear(y, f) { if (y == null || y === '') return null; y = Math.round(+y); if (y < 0 && f.neg) return `${-y} ${f.neg}`; if (y >= 0 && f.pos) return `${y} ${f.pos}`; return String(y); }
+// ---------------------------------------------------------------- Kalender (Monate/Tage) pro Zeitlinie, siehe src/calendar.js
+function calOf(t, lang) { try { return CAL.normCal(t.calendar, lang); } catch { return CAL.normCal(null, lang); } }
+// Datum formatieren: year + optional month/day (nur wenn der Kalender der Zeitlinie aktiv ist)
+function fmtD(t, o, f, lang) { if (!o || o.year == null) return null; return CAL.fmt(calOf(t, lang), o.year, o.month, o.day, y => fmtYear(y, f)); }
+// Eingabe lesen: Datumstext („12. Elona 3640 VSY“) oder Jahr; month/day separat überschreiben die Angabe im Text
+function parseD(t, v, f, month, day, lang) {
+  const c = calOf(t, lang);
+  const p = v != null && v !== '' ? CAL.parse(c, v, x => parseYear(x, f)) : null;
+  if (v != null && v !== '' && !p) throw Object.assign(new Error(`Datum/Jahr nicht erkannt: „${v}“`), { code: 400 });
+  if (!CAL.on(c)) { if ((month != null && month !== '') || (day != null && day !== '')) throw Object.assign(new Error('Für diese Zeitlinie ist kein Kalender mit Monaten/Tagen aktiviert (set_calendar)'), { code: 400 }); return p; }
+  if (month === undefined && day === undefined) return p;
+  const md = CAL.normMD(c, month === undefined ? (p && p.month) : month, day === undefined ? (p && p.day) : day);
+  return Object.assign(p || {}, md);
+}
+const setMD = (o, p) => { if (!p) return; if (p.month) o.month = p.month; else delete o.month; if (p.day) o.day = p.day; else delete o.day; };
 function parseYear(s, f) {
   if (s == null || s === '') return null;
   const m = String(s).trim().replace(/[.,\s](?=\d{3}\b)/g, '').match(/^([+-]?\d+)\s*(.*)$/); if (!m) return null;
@@ -308,6 +324,7 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
   const w = worldOf(tl, lang);
   L.push(de ? `Welt: ${w.name} · Zeitlinie: ${tl.name}` : `World: ${w.name} · Timeline: ${tl.name}`);
   L.push(de ? `Jahr: ${fmtYear(year, f)}` : `Year: ${fmtYear(year, f)}`);
+  { const c = calOf(tl, lang); if (CAL.on(c)) { const nd = rpDate(tl); L.push((de ? 'Kalender: ' : 'Calendar: ') + c.months.map(m => `${m.name} (${m.days})`).join(', ') + (de ? ` · aktuelles RP-Datum (neuester Story-Abschnitt): ${fmtD(tl, nd, f, lang)}` : ` · current RP date (latest story section): ${fmtD(tl, nd, f, lang)}`)); } }
   if (e) L.push((de ? 'Zeitalter: ' : 'Era: ') + `${e.name} (${de ? 'seit' : 'since'} ${fmtYear(e.year, f)})` + (e.desc ? ` – ${e.desc}` : ''));
   else L.push(de ? 'Zeitalter: keines (vor dem ersten Zeitalter)' : 'Era: none (before the first era)');
   if (snap.factions.length) {
@@ -329,7 +346,7 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
   if (wnsNow.length) L.push((de ? `Weltnotizen (${wnsNow.length}): ` : `World notes (${wnsNow.length}): `) + [...new Set(wnsNow.slice().sort(wnSort).map(n => n.category))].join(' · ') + (de ? ' – Details mit list_world_notes' : ' – details via list_world_notes'));
   const chs = tl.characters || [];
   if (chs.length) L.push((de ? 'Charaktere: ' : 'Characters: ') + chs.slice(0, 20).map(c => `${c.name}${c.title ? ' (' + c.title + ')' : ''}${c.location ? ' @ ' + c.location : ''}`).join(' · ') + (chs.length > 20 ? ' …' : ''));
-  if (st.length) L.push((de ? `Story bisher (${st.length} Abschnitte, neueste zuletzt): ` : `Story so far (${st.length} sections, latest last): `) + st.slice(-5).map(e => `${e.title} (${fmtYear(e.year, f)})`).join(' · '));
+  if (st.length) L.push((de ? `Story bisher (${st.length} Abschnitte, neueste zuletzt): ` : `Story so far (${st.length} sections, latest last): `) + st.slice(-5).map(e => `${e.title} (${fmtD(tl, e, f, lang)})`).join(' · '));
   for (const pn of placeNames) {
     const o = findPlace(tl, pn); if (!o) { L.push((de ? 'Unbekannter Ort: ' : 'Unknown place: ') + pn); continue; }
     const p = placeInfo(tl, o, year, lang, snap), fx = p.facts, rows = [];
@@ -356,7 +373,7 @@ function slug(n) { return (String(n || 'zeitlinie').normalize('NFKD').replace(/[
 // ---------------------------------------------------------------- Story-Abschnitte (tl.story)
 // Reihenfolge: Jahr, dann Position innerhalb des Jahres (order), dann Anlagezeit
 // Kapitel (tl.chapters) kommen zuerst: Abschnitte ohne Kapitel vorne, dann Kapitel in ihrer Reihenfolge
-const storySort = (a, b) => a.year - b.year || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.created || '').localeCompare(String(b.created || ''));
+const storySort = (a, b) => a.year - b.year || ((a.month || 0) * 100 + (a.day || 0)) - ((b.month || 0) * 100 + (b.day || 0)) || (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.created || '').localeCompare(String(b.created || ''));
 const chapSorted = t => (t.chapters || []).slice().sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
 function storySortT(t) {
   const rk = new Map(chapSorted(t).map((c, i) => [c.id, i]));
@@ -372,7 +389,7 @@ function chapterFor(t, v, create) {
 }
 // Abschnitt e innerhalb seines Jahres hinter "after" (oder an Index pos) einordnen und Positionen neu durchzählen
 function storyPlace(t, e, after) {
-  const same = t.story.filter(x => x.year === e.year && x !== e && (x.chapter || '') === (e.chapter || '')).sort(storySort);
+  const same = t.story.filter(x => x.year === e.year && (x.month || 0) === (e.month || 0) && (x.day || 0) === (e.day || 0) && x !== e && (x.chapter || '') === (e.chapter || '')).sort(storySort);
   let i = same.length;
   if (after === 'start') i = 0; else if (after) { const k = same.findIndex(x => x.id === after); if (k >= 0) i = k + 1; }
   same.splice(i, 0, e); same.forEach((x, n) => { x.order = n; });
@@ -387,7 +404,7 @@ function storyList(t, lang, o = {}) {
   if (o.era) { const er = t.eras.find(x => x.name.toLowerCase() === String(o.era).toLowerCase() || x.id === o.era); if (er) { const s2 = t.eras.slice().sort((a, b) => a.year - b.year), nx = s2[s2.indexOf(er) + 1]; list = list.filter(e => e.year >= er.year && (!nx || e.year < nx.year)); } }
   if (q) list = list.filter(e => (e.title + ' ' + e.text + ' ' + (e.places || []).join(' ')).toLowerCase().includes(q));
   const cm = new Map(chapSorted(t).map((c, i) => [c.id, { nr: i + 1, title: c.title }]));
-  return list.map((e, i) => ({ id: e.id, nr: i + 1, chapter: cm.get(e.chapter) ? cm.get(e.chapter).title : null, chapterNr: cm.get(e.chapter) ? cm.get(e.chapter).nr : null, year: e.year, yearLabel: fmtYear(e.year, f), era: (eraAt(t, e.year) || {}).name || null, title: e.title, text: e.text, places: e.places || [], created: e.created, updated: e.updated }));
+  return list.map((e, i) => ({ id: e.id, nr: i + 1, chapter: cm.get(e.chapter) ? cm.get(e.chapter).title : null, chapterNr: cm.get(e.chapter) ? cm.get(e.chapter).nr : null, year: e.year, month: e.month || null, day: e.day || null, yearLabel: fmtD(t, e, f, lang), era: (eraAt(t, e.year) || {}).name || null, title: e.title, text: e.text, places: e.places || [], created: e.created, updated: e.updated }));
 }
 function storyText(t, lang, list) {
   const de = lang !== 'en';
@@ -417,36 +434,42 @@ const wnSort = (a, b) => wnCatRank(a.category) - wnCatRank(b.category) || String
 // Jede Notiz hat Stände pro Jahr (revs). Angezeigt wird der letzte Stand mit Jahr <= gewähltem Jahr.
 function wnRevs(n) {
   if (!Array.isArray(n.revs)) { n.revs = [{ year: null, text: n.text || '', certainty: n.certainty || 'confirmed', updated: n.updated || n.created || null }]; delete n.text; delete n.certainty; }
-  n.revs.sort((a, b) => (a.year ?? -Infinity) - (b.year ?? -Infinity)); return n.revs;
+  n.revs.sort((a, b) => (a.year == null ? -Infinity : CAL.keyOf(a)) - (b.year == null ? -Infinity : CAL.keyOf(b))); return n.revs;
 }
-function wnAt(n, year) {
+function wnAt(n, year, month, day) {
   const r = wnRevs(n); if (year == null) return r[r.length - 1];
   if (n.until != null && year > n.until) return null;
-  let cur = null; for (const x of r) if (x.year == null || x.year <= year) cur = x; return cur;
+  const lim = CAL.endKey(year, month, day); // Jahr ohne Monat = Stand am Ende des Jahres
+  let cur = null; for (const x of r) if (x.year == null || CAL.keyOf(x) <= lim) cur = x; return cur;
 }
 // Standardjahr = Jahr des neuesten Story-Abschnitts (aktueller RP-Stand), sonst Beginn des letzten Zeitalters
 function rpYear(t) {
   const st = (t.story || []).slice().sort(storySortT(t)); if (st.length) return st[st.length - 1].year;
   const er = t.eras.slice().sort((a, b) => a.year - b.year); return er.length ? er[er.length - 1].year : 0;
 }
+// aktuelles RP-Datum (mit Monat/Tag, falls vorhanden) = Datum des neuesten Story-Abschnitts
+function rpDate(t) {
+  const st = (t.story || []).slice().sort(storySortT(t)); if (st.length) { const e = st[st.length - 1]; return { year: e.year, month: e.month || null, day: e.day || null }; }
+  return { year: rpYear(t), month: null, day: null };
+}
 function wnFind(t, b) {
   const L = t.worldNotes || []; if (b.id) return L.find(x => x.id === b.id) || null;
   const q = String(b.title || '').toLowerCase().trim(); if (!q) return null;
   return L.find(x => x.title.toLowerCase() === q && (!b.category || String(x.category).toLowerCase() === String(b.category).toLowerCase())) || L.find(x => x.title.toLowerCase() === q) || null;
 }
-function wnText(t, lang, list, year, history) {
+function wnText(t, lang, list, year, history, at) {
   const de = lang !== 'en', f = yearFmt(t, lang), C = { confirmed: de ? 'gesichert' : 'confirmed', suspected: de ? 'Vermutung' : 'suspected', rumor: de ? 'Gerücht' : 'rumour' };
   const out = [de ? 'Hinweis: Weltnotizen beschreiben den Zustand der Welt – nicht, was einzelne Charaktere wissen (dafür: Wissen in den Charakterakten).' : 'Note: world notes describe the state of the world – not what individual characters know (see character knowledge).',
-    year != null ? (de ? `Stand: ${fmtYear(year, f)}` : `As of: ${fmtYear(year, f)}`) : (de ? 'Stand: jeweils neuester Eintrag' : 'As of: latest entry')];
-  const rows = list.map(n => ({ n, r: wnAt(n, year) })).filter(x => x.r);
+    year != null ? (de ? `Stand: ${fmtD(t, Object.assign({ year }, at || {}), f, lang)}` : `As of: ${fmtD(t, Object.assign({ year }, at || {}), f, lang)}`) : (de ? 'Stand: jeweils neuester Eintrag' : 'As of: latest entry')];
+  const rows = list.map(n => ({ n, r: wnAt(n, year, at && at.month, at && at.day) })).filter(x => x.r);
   if (!rows.length) { out.push(de ? `Keine Weltnotizen für diesen Stand in „${t.name}“.` : `No world notes for this point in "${t.name}".`); return out.join('\n'); }
   let cur;
   for (const { n, r } of rows) {
     if (n.category !== cur) { cur = n.category; out.push(`\n# ${cur || (de ? 'Allgemein' : 'General')}`); }
-    const since = r.year != null ? (de ? ` seit ${fmtYear(r.year, f)}` : ` since ${fmtYear(r.year, f)}`) : '';
+    const since = r.year != null ? (de ? ` seit ${fmtD(t, r, f, lang)}` : ` since ${fmtD(t, r, f, lang)}`) : '';
     const until = n.until != null ? (de ? `, bis ${fmtYear(n.until, f)}` : `, until ${fmtYear(n.until, f)}`) : '';
     out.push(`## ${n.title} [${C[r.certainty] || C.confirmed}${since}${until}] [id: ${n.id}]\n${(n.places || []).length ? (de ? 'Orte: ' : 'Places: ') + n.places.join(', ') + '\n' : ''}${r.text || ''}`);
-    if (history) for (const h of wnRevs(n)) if (h !== r) out.push(`  – ${h.year != null ? fmtYear(h.year, f) : (de ? 'Anfang' : 'start')}: [${C[h.certainty] || C.confirmed}] ${String(h.text || '').replace(/\n+/g, ' ')}`);
+    if (history) for (const h of wnRevs(n)) if (h !== r) out.push(`  – ${h.year != null ? fmtD(t, h, f, lang) : (de ? 'Anfang' : 'start')}: [${C[h.certainty] || C.confirmed}] ${String(h.text || '').replace(/\n+/g, ' ')}`);
   }
   return out.join('\n');
 }
@@ -512,7 +535,7 @@ function charText(t, c, lang) {
     const cur = o.currency || defCurrency(t);
     L.push(`\n## ${de ? 'Besitz & Inventar' : 'Possessions & inventory'}`);
     if (o.money != null) L.push(`${de ? 'Geld' : 'Money'}: ${Number(o.money).toLocaleString(de ? 'de-DE' : 'en-GB')} ${cur}`);
-    const ml = (c.moneyLog || []).slice(-5); if (ml.length) L.push((de ? 'Letzte Geldbewegungen: ' : 'Recent transactions: ') + ml.map(m => `${m.delta != null ? (m.delta > 0 ? '+' : '') + m.delta : '–'}${m.reason ? ' (' + m.reason + ')' : ''}`).join(', '));
+    const ml = (c.moneyLog || []).slice(-5); if (ml.length) L.push((de ? 'Letzte Geldbewegungen: ' : 'Recent transactions: ') + ml.map(m => `${m.delta != null ? (m.delta > 0 ? '+' : '') + m.delta : '–'}${m.reason ? ' (' + m.reason + ')' : ''}${m.year != null ? ' – ' + fmtD(t, m, yearFmt(t, lang), lang) : ''}`).join(', '));
     for (const ty of ['gear', 'property']) { const it = o.inventory.filter(i => i.type === ty); if (!it.length) continue;
       L.push(ty === 'gear' ? (de ? 'Ausrüstung / trägt bei sich:' : 'Gear / carried:') : (de ? 'Eigentum:' : 'Property:'));
       for (const i of it) L.push(`- ${i.important ? '⭐ ' : ''}${i.name}${i.qty !== 1 ? ' ×' + i.qty : ''}${i.location ? ' (' + i.location + ')' : ''}${i.note ? ' – ' + i.note : ''}`); }
@@ -756,7 +779,8 @@ async function apiWrite(req, res, url, parts) {
   if (ep === 'worldnote' && (req.method === 'POST' || req.method === 'PATCH')) {
     t.worldNotes = t.worldNotes || []; const f = yearFmt(t, lang), now = new Date().toISOString();
     let n = wnFind(t, b); const created = !n;
-    const year = b.year === 'always' ? null : b.year != null && b.year !== '' ? parseYear(b.year, f) : rpYear(t);
+    const pd = b.year === 'always' ? null : (b.year != null && b.year !== '') || b.month != null || b.day != null ? parseD(t, b.year != null && b.year !== '' ? b.year : String(fmtYear(rpYear(t), f)), f, b.month, b.day, lang) : rpDate(t);
+    const year = pd ? pd.year : null, wm = pd && pd.month || null, wd = pd && pd.day || null;
     if (!n) { if (req.method === 'PATCH' || !b.title) return send(res, b.title ? 404 : 400, { error: b.title ? 'note not found' : 'title required' }); n = { id: uid('wn'), title: String(b.title).trim(), category: String(b.category || WN_CATS[0]), places: [], revs: [], created: now }; t.worldNotes.push(n); }
     const revs = wnRevs(n);
     if (b.newTitle) n.title = String(b.newTitle);
@@ -766,17 +790,17 @@ async function apiWrite(req, res, url, parts) {
     let action = null;
     if (b.text !== undefined || b.certainty !== undefined) {
       // Stand für dieses Jahr ändern oder neuen Stand ab diesem Jahr anlegen (alte Stände bleiben als Verlauf erhalten)
-      let r = revs.find(x => (x.year ?? null) === year);
-      const prev = wnAt(n, year);
-      if (!r) { r = { year, text: prev ? prev.text : '', certainty: prev ? prev.certainty : 'confirmed' }; revs.push(r); action = created ? 'created' : 'new state from ' + (year != null ? fmtYear(year, f) : 'start'); }
-      else action = 'updated state ' + (year != null ? fmtYear(year, f) : 'start');
+      let r = revs.find(x => (x.year ?? null) === year && (x.month || null) === wm && (x.day || null) === wd);
+      const prev = wnAt(n, year, wm, wd), lbl = year != null ? fmtD(t, { year, month: wm, day: wd }, f, lang) : 'start';
+      if (!r) { r = { year, text: prev ? prev.text : '', certainty: prev ? prev.certainty : 'confirmed' }; setMD(r, { month: wm, day: wd }); revs.push(r); action = created ? 'created' : 'new state from ' + lbl; }
+      else action = 'updated state ' + lbl;
       if (b.text !== undefined) r.text = b.append && r.text ? r.text + '\n\n' + String(b.text) : String(b.text);
       if (b.certainty !== undefined) r.certainty = WN_CERT.includes(b.certainty) ? b.certainty : 'confirmed';
       r.updated = now; wnRevs(n);
     }
-    if (!revs.length) revs.push({ year, text: '', certainty: 'confirmed', updated: now });
+    if (!revs.length) { const r0 = { year, text: '', certainty: 'confirmed', updated: now }; setMD(r0, { month: wm, day: wd }); revs.push(r0); }
     n.updated = now;
-    saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, action, note: { id: n.id, title: n.title, category: n.category, until: n.until ?? null, revisions: revs.map(r => ({ year: r.year != null ? fmtYear(r.year, f) : null, certainty: r.certainty, text: r.text })) } });
+    saveTimeline(t); return send(res, created ? 201 : 200, { ok: true, created, action, note: { id: n.id, title: n.title, category: n.category, until: n.until ?? null, revisions: revs.map(r => ({ year: r.year != null ? fmtD(t, r, f, lang) : null, certainty: r.certainty, text: r.text })) } });
   }
   if (ep === 'worldnote' && req.method === 'DELETE') {
     const n = wnFind(t, b); if (!n) return send(res, 404, { error: 'note not found (id or exact title)' });
@@ -806,7 +830,8 @@ async function apiWrite(req, res, url, parts) {
     if (b.money !== undefined) c.money = b.money === null || b.money === '' ? null : Number(b.money);
     if (b.moneyDelta != null) c.money = (Number(c.money) || 0) + Number(b.moneyDelta);
     if ((c.money ?? null) !== before) {
-      c.moneyLog = (c.moneyLog || []).concat([{ at: new Date().toISOString(), year: b.moneyYear != null && b.moneyYear !== '' ? parseYear(b.moneyYear, yearFmt(t, lang)) : rpYear(t),
+      const md = (b.moneyYear != null && b.moneyYear !== '') || b.moneyMonth != null || b.moneyDay != null ? parseD(t, b.moneyYear != null && b.moneyYear !== '' ? b.moneyYear : String(fmtYear(rpYear(t), yearFmt(t, lang))), yearFmt(t, lang), b.moneyMonth, b.moneyDay, lang) : rpDate(t);
+      c.moneyLog = (c.moneyLog || []).concat([{ at: new Date().toISOString(), year: md.year, ...(md.month ? { month: md.month } : {}), ...(md.day ? { day: md.day } : {}),
         delta: c.money == null ? null : (Number(c.money) || 0) - (Number(before) || 0), balance: c.money ?? null, reason: String(b.moneyReason || ''), by: VIEWER && VIEWER.api ? 'API' : (VIEWER && VIEWER.name) || '' }]).slice(-500);
     }
     if (b.currency !== undefined) c.currency = String(b.currency);
@@ -907,7 +932,9 @@ async function apiWrite(req, res, url, parts) {
     const f = yearFmt(t, lang); t.story = t.story || [];
     let e = b.id ? t.story.find(x => x.id === b.id) : null;
     if (req.method === 'PATCH' && !e) return send(res, 404, { error: 'story section not found (id)' });
-    const now = new Date().toISOString(), y = b.year != null && b.year !== '' ? parseYear(b.year, f) : null;
+    const now = new Date().toISOString(), hasY = (b.year != null && b.year !== '') || (b.date != null && b.date !== '');
+    const pd = hasY || b.month !== undefined || b.day !== undefined ? parseD(t, b.date || (b.year != null && b.year !== '' ? b.year : null), f, b.month, b.day, lang) : null;
+    const y = pd && pd.year != null ? pd.year : null, mdGiven = !!pd && ('month' in pd || 'day' in pd);
     if (!e) {
       if (!b.title && !b.text) return send(res, 400, { error: 'title or text required' });
       const aft = b.after && b.after !== 'start' ? t.story.find(x => x.id === b.after) : null;
@@ -916,10 +943,14 @@ async function apiWrite(req, res, url, parts) {
       e = { id: uid('st'), year: y != null ? y : last ? last.year : s2.length ? s2[s2.length - 1].year : 0, title: String(b.title || '').trim() || (lang === 'en' ? 'Section' : 'Abschnitt') + ' ' + (t.story.length + 1), text: String(b.text || ''), places: [], created: now };
       // Kapitel: angegeben (wird bei Bedarf angelegt), sonst das des Vorgängers
       const ch = b.chapter ? chapterFor(t, b.chapter, true) : null; e.chapter = ch ? ch.id : (last && last.chapter) || '';
+      if (mdGiven) setMD(e, pd);
       t.story.push(e); storyPlace(t, e, b.after);
     } else {
       if (b.chapter !== undefined) { const ch = b.chapter ? chapterFor(t, b.chapter, true) : null; const nid = ch ? ch.id : ''; if (nid !== (e.chapter || '')) { e.chapter = nid; if (y != null) e.year = y; storyPlace(t, e, b.after); } }
-      if (y != null && y !== e.year) { e.year = y; storyPlace(t, e, b.after); }
+      const oldKey = CAL.keyOf(e);
+      if (y != null) e.year = y;
+      if (mdGiven) setMD(e, pd);
+      if (CAL.keyOf(e) !== oldKey) storyPlace(t, e, b.after);
       else if (b.after) storyPlace(t, e, b.after);
       if (b.title !== undefined) e.title = String(b.title);
       if (b.text !== undefined) e.text = b.append ? (e.text ? e.text + '\n\n' : '') + String(b.text) : String(b.text);
@@ -969,6 +1000,16 @@ async function apiWrite(req, res, url, parts) {
     const id = b.id || q.get('id'); const n = (t.story || []).length;
     t.story = (t.story || []).filter(x => x.id !== id); if (t.story.length === n) return send(res, 404, { error: 'story section not found' });
     saveTimeline(t); return send(res, 200, { ok: true });
+  }
+  if (ep === 'calendar' && (req.method === 'POST' || req.method === 'PATCH')) {
+    const cur = calOf(t, lang), nx = { enabled: b.enabled != null ? !!b.enabled : (b.preset || b.months ? true : cur.enabled), preset: b.preset || (b.months ? 'custom' : cur.preset), months: b.months || (b.preset && b.preset !== cur.preset ? null : cur.months) };
+    if (b.preset && !CAL.PRESETS[b.preset]) return send(res, 400, { error: 'preset: ' + Object.keys(CAL.PRESETS).join(', ') });
+    let c; try { c = CAL.normCal(nx, lang); } catch (e) { return send(res, 400, { error: e.message }); }
+    // Einträge, deren Tag/Monat im neuen Kalender nicht mehr existiert, verlieren nur Monat/Tag (Jahr bleibt)
+    let fixed = 0; const fix = o => { if (!o || !o.month) return; const m = c.months[o.month - 1]; if (!m) { delete o.month; delete o.day; fixed++; } else if (o.day && o.day > m.days) { o.day = m.days; fixed++; } };
+    if (CAL.on(c)) { (t.story || []).forEach(fix); (t.worldNotes || []).forEach(n => (n.revs || []).forEach(fix)); (t.characters || []).forEach(ch => (ch.moneyLog || []).forEach(fix)); }
+    t.calendar = c; saveTimeline(t);
+    return send(res, 200, { ok: true, enabled: c.enabled, preset: c.preset, months: c.months, daysPerYear: CAL.daysInYear(c), adjustedEntries: fixed });
   }
   if (ep === 'conflict' && (req.method === 'POST' || req.method === 'PATCH')) {
     t.conflicts = Array.isArray(t.conflicts) ? t.conflicts : [];
@@ -1120,7 +1161,7 @@ async function apiV1(req, res, url) {
   const ep = parts[0];
   if (ep === 'worlds') return send(res, 200, allWorlds(lang));
   if (ep === 'timelines') return send(res, 200, allTimelines(lang).filter(t => !q.get('world') || t.world === q.get('world'))
-    .map(t => ({ id: t.id, name: t.name, world: t.world, readonly: !!t.readonly, file: t._file || null, eras: t.eras.map(e => ({ name: e.name, year: e.year, label: fmtYear(e.year, yearFmt(t, lang)) })) })));
+    .map(t => ({ id: t.id, name: t.name, world: t.world, readonly: !!t.readonly, calendar: calOf(t, lang).enabled, file: t._file || null, eras: t.eras.map(e => ({ name: e.name, year: e.year, label: fmtYear(e.year, yearFmt(t, lang)) })) })));
   if (ep === 'timeline') { const t = tl(); const c = Object.assign({}, t); delete c._file; return send(res, 200, c); }
   if (ep === 'state') {
     const t = tl(), y = year(t), s = snapshot(t, y, lang);
@@ -1144,10 +1185,12 @@ async function apiV1(req, res, url) {
     const txt = n => n.title + ' ' + wnRevs(n).map(r => r.text).join(' ');
     if (qq) list = list.filter(n => txt(n).toLowerCase().includes(qq));
     if (pq) list = list.filter(n => (n.places || []).some(p => p.toLowerCase().includes(pq)) || txt(n).toLowerCase().includes(pq));
-    const yq = q.get('year'), year = yq === 'latest' ? null : yq ? parseYear(yq, yearFmt(t, lang)) : rpYear(t);
-    if (q.get('format') === 'text') return send(res, 200, wnText(t, lang, list, year, q.get('history') === '1' || q.get('history') === 'true'), 'text/plain; charset=utf-8');
+    const yq = q.get('year'), mq = q.get('month'), dq = q.get('day');
+    const pd = yq === 'latest' ? null : yq || mq || dq ? parseD(t, yq || String(fmtYear(rpYear(t), yearFmt(t, lang))), yearFmt(t, lang), mq || undefined, dq || undefined, lang) : rpDate(t);
+    const year = pd ? pd.year : null, at = pd ? { month: pd.month || null, day: pd.day || null } : null;
+    if (q.get('format') === 'text') return send(res, 200, wnText(t, lang, list, year, q.get('history') === '1' || q.get('history') === 'true', at), 'text/plain; charset=utf-8');
     const f = yearFmt(t, lang);
-    return send(res, 200, { timeline: t.name, year, yearLabel: year != null ? fmtYear(year, f) : null, notes: list.map(n => { const r = wnAt(n, year); return r ? { id: n.id, title: n.title, category: n.category, places: n.places || [], until: n.until ?? null, text: r.text, certainty: r.certainty, since: r.year, sinceLabel: r.year != null ? fmtYear(r.year, f) : null, revisions: wnRevs(n).length } : null; }).filter(Boolean) });
+    return send(res, 200, { timeline: t.name, year, yearLabel: year != null ? fmtYear(year, f) : null, notes: list.map(n => { const r = wnAt(n, year, at && at.month, at && at.day); return r ? { id: n.id, title: n.title, category: n.category, places: n.places || [], until: n.until ?? null, text: r.text, certainty: r.certainty, since: r.year, sinceLabel: r.year != null ? fmtYear(r.year, f) : null, revisions: wnRevs(n).length } : null; }).filter(Boolean) });
   }
   if (ep === 'housings' || ep === 'housing') {
     const t = tl(), list = HOUSING.normalize(JSON.parse(JSON.stringify(t.housing || [])));
@@ -1201,6 +1244,10 @@ async function apiV1(req, res, url) {
     if (q.get('format') === 'text') return send(res, 200, text, 'text/plain; charset=utf-8');
     r.legs.forEach(l => { delete l.points; l.duration = d(l.hours); });
     return send(res, 200, Object.assign({ year: y, totalDuration: d(r.totalHours), text }, r));
+  }
+  if (ep === 'calendar') {
+    const t = tl(), c = calOf(t, lang), f = yearFmt(t, lang), now = rpDate(t);
+    return send(res, 200, { timeline: t.name, enabled: c.enabled, preset: c.preset, months: c.months, daysPerYear: CAL.daysInYear(c), currentDate: fmtD(t, now, f, lang), presets: Object.keys(CAL.PRESETS) });
   }
   if (ep === 'conflicts') {
     const t = tl(), f = yearFmt(t, lang), de = lang !== 'en', all = q.get('all') === '1' || q.get('all') === 'true';
@@ -1264,9 +1311,9 @@ const MCP_TOOLS = [
     inputSchema: S({ timeline: TL, chapter: str('nur dieses Kapitel (Titel/id)'), from: str('ab Jahr, z.B. "3641 BBY"'), to: str('bis Jahr'), era: str('nur dieses Zeitalter (Name)'), query: str('Suchtext'), last: { type: 'number', description: 'nur die letzten N Abschnitte' }, lang: LG }, ['timeline']),
     run: (a, v) => internalCall('GET', '/api/v1/story', { timeline: a.timeline, chapter: a.chapter, from: a.from, to: a.to, era: a.era, q: a.query, last: a.last, lang: a.lang, format: 'text' }, null, v) },
   { name: 'add_story_entry', title: 'Story-Abschnitt anlegen', description: 'Neuen Story-Abschnitt anlegen (erscheint im Story-Reiter). Ein Abschnitt pro Szene/Ereignis. Ohne Jahr wird das Jahr des letzten Abschnitts verwendet.',
-    inputSchema: S({ timeline: TL, title: str('kurzer Titel'), text: str('Text (Leerzeile = Absatz, **fett**, *kursiv*)'), year: YR, after: str('optional: id des Abschnitts, hinter dem eingefügt wird ("start" = an den Anfang des Jahres)'), chapter: str('Kapitel (Titel oder id; wird bei Bedarf angelegt). Ohne Angabe: Kapitel des vorherigen Abschnitts'), places: { type: 'array', items: { type: 'string' }, description: 'beteiligte Orte' } }, ['timeline', 'title', 'text']), run: a => internalCall('POST', '/api/v1/story', {}, a) },
+    inputSchema: S({ timeline: TL, title: str('kurzer Titel'), text: str('Text (Leerzeile = Absatz, **fett**, *kursiv*)'), year: YR, after: str('optional: id des Abschnitts, hinter dem eingefügt wird ("start" = an den Anfang des Jahres)'), month: str('Monat (Name oder Nummer) – nur wenn der Kalender der Zeitlinie aktiv ist (set_calendar)'), day: { type: 'number', description: 'Tag im Monat' }, chapter: str('Kapitel (Titel oder id; wird bei Bedarf angelegt). Ohne Angabe: Kapitel des vorherigen Abschnitts'), places: { type: 'array', items: { type: 'string' }, description: 'beteiligte Orte' } }, ['timeline', 'title', 'text']), run: a => internalCall('POST', '/api/v1/story', {}, a) },
   { name: 'update_story_entry', title: 'Story-Abschnitt ändern', description: 'Abschnitt per id ändern. append=true hängt den Text an statt ihn zu ersetzen.',
-    inputSchema: S({ timeline: TL, id: str('id aus list_story'), title: str('neuer Titel'), text: str('Text'), append: { type: 'boolean', description: 'Text anhängen' }, year: YR, after: str('optional: hinter diesen Abschnitt verschieben (id oder "start")'), chapter: str('in dieses Kapitel verschieben (Titel/id, "" = ohne Kapitel)'), places: { type: 'array', items: { type: 'string' } } }, ['timeline', 'id']), run: a => internalCall('PATCH', '/api/v1/story', {}, a) },
+    inputSchema: S({ timeline: TL, id: str('id aus list_story'), title: str('neuer Titel'), text: str('Text'), append: { type: 'boolean', description: 'Text anhängen' }, year: YR, month: str('Monat (Name oder Nummer) – nur wenn der Kalender der Zeitlinie aktiv ist (set_calendar)'), day: { type: 'number', description: 'Tag im Monat' },  after: str('optional: hinter diesen Abschnitt verschieben (id oder "start")'), chapter: str('in dieses Kapitel verschieben (Titel/id, "" = ohne Kapitel)'), places: { type: 'array', items: { type: 'string' } } }, ['timeline', 'id']), run: a => internalCall('PATCH', '/api/v1/story', {}, a) },
   { name: 'upsert_chapter', title: 'Kapitel anlegen/ändern', description: 'Story-Kapitel anlegen oder ändern: Titel, Kurzbeschreibung (summary), Position (after = Kapitel-id/-titel oder "start"), sections = Abschnitts-ids, die in dieses Kapitel gehören. Umbenennen über newTitle.',
     inputSchema: S({ timeline: TL, title: str('Kapiteltitel (Schlüssel)'), id: str('alternativ: Kapitel-id'), newTitle: str('neuer Titel'), summary: str('kurze Zusammenfassung des Kapitels'), after: str('hinter dieses Kapitel setzen oder "start"'), sections: { type: 'array', items: { type: 'string' }, description: 'Abschnitts-ids, die diesem Kapitel zugeordnet werden' } }, ['timeline']),
     run: a => internalCall('POST', '/api/v1/chapter', {}, a) },
@@ -1284,11 +1331,11 @@ const MCP_TOOLS = [
     run: a => internalCall('POST', '/api/v1/rule', {}, a) },
   { name: 'delete_rule', title: 'Weltregel löschen', description: 'Weltregel löschen (nur auf ausdrücklichen Wunsch des Nutzers).', inputSchema: S({ timeline: TL, title: str('Titel'), id: str('id') }, ['timeline']), run: a => internalCall('DELETE', '/api/v1/rule', {}, a) },
   { name: 'list_world_notes', title: 'Weltnotizen lesen', description: 'Aktueller Zustand der Welt (unabhängig von der Spieler-Story): Galaktische Lage, Fraktionen, Planeten & Regionen, Organisationen, offene Handlungsstränge, gesicherte Erkenntnisse. Weltnotizen sind NICHT das Wissen aller Charaktere – das steht in den Charakterakten.', ro: true,
-    inputSchema: S({ timeline: TL, year: str('Stand zu diesem Jahr (Standard: Jahr des neuesten Story-Abschnitts; "latest" = jeweils neuester Stand)'), history: { type: 'boolean', description: 'frühere Stände mit ausgeben' }, category: str('nur diese Kategorie'), query: str('Suchtext'), place: str('Ort'), lang: LG }, ['timeline']),
-    run: (a, v) => internalCall('GET', '/api/v1/worldnotes', { timeline: a.timeline, year: a.year, history: a.history ? '1' : undefined, category: a.category, q: a.query, place: a.place, lang: a.lang, format: 'text' }, null, v) },
+    inputSchema: S({ timeline: TL, year: str('Stand zu diesem Jahr (Standard: Datum des neuesten Story-Abschnitts; "latest" = jeweils neuester Stand)'), month: str('Monat (Name oder Nummer) – nur wenn der Kalender der Zeitlinie aktiv ist (set_calendar)'), day: { type: 'number', description: 'Tag im Monat' },  history: { type: 'boolean', description: 'frühere Stände mit ausgeben' }, category: str('nur diese Kategorie'), query: str('Suchtext'), place: str('Ort'), lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/worldnotes', { timeline: a.timeline, year: a.year, month: a.month, day: a.day, history: a.history ? '1' : undefined, category: a.category, q: a.query, place: a.place, lang: a.lang, format: 'text' }, null, v) },
   { name: 'upsert_world_note', title: 'Weltnotiz anlegen/aktualisieren', description: 'Weltnotiz anlegen oder aktualisieren. Notizen sind an Jahre gebunden: Text/Einstufung gelten ab year (Standard: Jahr des neuesten Story-Abschnitts). Gibt es für dieses Jahr schon einen Stand, wird er geändert; sonst entsteht ein neuer Stand ab diesem Jahr, frühere bleiben als Verlauf erhalten (wichtig für Rückblicke). until = Jahr, ab dem die Notiz nicht mehr gilt. Bestehende Notizen bevorzugt aktualisieren (per id oder Titel) statt für jede Kleinigkeit eine neue anzulegen. Kategorien (frei, empfohlen): ' + WN_CATS.join(', ') + '. certainty: confirmed (gesichert), suspected (Vermutung), rumor (Gerücht). append=true hängt Text an.',
     inputSchema: S({ timeline: TL, title: str('Titel (Schlüssel)'), id: str('alternativ: id'), category: str('Kategorie'), newTitle: str('neuer Titel'), text: str('Inhalt (Markdown: **fett**, *kursiv*, Leerzeile = Absatz)'),
-      year: str('gilt ab diesem Jahr, z.B. "3640 BBY" ("always" = von Anfang an)'), until: str('gilt bis zu diesem Jahr (leer = offen)'),
+      year: str('gilt ab diesem Jahr, z.B. "3640 BBY" ("always" = von Anfang an)'), month: str('Monat (Name oder Nummer) – nur wenn der Kalender der Zeitlinie aktiv ist (set_calendar)'), day: { type: 'number', description: 'Tag im Monat' }, until: str('gilt bis zu diesem Jahr (leer = offen)'),
       append: { type: 'boolean' }, certainty: { type: 'string', enum: WN_CERT }, places: { type: 'array', items: { type: 'string' }, description: 'betroffene Orte' } }, ['timeline']),
     run: a => internalCall('POST', '/api/v1/worldnote', {}, a) },
   { name: 'delete_world_note', title: 'Weltnotiz löschen', description: 'Weltnotiz löschen (id oder exakter Titel).', inputSchema: S({ timeline: TL, title: str('Titel'), id: str('id') }, ['timeline']), run: a => internalCall('DELETE', '/api/v1/worldnote', {}, a) },
@@ -1305,7 +1352,7 @@ const MCP_TOOLS = [
       faction: str('Fraktion (Name)'), title: str('Rang/Rolle'), organization: str('Organisation/Orden/Einheit'), master: str('Meister oder Mentor'),
       abilities: str('Machtfähigkeiten, Kampfstil, Fachwissen'),
       money: { type: 'number', description: 'Geld (setzt den Betrag)' }, moneyDelta: { type: 'number', description: 'Geld ändern, z.B. -500 oder 1200' },
-      moneyReason: str('Grund der Geldänderung für den Verlauf, z.B. "Treibstoff auf Nar Shaddaa"'), moneyYear: str('RP-Jahr der Geldänderung (Standard: Jahr des neuesten Story-Abschnitts)'), currency: str('Währung (Standard: Credits bzw. Gold)'),
+      moneyReason: str('Grund der Geldänderung für den Verlauf, z.B. "Treibstoff auf Nar Shaddaa"'), moneyYear: str('RP-Jahr der Geldänderung (Standard: Jahr des neuesten Story-Abschnitts)'), moneyMonth: str('Monat der Geldänderung (mit Kalender)'), moneyDay: { type: 'number', description: 'Tag der Geldänderung' }, currency: str('Währung (Standard: Credits bzw. Gold)'),
       inventory: { type: 'array', items: ITEM, description: 'Gegenstände/Eigentum anlegen oder ändern (per Name); qtyDelta ändert die Menge, Menge 0 entfernt' },
       removeItems: { type: 'array', items: { type: 'string' }, description: 'Gegenstände entfernen (Namen)' },
       knowledge: str('Was weiß die Person über Tim und andere?'),
@@ -1348,6 +1395,11 @@ const MCP_TOOLS = [
   { name: 'delete_housing', title: 'Housing löschen', description: 'Löscht ein Raumschiff/Haus komplett (exakter Name oder id). Nur auf ausdrücklichen Wunsch.', destructive: true,
     inputSchema: S({ timeline: TL, name: str('exakter Name oder id') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/housing', {}, { timeline: a.timeline, name: a.name, id: a.name }) },
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
+  { name: 'get_calendar', title: 'Kalender lesen', description: 'Kalender der Zeitlinie (aktiv?, Monate mit Tagen) und aktuelles RP-Datum.', ro: true,
+    inputSchema: S({ timeline: TL, lang: LG }, ['timeline']), run: (a, v) => internalCall('GET', '/api/v1/calendar', { timeline: a.timeline, lang: a.lang }, null, v) },
+  { name: 'set_calendar', title: 'Kalender einstellen', description: 'Aktiviert Monate und Tage für eine Zeitlinie (danach können Story-Abschnitte, Weltnotiz-Stände und Geldänderungen month/day bekommen). preset: gsc = Galaktischer Standardkalender (Star Wars, 368 Tage: 10 Monate à 35 Tage, 3 Festwochen, Feiertage), gsc10 = nur die 10 Monate, gregorian = Januar–Dezember, custom = eigene months [{name, days}] (z.B. Fantasy-Kalender). enabled=false schaltet wieder ab (Monat/Tag-Angaben bleiben gespeichert).',
+    inputSchema: S({ timeline: TL, enabled: { type: 'boolean' }, preset: { type: 'string', enum: ['gsc', 'gsc10', 'gregorian', 'custom'] }, months: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, days: { type: 'number' } }, required: ['name', 'days'] }, description: 'eigene Monate (ersetzt die Liste)' } }, ['timeline']),
+    run: a => internalCall('POST', '/api/v1/calendar', {}, a) },
   { name: 'list_conflicts', title: 'Konfliktzonen', description: 'Aktive Konfliktzonen (offene Kämpfe) in einem Jahr bzw. mit all=true alle, mit Parteien, Laufzeit und Orten. Grenzen allein bedeuten keinen Krieg – nur Konfliktzonen markieren direkte Kämpfe.', ro: true,
     inputSchema: S({ timeline: TL, year: YR, all: { type: 'boolean' }, lang: LG }, ['timeline']), run: (a, v) => internalCall('GET', '/api/v1/conflicts', { timeline: a.timeline, year: a.year, all: a.all ? '1' : '', lang: a.lang, format: 'text' }, null, v) },
   { name: 'upsert_conflict', title: 'Konfliktzone markieren', description: 'Markiert eine Konfliktzone (gestrichelt + schraffiert auf der Karte) für direkte Kämpfe – nicht jede Grenze ist Krieg. Formen (kind): "border" = Konfliktstreifen entlang der gemeinsamen Grenze zweier angrenzender Fraktionen (genau 2 factions; ohne places die ganze gemeinsame Grenze, mit places nur der Abschnitt bei diesen Orten; size = Streifenbreite) – typisch für Fronten; "area" = Fläche um mehrere Orte/Systeme (mind. 3 places, folgt ihrer Lage); "circle" = Kreis um Orte (z.B. Belagerung eines Systems) oder x, y, radius. from/to = Laufzeit (to leer/"open" = andauernd; Standard from = aktuelles RP-Jahr). Bestehende Zonen (gleicher Name) werden geändert.',
@@ -1369,7 +1421,7 @@ const MCP_INSTRUCTIONS = 'Ascandir RP-Manager: interaktive Karte (Star Wars u. e
   'WICHTIG: Jede Zeitlinie kann feste Weltregeln haben (list_rules). Sie gelten immer, haben Vorrang vor allem anderen und werden zu Beginn mit list_rules oder get_summary gelesen; ändern nur auf ausdrücklichen Wunsch des Nutzers. ' +
   'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
-  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Konfliktzonen: Grenzen bedeuten nicht automatisch Krieg; direkte Kämpfe als Konfliktzone markieren (upsert_conflict mit places, factions, from), beendete Kämpfe mit end_conflict abschließen, list_conflicts zeigt aktive. Housing (Raumschiffe, Häuser, Basen) pro Zeitlinie: list_housing/get_housing lesen, upsert_housing, upsert_deck, set_deck_image (Grundriss-Bild), upsert_room (Räume als Rasterflächen oder Markierung, mit Beschreibung, Einrichtung, Gegenständen), move_wall (Wände verschieben); vorher get_housing aufrufen. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
+  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Kalender: Zeitlinien können Monate/Tage haben (get_calendar, set_calendar); dann bei Story, Weltnotizen und Geld month/day angeben bzw. Datum wie "12. Elona 3640 VSY". Konfliktzonen: Grenzen bedeuten nicht automatisch Krieg; direkte Kämpfe als Konfliktzone markieren (upsert_conflict mit places, factions, from), beendete Kämpfe mit end_conflict abschließen, list_conflicts zeigt aktive. Housing (Raumschiffe, Häuser, Basen) pro Zeitlinie: list_housing/get_housing lesen, upsert_housing, upsert_deck, set_deck_image (Grundriss-Bild), upsert_room (Räume als Rasterflächen oder Markierung, mit Beschreibung, Einrichtung, Gegenständen), move_wall (Wände verschieben); vorher get_housing aufrufen. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
 async function handleMcp(req, res, url, tv) {
   // tv = Betrachter aus dem Token (null = Gast). Sichtbar ist nur, was dieser Benutzer sehen darf.
   const viewerOf = () => tv || whoIs({ headers: {} }, null);

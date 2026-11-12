@@ -142,6 +142,24 @@ Dazu kommen Tags, Notizen, ein Porträt und eine Bildergalerie.
 - **REST:** `GET /api/v1/characters`, `GET /api/v1/character?name=…`, `POST/DELETE /api/v1/character`, `POST /api/v1/character/image`.
 - Selbst hochgeladene Bilder werden verkleinert direkt in der Zeitlinien-Datei gespeichert.
 
+### Kalender: Monate und Tage
+
+Pro Zeitlinie lässt sich unter **Einstellungen → 📅 Kalender** ein Kalender einschalten. Dann bekommen Story-Abschnitte, Weltnotiz-Stände und der Geldverlauf der Charaktere ein genaues Datum, z. B. „12. Kelona 3640 VSY“. Karte und Zeitleiste rechnen weiter in Jahren.
+
+- **Vorlagen:**
+  - *Galaktischer Standardkalender* für Star Wars: 368 Tage, 10 Monate à 35 Tage, 3 Festwochen à 5 Tage und Feiertage. Die Festwochen sind neutral benannt und lassen sich umbenennen.
+  - *nur die 10 Monate*
+  - *Gregorianisch*
+  - *eigener Kalender*: Monate mit beliebigen Namen und Tageszahlen, z. B. für Fantasy-Welten.
+- **Eingabe:** Neben dem Jahr stehen Monat und Tag. Du kannst auch direkt „12. Kelona 3640 VSY“ oder „12.3.3640 VSY“ eintippen. Einträge im selben Jahr werden nach Monat und Tag sortiert. Die Story zeigt das aktuelle RP-Datum, also das des neuesten Abschnitts.
+- **Weltnotizen** können mehrere Stände im selben Jahr haben. In der Jahresansicht gilt der Stand am Jahresende.
+- Abschalten behält die Monats- und Tagesangaben. Beim Wechsel auf einen Kalender mit weniger Monaten oder Tagen verlieren betroffene Einträge nur Monat bzw. Tag, das Jahr bleibt.
+- **ChatGPT:**
+  - `get_calendar` und `set_calendar` (`preset` gsc/gsc10/gregorian/custom, eigene `months`, `enabled`)
+  - `add_story_entry`, `update_story_entry`, `upsert_world_note`, `list_world_notes` mit `month` (Name oder Nummer) und `day`. Alternativ ein Datum als Text im Jahresfeld.
+  - Geld mit `moneyMonth` und `moneyDay`.
+  - `get_summary` nennt Kalender und aktuelles RP-Datum.
+
 ### Konfliktzonen
 
 Nicht jede Grenze bedeutet Krieg. Direkte Kämpfe markierst du als **Konfliktzone**: rot gestrichelt und schraffiert, mit „⚔ Name“. Das funktioniert in Star Wars, eigenen Sci-Fi-Welten und Fantasy-Welten. Es gibt drei Formen:
