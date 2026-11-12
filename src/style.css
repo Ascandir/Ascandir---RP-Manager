@@ -280,7 +280,7 @@ body[data-theme="fantasy"] #topbar .lang-switch button.active { background: #f4e
   .tl-controls button { padding: 5px 8px; font-size: 12px; }
   .mode-tabs { margin-left: auto; gap: 3px; }
   .mode-tabs button { padding: 5px 9px; font-size: 12px; }
-  #btnUser, #btnServer { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+  #btnUser, #btnServer, #curDateBtn { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
   .lang-switch button { padding: 4px 7px; }
   button, select, input { min-height: 34px; }
 
