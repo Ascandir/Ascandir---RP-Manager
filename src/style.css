@@ -558,3 +558,4 @@ body[data-theme="scifi"] #topbar #modeMenu > button.active { color: #1a1205 !imp
 #curDateBtn.dim { opacity: .7; font-style: italic; }
 .cd-now { font-size: 1.25em; font-weight: 600; margin: 4px 0 2px; }
 .cd-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+.bday { color: var(--accent); font-size: .92em; white-space: nowrap; }

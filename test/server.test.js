@@ -274,3 +274,27 @@ test('Aktuelles Datum: setzen, weiterzählen, rechnen', async () => {
   const yr = await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', year: '12 n.K.', advanceYears: 2 });
   assert.equal(yr.data.current.label, '14 n.K.');
 });
+
+test('Charakter: Geburtstag, berechnetes Alter, nächster Geburtstag', async () => {
+  const y = await mcp(TOK.editor, 'upsert_character', { timeline: 'Haupt', name: 'Arin', birth: '-10 n.K.' });
+  assert.ok(!y.isError, y.text);
+  await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', year: '14 n.K.' });
+  let g = await mcp(TOK.viewer, 'get_character', { timeline: 'Haupt', name: 'Arin' });
+  assert.match(g.text, /Alter – Geburtstag: 24 Jahre – 10 v\.K\./);
+  await mcp(TOK.editor, 'set_calendar', { timeline: 'Haupt', preset: 'gsc', enabled: true });
+  await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', date: '18. Kelona 14 n.K.' });
+  const d = await mcp(TOK.editor, 'upsert_character', { timeline: 'Haupt', name: 'Arin', birth: '-10 n.K.', birthMonth: 'Kelona', birthDay: 20 });
+  assert.ok(!d.isError, d.text);
+  g = await mcp(TOK.viewer, 'get_character', { timeline: 'Haupt', name: 'Arin' });
+  assert.match(g.text, /Alter – Geburtstag: 23 Jahre – 20\. Kelona 10 v\.K\. \(nächster Geburtstag in 2 Tagen\)/);
+  const bad = await mcp(TOK.editor, 'upsert_character', { timeline: 'Haupt', name: 'Arin', birthMonth: 'Kelona', birthDay: 40 });
+  assert.ok(bad.isError && /1…35/.test(bad.text));
+  const lst = await mcp(TOK.viewer, 'list_characters', { timeline: 'Haupt' });
+  assert.ok(!lst.isError);
+  const clr = await mcp(TOK.editor, 'upsert_character', { timeline: 'Haupt', name: 'Arin', birth: '' });
+  assert.ok(!clr.isError);
+  g = await mcp(TOK.viewer, 'get_character', { timeline: 'Haupt', name: 'Arin' });
+  assert.doesNotMatch(g.text, /Geburtstag/);
+  await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', clear: true });
+  await mcp(TOK.editor, 'set_calendar', { timeline: 'Haupt', enabled: false });
+});

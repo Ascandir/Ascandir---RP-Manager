@@ -515,16 +515,21 @@ function groupFor(t, name, color) {
   else if (color) g.color = color;
   return g;
 }
-function charOut(t, c, full) {
+function charOut(t, c, full, lang = 'de') {
   const fac = c.faction ? t.factions.find(f => f.id === c.faction) : null, grp = c.group ? (t.charGroups || []).find(g => g.id === c.group) : null;
   const base = { id: c.id, name: c.name, group: grp ? grp.name : '', title: c.title || '', faction: fac ? fac.name : (c.faction || ''), location: c.location || '', status: c.status || '', image: c.image || null };
+  if (c.birth && c.birth.year != null) {
+    const f = yearFmt(t, lang), now = rpDate(t), cl = calOf(t, lang);
+    base.birthday = fmtD(t, c.birth, f, lang); base.ageNow = CAL.ageOf(c.birth, now);
+    const nd = CAL.daysUntilAnniversary(cl, c.birth, now); if (nd != null) base.daysToBirthday = nd;
+  }
   if (!full) return base;
   return Object.assign(base, { species: c.species || '', gender: c.gender || '', age: c.age || '', homeworld: c.homeworld || '', appearance: c.appearance || '', personality: c.personality || '',
     money: c.money ?? null, currency: c.currency || '', moneyLog: (c.moneyLog || []).slice(-20), inventory: (c.inventory || []).map(i => ({ name: i.name, qty: i.qty ?? 1, type: i.type || 'gear', location: i.location || '', important: !!i.important, note: i.note || '' })),
     abilities: c.abilities || '', bio: c.bio || '', notes: c.notes || '', organization: c.organization || '', master: c.master || '', knowledge: c.knowledge || '', threads: c.threads || '', tags: c.tags || [], relations: c.relations || [], gallery: (c.gallery || []).map(g => ({ src: g.src && g.src.startsWith('data:') ? '(eingebettetes Bild)' : g.src, caption: g.caption || '' })), updated: c.updated || null });
 }
 function charText(t, c, lang) {
-  const de = lang !== 'en', o = charOut(t, c, true), L = [`# ${o.name}${o.title ? ' – ' + o.title : ''} [id: ${o.id}]`];
+  const de = lang !== 'en', o = charOut(t, c, true, lang), L = [`# ${o.name}${o.title ? ' – ' + o.title : ''} [id: ${o.id}]`];
   const lab = de ? { species: 'Spezies', gender: 'Geschlecht', age: 'Alter', homeworld: 'Herkunftswelt', faction: 'Fraktion', title: 'Rang/Rolle', organization: 'Organisation', master: 'Meister/Mentor', location: 'Aufenthaltsort', status: 'Status',
       appearance: 'Erscheinungsbild', personality: 'Persönlichkeit', bio: 'Hintergrund', abilities: 'Fähigkeiten', knowledge: 'Wissen', threads: 'Laufende Handlungsstränge', notes: 'Notizen',
       secId: 'Identität', secAff: 'Zugehörigkeit', secNow: 'Aktueller Stand', rel: 'Beziehungen', kinds: { ally: 'Verbündete', enemy: 'Feinde', family: 'Familie', contact: 'Kontakte', other: 'Sonstige' } }
@@ -534,7 +539,11 @@ function charText(t, c, lang) {
   const block = (head, keys) => { const r = keys.filter(k => o[k]).map(k => `${lab[k]}: ${o[k]}`); if (r.length) L.push(`\n## ${head}\n` + r.join('\n')); };
   if (o.group) L.push((de ? 'Gruppe: ' : 'Group: ') + o.group);
   if (o.tags.length) L.push('Tags: ' + o.tags.join(', '));
-  block(lab.secId, ['species', 'age', 'gender', 'homeworld']);
+  if (o.birthday) { // „Alter – Geburtstag“, Alter berechnet zum aktuellen RP-Datum
+    lab.birthday = de ? 'Alter – Geburtstag' : 'Age – birthday';
+    o.birthday = (o.ageNow != null ? `${o.ageNow} ${de ? 'Jahre' : 'years'} – ` : '') + o.birthday + (o.daysToBirthday != null ? (o.daysToBirthday === 0 ? (de ? ' (hat heute Geburtstag)' : ' (birthday today)') : (de ? ` (nächster Geburtstag in ${o.daysToBirthday} Tagen)` : ` (next birthday in ${o.daysToBirthday} days)`)) : '');
+  }
+  block(lab.secId, o.birthday ? ['birthday', 'species', 'gender', 'homeworld'] : ['species', 'age', 'gender', 'homeworld']);
   for (const k of ['appearance', 'personality', 'bio']) if (o[k]) L.push(`\n## ${lab[k]}\n${o[k]}`);
   block(lab.secAff, ['faction', 'title', 'organization', 'master']);
   if (o.abilities) L.push(`\n## ${lab.abilities}\n${o.abilities}`);
@@ -846,6 +855,14 @@ async function apiWrite(req, res, url, parts) {
         delta: c.money == null ? null : (Number(c.money) || 0) - (Number(before) || 0), balance: c.money ?? null, reason: String(b.moneyReason || ''), by: VIEWER && VIEWER.api ? 'API' : (VIEWER && VIEWER.name) || '' }]).slice(-500);
     }
     if (b.currency !== undefined) c.currency = String(b.currency);
+    // Geburtstag: Datumstext oder Jahr, optional birthMonth/birthDay (mit Kalender); null/"" löscht
+    if (b.birth === null || b.birth === '') delete c.birth;
+    else if (b.birth !== undefined || b.birthMonth !== undefined || b.birthDay !== undefined) {
+      const f = yearFmt(t, lang), base = b.birth != null ? b.birth : (c.birth ? String(fmtYear(c.birth.year, f)) : null);
+      if (base == null) return send(res, 400, { error: 'birth: Geburtsjahr oder -datum angeben, z.B. "3660 VSY" oder "20. Kelona 3660 VSY"' });
+      const p = parseD(t, base, f, b.birthMonth, b.birthDay, lang);
+      c.birth = { year: p.year }; if (p.month) c.birth.month = p.month; if (p.day) c.birth.day = p.day;
+    }
     if (b.inventory || b.removeItems) applyInventory(c, { items: b.inventory, remove: b.removeItems });
     if (b.group !== undefined) { const g = groupFor(t, b.group, b.groupColor); c.group = g ? g.id : ''; }
     const rel = r => ({ name: String(r.name), relation: String(r.relation || ''), kind: REL_KINDS.includes(r.kind) ? r.kind : 'other' });
@@ -1400,7 +1417,7 @@ const MCP_TOOLS = [
     run: (a, v) => internalCall('GET', '/api/v1/characters', { timeline: a.timeline, q: a.query, faction: a.faction, place: a.place, group: a.group, lang: a.lang, format: 'text' }, null, v) },
   { name: 'get_character', title: 'Charakter lesen', description: 'Alle Details eines Charakters (Steckbrief, Aussehen, Persönlichkeit, Hintergrund, Beziehungen).', ro: true,
     inputSchema: S({ timeline: TL, name: str('Name oder id'), lang: LG }, ['timeline', 'name']), run: (a, v) => internalCall('GET', '/api/v1/character', { timeline: a.timeline, name: a.name, lang: a.lang, format: 'text' }, null, v) },
-  { name: 'upsert_character', title: 'Charakter anlegen/ändern', description: 'Charakter anlegen oder Felder ändern (nur angegebene Felder werden geändert). Gliederung: Identität (species, age, gender, homeworld), Erscheinungsbild (appearance: Gesicht, Haare, Augen, Körperbau, Kleidung), Persönlichkeit (personality: Züge, Verhalten, Eigenheiten), Hintergrund (bio: Herkunft, Ausbildung, Vergangenheit), Zugehörigkeit (faction, title=Rang, organization, master), Fähigkeiten (abilities: Machtfähigkeiten, Kampfstil, Fachwissen), Besitz & Inventar (money/moneyDelta mit moneyReason für den Geldverlauf, currency, inventory mit type gear|property, important = storyrelevant, removeItems), Beziehungen (relations/addRelations mit kind ally|enemy|family|contact|other), Wissen (knowledge: was die Person über Tim und andere weiß), Aktueller Stand (location, status, threads = laufende Handlungsstränge). append: Liste von Textfeldern, an die angehängt statt ersetzt wird (z.B. ["knowledge","threads"]). Texte dürfen **fett**/*kursiv* und Leerzeilen enthalten.',
+  { name: 'upsert_character', title: 'Charakter anlegen/ändern', description: 'Charakter anlegen oder Felder ändern (nur angegebene Felder werden geändert). Gliederung: Identität (birth = Geburtstag, species, age, gender, homeworld), Erscheinungsbild (appearance: Gesicht, Haare, Augen, Körperbau, Kleidung), Persönlichkeit (personality: Züge, Verhalten, Eigenheiten), Hintergrund (bio: Herkunft, Ausbildung, Vergangenheit), Zugehörigkeit (faction, title=Rang, organization, master), Fähigkeiten (abilities: Machtfähigkeiten, Kampfstil, Fachwissen), Besitz & Inventar (money/moneyDelta mit moneyReason für den Geldverlauf, currency, inventory mit type gear|property, important = storyrelevant, removeItems), Beziehungen (relations/addRelations mit kind ally|enemy|family|contact|other), Wissen (knowledge: was die Person über Tim und andere weiß), Aktueller Stand (location, status, threads = laufende Handlungsstränge). append: Liste von Textfeldern, an die angehängt statt ersetzt wird (z.B. ["knowledge","threads"]). Texte dürfen **fett**/*kursiv* und Leerzeilen enthalten.',
     inputSchema: S({ timeline: TL, name: str('Name (Schlüssel)'), newName: str('neuer Name'),
       group: str('Gruppe, z.B. "Crew der Trailblazer" (wird bei Bedarf angelegt; leer = keine)'), groupColor: str('Farbe der Gruppe, z.B. "#e57373"'),
       species: str('Spezies'), age: str('Alter, z.B. "34" oder "geb. 3674 BBY"'), gender: str('Geschlecht'), homeworld: str('Herkunftswelt'),
@@ -1408,6 +1425,7 @@ const MCP_TOOLS = [
       faction: str('Fraktion (Name)'), title: str('Rang/Rolle'), organization: str('Organisation/Orden/Einheit'), master: str('Meister oder Mentor'),
       abilities: str('Machtfähigkeiten, Kampfstil, Fachwissen'),
       money: { type: 'number', description: 'Geld (setzt den Betrag)' }, moneyDelta: { type: 'number', description: 'Geld ändern, z.B. -500 oder 1200' },
+      birth: str('Geburtstag/Geburtsjahr, z.B. "20. Kelona 3660 VSY" oder "3660 VSY" ("" löscht) – das Alter wird daraus zum aktuellen RP-Datum berechnet'), birthMonth: str('Geburtsmonat (Name oder Nummer)'), birthDay: { type: 'number', description: 'Geburtstag im Monat' },
       moneyReason: str('Grund der Geldänderung für den Verlauf, z.B. "Treibstoff auf Nar Shaddaa"'), moneyYear: str('RP-Jahr der Geldänderung (Standard: Jahr des neuesten Story-Abschnitts)'), moneyMonth: str('Monat der Geldänderung (mit Kalender)'), moneyDay: { type: 'number', description: 'Tag der Geldänderung' }, currency: str('Währung (Standard: Credits bzw. Gold)'),
       inventory: { type: 'array', items: ITEM, description: 'Gegenstände/Eigentum anlegen oder ändern (per Name); qtyDelta ändert die Menge, Menge 0 entfernt' },
       removeItems: { type: 'array', items: { type: 'string' }, description: 'Gegenstände entfernen (Namen)' },

@@ -93,7 +93,21 @@
     return r;
   }
   const diffDays = (c, a, b) => toDays(c, b) - toDays(c, a);
-  const API = { PRESETS, LIMITS, CalError, normCal, on, monthNo, normMD, key, keyOf, endKey, fmt, parse, daysInYear, dayOfYear, toDays, fromDays, add, diffDays };
+  // Alter in Jahren zum Datum now (Jahre linear, Geburtstag im Jahr berücksichtigt, sofern Monat/Tag bekannt)
+  function ageOf(birth, now) {
+    if (!birth || birth.year == null || !now || now.year == null) return null;
+    let a = Math.round(now.year) - Math.round(birth.year);
+    if (birth.month && now.month && (now.month < birth.month || (now.month === birth.month && (now.day || 1) < (birth.day || 1)))) a--;
+    return a;
+  }
+  // Tage bis zum nächsten Jahrestag (Geburtstag); 0 = heute; null, wenn Monat fehlt oder kein Kalender aktiv
+  function daysUntilAnniversary(c, birth, now) {
+    if (!on(c) || !birth || !birth.month || !now || !now.month || !c.months[birth.month - 1]) return null;
+    const md = { month: birth.month, day: Math.min(birth.day || 1, c.months[birth.month - 1].days) }, cur = { year: now.year, month: now.month, day: now.day || 1 };
+    let next = Object.assign({ year: now.year }, md); if (toDays(c, next) < toDays(c, cur)) next = Object.assign({ year: now.year + 1 }, md);
+    return toDays(c, next) - toDays(c, cur);
+  }
+  const API = { PRESETS, LIMITS, CalError, normCal, on, monthNo, normMD, key, keyOf, endKey, fmt, parse, daysInYear, dayOfYear, toDays, fromDays, add, diffDays, ageOf, daysUntilAnniversary };
   root.IAM_CAL = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -3037,6 +3037,12 @@
       pushUndo(); const n = { id: uid('ch'), name: name.trim(), created: new Date().toISOString() }; list.push(n); charSel = n.id; charEdit = true; afterEdit(); renderChars(true);
     };
   }
+  // „Alter – Geburtstag“: Alter berechnet zum aktuellen RP-Datum, 🎂 kurz vor dem Geburtstag
+  function birthRow(c) {
+    if (!c.birth || c.birth.year == null || !CAL) return '';
+    const now = curDate(), age = CAL.ageOf(c.birth, now), nd = CAL.daysUntilAnniversary(cal(), c.birth, now);
+    return `<span class="k">${esc(t('ch_ageBirth'))}</span><span>${age != null ? `<b>${esc(t('ageYears', String(age)))}</b> – ` : ''}${esc(fmtD(c.birth))}${nd != null && nd <= 30 ? ` <span class="bday">🎂 ${esc(nd === 0 ? t('bdayToday') : t('bdayIn', String(nd)))}</span>` : ''}</span>`;
+  }
   function charDetail(box, c, can) {
     const f = c.faction && facById(c.faction), pl = placeByName(c.location), hw = placeByName(c.homeworld);
     const val = k => k === 'location' && pl ? `<a href="#" data-place="${esc(pl.id)}">📍 ${esc(c.location)}</a>` : k === 'homeworld' && hw ? `<a href="#" data-place="${esc(hw.id)}">${esc(c.homeworld)}</a>`
@@ -3052,15 +3058,16 @@
         return `<h3 class="facts-h">${esc(t(key))}</h3>
           ${['gear', 'property'].map(ty => grp(ty).length ? `<div class="k sub">${esc(t('inv_' + ty))}</div><ul class="inv">${grp(ty).sort((a, b) => (b.important ? 1 : 0) - (a.important ? 1 : 0)).map(itHtml).join('')}</ul>` : '').join('')}`;
       }
-      const iv = info.filter(k => c[k]), tv = texts.filter(k => c[k]);
+      const bRow = key === 'secIdentity' ? birthRow(c) : '';
+      const iv = info.filter(k => c[k] && !(k === 'age' && bRow)), tv = texts.filter(k => c[k]);
       const money = key === 'secIdentity' && c.money != null ? `<div class="money"><a href="#" id="moneyHist" title="${esc(t('moneyHistory'))}">💰 <b>${esc(Number(c.money).toLocaleString(settings.lang === 'en' ? 'en-GB' : 'de-DE'))}</b> ${esc(c.currency || defCurrency())} <span class="hist-ic">🕘${(c.moneyLog || []).length ? ` ${c.moneyLog.length}` : ''}</span></a></div>` : '';
-      if (!iv.length && !tv.length) return money ? `<h3 class="facts-h">${esc(t(key))}</h3>${money}` : '';
+      if (!iv.length && !tv.length && !bRow) return money ? `<h3 class="facts-h">${esc(t(key))}</h3>${money}` : '';
       // längere Textbereiche sind zugeklappt, Klick auf die Überschrift klappt auf
       if (CH_FOLDED.includes(key)) {
         const open = charOpen.has(c.id + ':' + key);
         return `<h3 class="facts-h ch-fold" data-sec="${key}"><span class="fold-ar">${open ? '▾' : '▸'}</span> ${esc(t(key))}</h3>${open ? tv.map(k => `<div class="story-text">${rich(c[k])}</div>`).join('') : ''}`;
       }
-      return `<h3 class="facts-h">${esc(t(key))}</h3>${iv.length ? `<div class="kv">${iv.map(k => `<span class="k">${esc(t('ch_' + k))}</span><span>${val(k)}</span>`).join('')}</div>` : ''}${money}
+      return `<h3 class="facts-h">${esc(t(key))}</h3>${iv.length || bRow ? `<div class="kv">${bRow}${iv.map(k => `<span class="k">${esc(t('ch_' + k))}</span><span>${val(k)}</span>`).join('')}</div>` : ''}${money}
         ${tv.map(k => `${texts.length > 1 || info.length ? `<div class="k sub">${esc(t('ch_' + k))}</div>` : ''}<div class="story-text">${rich(c[k])}</div>`).join('')}`;
     };
     box.innerHTML = `
@@ -3111,6 +3118,7 @@
       <label class="field"><span>${esc(t('name'))}</span><input data-f="name" value="${esc(c.name)}"></label>
       <label class="field"><span>${esc(t('charGroup'))}</span><select data-f="group"><option value="">–</option>${(state.tl.charGroups || []).map(g => `<option value="${esc(g.id)}" ${g.id === c.group ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}<option value="__new">＋ ${esc(t('charGroupAdd'))}…</option></select></label>
       <h4>${esc(t('secIdentity'))}</h4>
+      <div class="row"><label class="field"><span>${esc(t('ch_birth'))}</span><input id="chBirth" value="${esc(c.birth && c.birth.year != null ? fmtYear(c.birth.year) : '')}" placeholder="${esc(t('ph_birth'))}"></label>${mdFields('chB', c.birth)}</div>
       <div class="row">${['species', 'age'].map(fld).join('')}</div><div class="row">${['gender', 'homeworld'].map(fld).join('')}</div>
       ${area('appearance', 3, 'secLooks')}${area('personality', 3, 'secPersonality')}${area('bio', 5, 'secBackground')}
       <h4>${esc(t('secAffil'))}</h4>
@@ -3143,6 +3151,12 @@
       <div class="row"><button id="chDone" class="primary">${esc(t('ok'))}</button><button id="chDel" class="danger">${esc(t('delete'))}</button></div></div>`;
     let pushed = false; const mark = () => { if (!pushed) { pushUndo(); pushed = true; } };
     const touch = () => { c.updated = new Date().toISOString(); saveSoon(); };
+    ['chBirth', 'chBM', 'chBD'].forEach(id => { const el = $('#' + id); if (el) el.addEventListener('change', () => {
+      if (!$('#chBirth').value.trim()) { if (c.birth) { mark(); delete c.birth; touch(); } return; }
+      let p; try { p = readDate($('#chBirth').value, 'chB'); } catch (e) { toast(e.message); return; }
+      if (!p || p.year == null) return;
+      mark(); c.birth = { year: p.year }; if (p.month) c.birth.month = p.month; if (p.day) c.birth.day = p.day; touch();
+    }); });
     box.querySelectorAll('[data-f]').forEach(el => el.addEventListener('change', () => {
       mark(); const k = el.dataset.f, v = el.value;
       if (k === 'tags') c.tags = v.split(',').map(x => x.trim()).filter(Boolean);
