@@ -2325,22 +2325,23 @@
         ${ed ? `<button id="calAdd">＋ ${esc(t('calAddMonth'))}</button>` : ''}
         <p class="hint">${esc(t('calTotal', String(total), String(d.months.length)))}</p>
       </div>
-      ${ed ? `<div class="row"><button id="calSave" class="primary">${esc(t('save'))}</button></div>` : ''}`;
+      <p class="hint">${d.enabled ? '✅ ' + esc(t('calActiveSaved')) : esc(t('calInactive'))}</p>`;
     const on = (id, ev, fn) => { const el = $('#' + id); if (el) el[ev] = fn; };
-    on('calOn', 'onchange', e => { d.enabled = e.target.checked; renderCalendarCard(); });
-    on('calPreset', 'onchange', e => { d.preset = e.target.value; if (d.preset !== 'custom') d.months = CAL.PRESETS[d.preset](settings.lang); renderCalendarCard(); });
-    box.querySelectorAll('[data-cmn]').forEach(i => i.onchange = () => { d.months[+i.dataset.cmn].name = i.value; d.preset = 'custom'; renderCalendarCard(); });
-    box.querySelectorAll('[data-cmd]').forEach(i => i.onchange = () => { d.months[+i.dataset.cmd].days = +i.value; d.preset = 'custom'; renderCalendarCard(); });
-    box.querySelectorAll('[data-cmx]').forEach(b => b.onclick = () => { if (d.months.length > 1) d.months.splice(+b.dataset.cmx, 1); d.preset = 'custom'; renderCalendarCard(); });
-    on('calAdd', 'onclick', () => { d.months.push({ name: (settings.lang === 'en' ? 'Month ' : 'Monat ') + (d.months.length + 1), days: 30 }); d.preset = 'custom'; renderCalendarCard(); });
-    on('calSave', 'onclick', () => {
-      let c; try { c = CAL.normCal({ enabled: d.enabled, preset: d.preset, months: d.months }, settings.lang); } catch (e) { toast(e.message); return; }
+    // jede Änderung wird sofort gespeichert (kein extra Speichern-Klick, der vergessen werden kann)
+    const apply = () => {
+      let c; try { c = CAL.normCal({ enabled: d.enabled, preset: d.preset, months: d.months }, settings.lang); } catch (e) { toast(e.message); calDraft = null; renderCalendarCard(); return; }
       pushUndo(); tl.calendar = c;
       // Einträge, deren Monat/Tag es im neuen Kalender nicht gibt, behalten nur das Jahr
       const fix = o => { if (!o || !o.month) return; const m = c.months[o.month - 1]; if (!m) { delete o.month; delete o.day; } else if (o.day > m.days) o.day = m.days; };
       if (c.enabled) { (tl.story || []).forEach(fix); (tl.worldNotes || []).forEach(n => (n.revs || []).forEach(fix)); (tl.characters || []).forEach(ch => (ch.moneyLog || []).forEach(fix)); fix(tl.currentDate); }
       calDraft = null; afterEdit(true); toast(t('calSaved')); renderCalendarCard();
-    });
+    };
+    on('calOn', 'onchange', e => { d.enabled = e.target.checked; apply(); });
+    on('calPreset', 'onchange', e => { d.preset = e.target.value; if (d.preset !== 'custom') d.months = CAL.PRESETS[d.preset](settings.lang); apply(); });
+    box.querySelectorAll('[data-cmn]').forEach(i => i.onchange = () => { d.months[+i.dataset.cmn].name = i.value; d.preset = 'custom'; apply(); });
+    box.querySelectorAll('[data-cmd]').forEach(i => i.onchange = () => { d.months[+i.dataset.cmd].days = +i.value; d.preset = 'custom'; apply(); });
+    box.querySelectorAll('[data-cmx]').forEach(b => b.onclick = () => { if (d.months.length > 1) d.months.splice(+b.dataset.cmx, 1); d.preset = 'custom'; apply(); });
+    on('calAdd', 'onclick', () => { d.months.push({ name: (settings.lang === 'en' ? 'Month ' : 'Monat ') + (d.months.length + 1), days: 30 }); d.preset = 'custom'; apply(); });
   }
   function renderSettings() {
     const v = $('#settingsView'), w = state.world, info = state.appInfo;

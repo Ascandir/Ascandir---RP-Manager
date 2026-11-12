@@ -209,7 +209,7 @@ function parseD(t, v, f, month, day, lang) {
   const c = calOf(t, lang);
   const p = v != null && v !== '' ? CAL.parse(c, v, x => parseYear(x, f)) : null;
   if (v != null && v !== '' && !p) throw Object.assign(new Error(`Datum/Jahr nicht erkannt: „${v}“`), { code: 400 });
-  if (!CAL.on(c)) { if ((month != null && month !== '') || (day != null && day !== '')) throw Object.assign(new Error('Für diese Zeitlinie ist kein Kalender mit Monaten/Tagen aktiviert (set_calendar)'), { code: 400 }); return p; }
+  if (!CAL.on(c)) { if ((month != null && month !== '') || (day != null && day !== '')) throw Object.assign(new Error(`Für die Zeitlinie „${t.name}“ ist kein Kalender mit Monaten/Tagen aktiviert. Aktivieren mit set_calendar (z.B. preset "gsc" für Star Wars) oder in der App unter Einstellungen → Kalender; get_calendar zeigt den Stand.`), { code: 400 }); return p; }
   if (month === undefined && day === undefined) return p;
   const md = CAL.normMD(c, month === undefined ? (p && p.month) : month, day === undefined ? (p && p.day) : day);
   return Object.assign(p || {}, md);
