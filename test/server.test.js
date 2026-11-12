@@ -247,3 +247,30 @@ test('Kalender: aktivieren, Story/Weltnotizen/Geld mit Tag und Monat', async () 
   const canon = await mcp(TOK.admin, 'set_calendar', { timeline: 'Kanon', preset: 'gsc' });
   assert.ok(canon.isError, 'Kanon bleibt schreibgeschützt');
 });
+
+test('Aktuelles Datum: setzen, weiterzählen, rechnen', async () => {
+  await mcp(TOK.editor, 'set_calendar', { timeline: 'Haupt', preset: 'gsc', enabled: true });
+  const s = await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', date: '33. Welona 10 n.K.' });
+  assert.ok(!s.isError, s.text); assert.equal(s.data.current.label, '33. Welona 10 n.K.'); assert.equal(s.data.current.dayOfYear, 363);
+  const adv = await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', advanceDays: 10 });
+  assert.equal(adv.data.current.label, '5. Festwoche 1 11 n.K.', 'über den Jahreswechsel'); assert.equal(adv.data.daysPassed, 10);
+  const g = await mcp(TOK.viewer, 'get_current_date', { timeline: 'Haupt', compare: '1. Elona 11 n.K.' });
+  assert.match(g.text, /Aktuelles Datum \(Haupt\): 5\. Festwoche 1 11 n\.K\./); assert.match(g.text, /Tag 5 von 368/); assert.match(g.text, /in 1 Tagen/); assert.match(g.text, /Elona \(35\)/);
+  const c1 = await mcp(TOK.viewer, 'calc_date', { timeline: 'Haupt', addDays: 40 });
+  assert.equal(c1.data.result, '5. Kelona 11 n.K.');
+  const c2 = await mcp(TOK.viewer, 'calc_date', { timeline: 'Haupt', from: '1. Elona 5 n.K.', to: '1. Elona 11 n.K.' });
+  assert.equal(c2.data.days, 6 * 368); assert.equal(c2.data.years, 6); assert.equal(c2.data.remainingDays, 0);
+  const sum = await mcp(TOK.viewer, 'get_summary', { timeline: 'Haupt' });
+  assert.match(sum.text, /aktuelles RP-Datum: 5\. Festwoche 1 11 n\.K\./);
+  // neue Weltnotiz-Stände nehmen das aktuelle Datum
+  const wn = await mcp(TOK.editor, 'upsert_world_note', { timeline: 'Haupt', title: 'Neujahr', text: 'Feste' });
+  assert.match(JSON.stringify(wn.data.note.revisions), /5\. Festwoche 1 11 n\.K\./);
+  const clr = await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', clear: true });
+  assert.ok(!clr.isError);
+  const off = await mcp(TOK.editor, 'set_calendar', { timeline: 'Haupt', enabled: false });
+  assert.equal(off.data.enabled, false);
+  const noCal = await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', advanceDays: 1 });
+  assert.ok(noCal.isError && /Kalender/.test(noCal.text));
+  const yr = await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', year: '12 n.K.', advanceYears: 2 });
+  assert.equal(yr.data.current.label, '14 n.K.');
+});

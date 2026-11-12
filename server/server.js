@@ -215,6 +215,14 @@ function parseD(t, v, f, month, day, lang) {
   return Object.assign(p || {}, md);
 }
 const setMD = (o, p) => { if (!p) return; if (p.month) o.month = p.month; else delete o.month; if (p.day) o.day = p.day; else delete o.day; };
+function dateInfo(t, lang, d) {
+  const c = calOf(t, lang), f = yearFmt(t, lang), de = lang !== 'en', o = { label: fmtD(t, d, f, lang), year: d.year, yearLabel: fmtYear(d.year, f) };
+  if (CAL.on(c) && d.month) {
+    const m = c.months[d.month - 1]; Object.assign(o, { month: d.month, monthName: m.name, day: d.day || null, daysInMonth: m.days, dayOfYear: CAL.dayOfYear(c, d.month, d.day), daysInYear: CAL.daysInYear(c) });
+    if (d.day) { o.daysLeftInMonth = m.days - d.day; o.daysLeftInYear = CAL.daysInYear(c) - o.dayOfYear; }
+  }
+  return o;
+}
 function parseYear(s, f) {
   if (s == null || s === '') return null;
   const m = String(s).trim().replace(/[.,\s](?=\d{3}\b)/g, '').match(/^([+-]?\d+)\s*(.*)$/); if (!m) return null;
@@ -324,7 +332,8 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
   const w = worldOf(tl, lang);
   L.push(de ? `Welt: ${w.name} · Zeitlinie: ${tl.name}` : `World: ${w.name} · Timeline: ${tl.name}`);
   L.push(de ? `Jahr: ${fmtYear(year, f)}` : `Year: ${fmtYear(year, f)}`);
-  { const c = calOf(tl, lang); if (CAL.on(c)) { const nd = rpDate(tl); L.push((de ? 'Kalender: ' : 'Calendar: ') + c.months.map(m => `${m.name} (${m.days})`).join(', ') + (de ? ` · aktuelles RP-Datum (neuester Story-Abschnitt): ${fmtD(tl, nd, f, lang)}` : ` · current RP date (latest story section): ${fmtD(tl, nd, f, lang)}`)); } }
+  { const c = calOf(tl, lang); if (CAL.on(c)) { const nd = rpDate(tl); L.push((de ? 'Kalender: ' : 'Calendar: ') + c.months.map(m => `${m.name} (${m.days})`).join(', ') + (de ? ` · aktuelles RP-Datum${tl.currentDate ? '' : ' (neuester Story-Abschnitt)'}: ${fmtD(tl, nd, f, lang)}` : ` · current RP date${tl.currentDate ? '' : ' (latest story section)'}: ${fmtD(tl, nd, f, lang)}`)); }
+    else if (tl.currentDate) L.push((de ? 'Aktuelles RP-Jahr: ' : 'Current RP year: ') + fmtYear(tl.currentDate.year, f)); }
   if (e) L.push((de ? 'Zeitalter: ' : 'Era: ') + `${e.name} (${de ? 'seit' : 'since'} ${fmtYear(e.year, f)})` + (e.desc ? ` – ${e.desc}` : ''));
   else L.push(de ? 'Zeitalter: keines (vor dem ersten Zeitalter)' : 'Era: none (before the first era)');
   if (snap.factions.length) {
@@ -444,11 +453,13 @@ function wnAt(n, year, month, day) {
 }
 // Standardjahr = Jahr des neuesten Story-Abschnitts (aktueller RP-Stand), sonst Beginn des letzten Zeitalters
 function rpYear(t) {
+  if (t.currentDate && Number.isFinite(t.currentDate.year)) return t.currentDate.year;
   const st = (t.story || []).slice().sort(storySortT(t)); if (st.length) return st[st.length - 1].year;
   const er = t.eras.slice().sort((a, b) => a.year - b.year); return er.length ? er[er.length - 1].year : 0;
 }
 // aktuelles RP-Datum (mit Monat/Tag, falls vorhanden) = Datum des neuesten Story-Abschnitts
 function rpDate(t) {
+  if (t.currentDate && Number.isFinite(t.currentDate.year)) return { year: t.currentDate.year, month: t.currentDate.month || null, day: t.currentDate.day || null };
   const st = (t.story || []).slice().sort(storySortT(t)); if (st.length) { const e = st[st.length - 1]; return { year: e.year, month: e.month || null, day: e.day || null }; }
   return { year: rpYear(t), month: null, day: null };
 }
@@ -1001,13 +1012,31 @@ async function apiWrite(req, res, url, parts) {
     t.story = (t.story || []).filter(x => x.id !== id); if (t.story.length === n) return send(res, 404, { error: 'story section not found' });
     saveTimeline(t); return send(res, 200, { ok: true });
   }
+  if (ep === 'date' && (req.method === 'POST' || req.method === 'PATCH')) {
+    const c = calOf(t, lang), f = yearFmt(t, lang), before = rpDate(t);
+    let d = before;
+    if (b.clear) { delete t.currentDate; saveTimeline(t); return send(res, 200, { ok: true, cleared: true, current: dateInfo(t, lang, rpDate(t)) }); }
+    if ((b.date != null && b.date !== '') || (b.year != null && b.year !== '') || b.month !== undefined || b.day !== undefined) {
+      const p = parseD(t, b.date || (b.year != null && b.year !== '' ? b.year : String(fmtYear(before.year, f))), f, b.month, b.day, lang);
+      d = { year: p.year, month: p.month || null, day: p.day || null };
+    }
+    if (b.advanceYears || b.advanceMonths || b.advanceDays) {
+      if ((b.advanceMonths || b.advanceDays) && !CAL.on(c)) return send(res, 400, { error: 'Monate/Tage weiterzählen geht nur mit aktivem Kalender (set_calendar)' });
+      d = CAL.add(c, d, { years: +b.advanceYears || 0, months: +b.advanceMonths || 0, days: +b.advanceDays || 0 });
+    }
+    t.currentDate = { year: d.year }; if (d.month) t.currentDate.month = d.month; if (d.day) t.currentDate.day = d.day;
+    saveTimeline(t);
+    const out = { ok: true, previous: fmtD(t, before, f, lang), current: dateInfo(t, lang, t.currentDate) };
+    if (CAL.on(c) && before.month && d.month) out.daysPassed = CAL.diffDays(c, Object.assign({}, before, { day: before.day || 1 }), Object.assign({}, d, { day: d.day || 1 }));
+    return send(res, 200, out);
+  }
   if (ep === 'calendar' && (req.method === 'POST' || req.method === 'PATCH')) {
     const cur = calOf(t, lang), nx = { enabled: b.enabled != null ? !!b.enabled : (b.preset || b.months ? true : cur.enabled), preset: b.preset || (b.months ? 'custom' : cur.preset), months: b.months || (b.preset && b.preset !== cur.preset ? null : cur.months) };
     if (b.preset && !CAL.PRESETS[b.preset]) return send(res, 400, { error: 'preset: ' + Object.keys(CAL.PRESETS).join(', ') });
     let c; try { c = CAL.normCal(nx, lang); } catch (e) { return send(res, 400, { error: e.message }); }
     // Einträge, deren Tag/Monat im neuen Kalender nicht mehr existiert, verlieren nur Monat/Tag (Jahr bleibt)
     let fixed = 0; const fix = o => { if (!o || !o.month) return; const m = c.months[o.month - 1]; if (!m) { delete o.month; delete o.day; fixed++; } else if (o.day && o.day > m.days) { o.day = m.days; fixed++; } };
-    if (CAL.on(c)) { (t.story || []).forEach(fix); (t.worldNotes || []).forEach(n => (n.revs || []).forEach(fix)); (t.characters || []).forEach(ch => (ch.moneyLog || []).forEach(fix)); }
+    if (CAL.on(c)) { (t.story || []).forEach(fix); (t.worldNotes || []).forEach(n => (n.revs || []).forEach(fix)); (t.characters || []).forEach(ch => (ch.moneyLog || []).forEach(fix)); fix(t.currentDate); }
     t.calendar = c; saveTimeline(t);
     return send(res, 200, { ok: true, enabled: c.enabled, preset: c.preset, months: c.months, daysPerYear: CAL.daysInYear(c), adjustedEntries: fixed });
   }
@@ -1245,6 +1274,33 @@ async function apiV1(req, res, url) {
     r.legs.forEach(l => { delete l.points; l.duration = d(l.hours); });
     return send(res, 200, Object.assign({ year: y, totalDuration: d(r.totalHours), text }, r));
   }
+  if (ep === 'date') {
+    const t = tl(), c = calOf(t, lang), f = yearFmt(t, lang), cur = rpDate(t), de = lang !== 'en';
+    const out = { timeline: t.name, current: dateInfo(t, lang, cur), source: t.currentDate ? 'set' : 'latest story section', calendar: { enabled: c.enabled, months: CAL.on(c) ? c.months.map((m, i) => ({ nr: i + 1, name: m.name, days: m.days })) : [], daysPerYear: CAL.daysInYear(c) } };
+    if (q.get('compare')) { const o = parseD(t, q.get('compare'), f, undefined, undefined, lang); if (CAL.on(c) && o.month) { out.compare = dateInfo(t, lang, o); out.daysFromCurrent = CAL.diffDays(c, { year: cur.year, month: cur.month || 1, day: cur.day || 1 }, { year: o.year, month: o.month, day: o.day || 1 }); } else out.yearsFromCurrent = o.year - cur.year; }
+    if (q.get('format') === 'text') {
+      const L = [`${de ? 'Aktuelles Datum' : 'Current date'} (${t.name}): ${out.current.label}${t.currentDate ? '' : (de ? ' (aus dem neuesten Story-Abschnitt – noch nicht fest gesetzt)' : ' (from latest story section – not set yet)')}`];
+      if (out.current.dayOfYear) L.push(de ? `Tag ${out.current.dayOfYear} von ${out.current.daysInYear} im Jahr · ${out.current.monthName} hat ${out.current.daysInMonth} Tage${out.current.day ? `, noch ${out.current.daysLeftInMonth} Tage im Monat, ${out.current.daysLeftInYear} im Jahr` : ''}` : `Day ${out.current.dayOfYear} of ${out.current.daysInYear} · ${out.current.monthName} has ${out.current.daysInMonth} days${out.current.day ? `, ${out.current.daysLeftInMonth} left in month, ${out.current.daysLeftInYear} in year` : ''}`);
+      if (CAL.on(c)) L.push((de ? 'Kalender: ' : 'Calendar: ') + c.months.map((m, i) => `${i + 1}. ${m.name} (${m.days})`).join(', ') + ` = ${CAL.daysInYear(c)} ${de ? 'Tage' : 'days'}`);
+      else L.push(de ? 'Kein Kalender mit Monaten/Tagen aktiv (set_calendar) – es wird nur in Jahren gerechnet.' : 'No calendar with months/days enabled – years only.');
+      if (out.compare) L.push(`${out.compare.label}: ${out.daysFromCurrent >= 0 ? (de ? 'in ' : 'in ') + out.daysFromCurrent : (de ? 'vor ' : '') + -out.daysFromCurrent} ${de ? 'Tagen' : 'days'}${out.daysFromCurrent < 0 && !de ? ' ago' : ''}`);
+      else if (out.yearsFromCurrent != null) L.push(`${de ? 'Abstand' : 'Difference'}: ${out.yearsFromCurrent} ${de ? 'Jahre' : 'years'}`);
+      return send(res, 200, L.join('\n'), 'text/plain; charset=utf-8');
+    }
+    return send(res, 200, out);
+  }
+  if (ep === 'date-calc') {
+    const t = tl(), c = calOf(t, lang), f = yearFmt(t, lang), cur = rpDate(t);
+    const from = q.get('from') ? parseD(t, q.get('from'), f, undefined, undefined, lang) : cur;
+    if (q.get('to')) {
+      const to = parseD(t, q.get('to'), f, undefined, undefined, lang);
+      if (CAL.on(c)) { const a = Object.assign({}, from, { month: from.month || 1, day: from.day || 1 }), b = Object.assign({}, to, { month: to.month || 1, day: to.day || 1 }), d = CAL.diffDays(c, a, b), N = CAL.daysInYear(c);
+        return send(res, 200, { from: fmtD(t, from, f, lang), to: fmtD(t, to, f, lang), days: d, years: Math.trunc(d / N), remainingDays: d - Math.trunc(d / N) * N, daysPerYear: N }); }
+      return send(res, 200, { from: fmtD(t, from, f, lang), to: fmtD(t, to, f, lang), years: to.year - from.year });
+    }
+    const r = CAL.add(c, from, { years: +q.get('addYears') || 0, months: +q.get('addMonths') || 0, days: +q.get('addDays') || 0 });
+    return send(res, 200, { from: fmtD(t, from, f, lang), result: fmtD(t, r, f, lang), resultDate: dateInfo(t, lang, r) });
+  }
   if (ep === 'calendar') {
     const t = tl(), c = calOf(t, lang), f = yearFmt(t, lang), now = rpDate(t);
     return send(res, 200, { timeline: t.name, enabled: c.enabled, preset: c.preset, months: c.months, daysPerYear: CAL.daysInYear(c), currentDate: fmtD(t, now, f, lang), presets: Object.keys(CAL.PRESETS) });
@@ -1395,6 +1451,14 @@ const MCP_TOOLS = [
   { name: 'delete_housing', title: 'Housing löschen', description: 'Löscht ein Raumschiff/Haus komplett (exakter Name oder id). Nur auf ausdrücklichen Wunsch.', destructive: true,
     inputSchema: S({ timeline: TL, name: str('exakter Name oder id') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/housing', {}, { timeline: a.timeline, name: a.name, id: a.name }) },
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
+  { name: 'get_current_date', title: 'Aktuelles Datum', description: 'Aktuelles RP-Datum der Zeitlinie mit Tag im Jahr, Tagen im Monat, verbleibenden Tagen und dem kompletten Kalender (Monate mit Tagen). compare = anderes Datum → Abstand in Tagen. Vor Zeitangaben und Rechnungen aufrufen.', ro: true,
+    inputSchema: S({ timeline: TL, compare: str('optional: Datum zum Vergleichen, z.B. "20. Selona 3640 VSY"'), lang: LG }, ['timeline']), run: (a, v) => internalCall('GET', '/api/v1/date', { timeline: a.timeline, compare: a.compare, lang: a.lang, format: 'text' }, null, v) },
+  { name: 'set_current_date', title: 'Aktuelles Datum setzen/weiterzählen', description: 'Setzt das aktuelle RP-Datum (date als Text oder year/month/day) oder zählt es weiter: advanceDays/advanceMonths/advanceYears (auch negativ). Beispiel nach einer Reise: advanceDays 3. Das Datum ist Standard für neue Weltnotiz-Stände und Geldänderungen. clear=true = wieder aus dem neuesten Story-Abschnitt ableiten.',
+    inputSchema: S({ timeline: TL, date: str('z.B. "12. Kelona 3640 VSY"'), year: YR, month: str('Monat (Name oder Nummer)'), day: { type: 'number' }, advanceDays: { type: 'number' }, advanceMonths: { type: 'number' }, advanceYears: { type: 'number' }, clear: { type: 'boolean' } }, ['timeline']),
+    run: a => internalCall('POST', '/api/v1/date', {}, a) },
+  { name: 'calc_date', title: 'Mit Daten rechnen', description: 'Rechnet im Kalender der Zeitlinie: mit to = Abstand zwischen from und to in Tagen (und Jahren + Resttagen); sonst from + addYears/addMonths/addDays. from fehlt = aktuelles Datum. Beispiel: „Welches Datum ist in 40 Tagen?“ → addDays 40.', ro: true,
+    inputSchema: S({ timeline: TL, from: str('Startdatum (Standard: aktuelles Datum)'), to: str('Zieldatum für Abstand'), addDays: { type: 'number' }, addMonths: { type: 'number' }, addYears: { type: 'number' }, lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/date-calc', { timeline: a.timeline, from: a.from, to: a.to, addDays: a.addDays, addMonths: a.addMonths, addYears: a.addYears, lang: a.lang }, null, v) },
   { name: 'get_calendar', title: 'Kalender lesen', description: 'Kalender der Zeitlinie (aktiv?, Monate mit Tagen) und aktuelles RP-Datum.', ro: true,
     inputSchema: S({ timeline: TL, lang: LG }, ['timeline']), run: (a, v) => internalCall('GET', '/api/v1/calendar', { timeline: a.timeline, lang: a.lang }, null, v) },
   { name: 'set_calendar', title: 'Kalender einstellen', description: 'Aktiviert Monate und Tage für eine Zeitlinie (danach können Story-Abschnitte, Weltnotiz-Stände und Geldänderungen month/day bekommen). preset: gsc = Galaktischer Standardkalender (Star Wars, 368 Tage: 10 Monate à 35 Tage, 3 Festwochen, Feiertage), gsc10 = nur die 10 Monate, gregorian = Januar–Dezember, custom = eigene months [{name, days}] (z.B. Fantasy-Kalender). enabled=false schaltet wieder ab (Monat/Tag-Angaben bleiben gespeichert).',
@@ -1421,7 +1485,7 @@ const MCP_INSTRUCTIONS = 'Ascandir RP-Manager: interaktive Karte (Star Wars u. e
   'WICHTIG: Jede Zeitlinie kann feste Weltregeln haben (list_rules). Sie gelten immer, haben Vorrang vor allem anderen und werden zu Beginn mit list_rules oder get_summary gelesen; ändern nur auf ausdrücklichen Wunsch des Nutzers. ' +
   'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
-  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Kalender: Zeitlinien können Monate/Tage haben (get_calendar, set_calendar); dann bei Story, Weltnotizen und Geld month/day angeben bzw. Datum wie "12. Elona 3640 VSY". Konfliktzonen: Grenzen bedeuten nicht automatisch Krieg; direkte Kämpfe als Konfliktzone markieren (upsert_conflict mit places, factions, from), beendete Kämpfe mit end_conflict abschließen, list_conflicts zeigt aktive. Housing (Raumschiffe, Häuser, Basen) pro Zeitlinie: list_housing/get_housing lesen, upsert_housing, upsert_deck, set_deck_image (Grundriss-Bild), upsert_room (Räume als Rasterflächen oder Markierung, mit Beschreibung, Einrichtung, Gegenständen), move_wall (Wände verschieben); vorher get_housing aufrufen. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
+  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Kalender: Zeitlinien können Monate/Tage und ein festes aktuelles Datum haben (get_current_date zum Lesen und Zählen der Tage, set_current_date setzen/weiterzählen z.B. advanceDays nach Reisen, calc_date für Abstände/Termine; get_calendar, set_calendar); dann bei Story, Weltnotizen und Geld month/day angeben bzw. Datum wie "12. Elona 3640 VSY". Konfliktzonen: Grenzen bedeuten nicht automatisch Krieg; direkte Kämpfe als Konfliktzone markieren (upsert_conflict mit places, factions, from), beendete Kämpfe mit end_conflict abschließen, list_conflicts zeigt aktive. Housing (Raumschiffe, Häuser, Basen) pro Zeitlinie: list_housing/get_housing lesen, upsert_housing, upsert_deck, set_deck_image (Grundriss-Bild), upsert_room (Räume als Rasterflächen oder Markierung, mit Beschreibung, Einrichtung, Gegenständen), move_wall (Wände verschieben); vorher get_housing aufrufen. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
 async function handleMcp(req, res, url, tv) {
   // tv = Betrachter aus dem Token (null = Gast). Sichtbar ist nur, was dieser Benutzer sehen darf.
   const viewerOf = () => tv || whoIs({ headers: {} }, null);

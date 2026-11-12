@@ -76,7 +76,24 @@
     const y = parseYear(str); return y == null ? null : { year: y, month: null, day: null };
   }
   const daysInYear = c => on(c) ? c.months.reduce((n, m) => n + m.days, 0) : 0;
-  const API = { PRESETS, LIMITS, CalError, normCal, on, monthNo, normMD, key, keyOf, endKey, fmt, parse, daysInYear };
+  // ---------------------------------------------------------------- Rechnen mit Daten (Jahre linear als ganze Zahlen, Monat/Tag nach Kalender)
+  function dayOfYear(c, m, d) { let n = 0; for (let i = 0; i < (m || 1) - 1; i++) n += c.months[i].days; return n + (d || 1); }
+  function toDays(c, o) { const N = daysInYear(c); if (!N) fail('Kein Kalender mit Monaten/Tagen aktiv'); return Math.round(o.year) * N + dayOfYear(c, o.month, o.day) - 1; }
+  function fromDays(c, n) {
+    const N = daysInYear(c), y = Math.floor(n / N); let r = n - y * N;
+    for (let i = 0; i < c.months.length; i++) { if (r < c.months[i].days) return { year: y, month: i + 1, day: r + 1 }; r -= c.months[i].days; }
+    return { year: y + 1, month: 1, day: 1 };
+  }
+  // Datum verschieben: Jahre, Monate, Tage (in dieser Reihenfolge); Tag wird bei kürzeren Monaten begrenzt
+  function add(c, o, k) {
+    k = k || {}; let r = { year: Math.round(o.year) + Math.round(k.years || 0), month: o.month || null, day: o.day || null };
+    if (k.months || k.days) { if (!on(c)) fail('Monate/Tage rechnen geht nur mit aktivem Kalender'); if (!r.month) r.month = 1; if (!r.day) r.day = 1; }
+    if (k.months) { const M = c.months.length, t = r.year * M + (r.month - 1) + Math.round(k.months); r.year = Math.floor(t / M); r.month = t - r.year * M + 1; r.day = Math.min(r.day, c.months[r.month - 1].days); }
+    if (k.days) r = fromDays(c, toDays(c, r) + Math.round(k.days));
+    return r;
+  }
+  const diffDays = (c, a, b) => toDays(c, b) - toDays(c, a);
+  const API = { PRESETS, LIMITS, CalError, normCal, on, monthNo, normMD, key, keyOf, endKey, fmt, parse, daysInYear, dayOfYear, toDays, fromDays, add, diffDays };
   root.IAM_CAL = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

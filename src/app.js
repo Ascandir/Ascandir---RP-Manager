@@ -1638,7 +1638,43 @@
     if (dir < 0) { const prev = eras.filter(e => e.year < state.year); const cur = era(); const tgt = cur && cur.year < state.year ? cur : prev[prev.length - 1]; if (tgt) { setYear(tgt.year); fitTrack(); } }
     else { const nx = eras.find(e => e.year > state.year); if (nx) { setYear(nx.year); fitTrack(); } }
   }
+  // aktuelles RP-Datum: fest gesetzt (timeline.currentDate) oder Datum des neuesten Story-Abschnitts
+  function curDate() {
+    const cd = state.tl && state.tl.currentDate; if (cd && Number.isFinite(cd.year)) return { year: cd.year, month: cd.month || null, day: cd.day || null, set: true };
+    const st = (state.tl && state.tl.story || []).length ? storyOf(null, null).slice(-1)[0] : null;
+    return st ? { year: st.year, month: st.month || null, day: st.day || null, set: false } : null;
+  }
+  function renderCurDate() {
+    const b = $('#curDateBtn'); if (!b) return; const d = curDate();
+    b.hidden = !d && !canEditTl(state.tl); b.textContent = '📅 ' + (d ? fmtD(d) : t('cdNone')); b.title = t('cdTitle') + (d && !d.set ? ' – ' + t('cdFromStory') : '');
+    b.classList.toggle('dim', !!d && !d.set);
+  }
+  function editCurDate() {
+    const tl = state.tl, ed = !tl.readonly && canEditTl(tl), d = curDate() || { year: state.year }, on = calOn(), c = cal();
+    const info = () => { const x = curDate(); if (!x || !on || !x.month) return ''; const doy = CAL.dayOfYear(c, x.month, x.day), N = CAL.daysInYear(c), m = c.months[x.month - 1]; return t('cdInfo', String(doy), String(N), m.name, String(m.days)); };
+    const step = k => `<button type="button" data-cdk="${k}" ${ed ? '' : 'disabled'}>${esc(t('cdStep_' + k))}</button>`;
+    modal(t('cdTitle'), `<p class="hint" style="margin-top:0">${esc(t('cdHint'))}</p>
+      <div class="cd-now">${esc(fmtD(d))}${d.set === false ? ` <span class="dim small">(${esc(t('cdFromStory'))})</span>` : ''}</div><p class="hint" id="cdInfo">${esc(info())}</p>
+      ${ed ? `<div class="row"><label class="field"><span>${esc(t('calYearOrDate'))}</span><input id="cdYear" value="${esc(fmtYear(d.year))}"></label>${mdFields('cd', d)}</div>
+      ${on ? `<div class="cd-steps">${['-d', '+d', '+w', '+m', '+y'].map(step).join('')}</div>` : `<div class="cd-steps">${['-y', '+y'].map(step).join('')}</div><p class="hint">${esc(t('cdNoCal'))}</p>`}` : `<p class="hint">${esc(t('calReadonly'))}</p>`}
+      <div class="row"><button type="button" id="cdMap">🗺 ${esc(t('cdMapYear'))}</button>${ed && tl.currentDate ? `<button type="button" id="cdClear">${esc(t('cdClear'))}</button>` : ''}</div>`, () => {
+      if (!ed) return true;
+      const p = readDate($('#cdYear').value, 'cd');
+      if (!p || p.year == null) throw new Error(t('calBadDate'));
+      pushUndo(); tl.currentDate = { year: p.year }; if (p.month) tl.currentDate.month = p.month; if (p.day) tl.currentDate.day = p.day;
+      afterEdit(true); renderCurDate(); return true;
+    }, { ok: ed ? t('save') : t('close'), noCancel: !ed });
+    document.querySelectorAll('[data-cdk]').forEach(b => b.onclick = () => {
+      let p; try { p = readDate($('#cdYear').value, 'cd'); } catch (e) { toast(e.message); return; }
+      const k = b.dataset.cdk, n = k[0] === '-' ? -1 : 1, u = k.slice(1), wk = c.preset && c.preset.startsWith('gsc') ? 5 : 7;
+      let r; try { r = CAL.add(c, p, u === 'd' ? { days: n } : u === 'w' ? { days: n * wk } : u === 'm' ? { months: n } : { years: n }); } catch (e) { toast(e.message); return; }
+      $('#cdYear').value = fmtYear(r.year); if ($('#cdM')) { $('#cdM').value = r.month || ''; $('#cdD').value = r.day || ''; }
+    });
+    const mp = $('#cdMap'); if (mp) mp.onclick = () => { const x = curDate(); if (x) { setYear(x.year); fitTrack(); } $('#modal').hidden = true; };
+    const cl = $('#cdClear'); if (cl) cl.onclick = () => { pushUndo(); delete tl.currentDate; afterEdit(true); renderCurDate(); $('#modal').hidden = true; };
+  }
   function renderYear() {
+    renderCurDate();
     const inp = $('#yearInput'); if (document.activeElement !== inp) inp.value = fmtYear(state.year);
     const e = era();
     $('#eraName').textContent = e ? e.name : t('noEra');
@@ -2265,6 +2301,7 @@
   $('#tabEdit').addEventListener('click', () => setMode('edit'));
   $('#tabStory').addEventListener('click', () => setMode(state.mode === 'story' ? 'view' : 'story'));
   $('#tabChars').addEventListener('click', () => setMode(state.mode === 'chars' ? 'view' : 'chars'));
+  $('#curDateBtn').addEventListener('click', editCurDate);
   $('#tabHousing').addEventListener('click', () => setMode(state.mode === 'housing' ? 'view' : 'housing'));
   $('#tabWorld').addEventListener('click', () => setMode(state.mode === 'world' ? 'view' : 'world'));
   $('#eraDesc').addEventListener('click', () => setMode('story'));
@@ -2301,7 +2338,7 @@
       pushUndo(); tl.calendar = c;
       // Einträge, deren Monat/Tag es im neuen Kalender nicht gibt, behalten nur das Jahr
       const fix = o => { if (!o || !o.month) return; const m = c.months[o.month - 1]; if (!m) { delete o.month; delete o.day; } else if (o.day > m.days) o.day = m.days; };
-      if (c.enabled) { (tl.story || []).forEach(fix); (tl.worldNotes || []).forEach(n => (n.revs || []).forEach(fix)); (tl.characters || []).forEach(ch => (ch.moneyLog || []).forEach(fix)); }
+      if (c.enabled) { (tl.story || []).forEach(fix); (tl.worldNotes || []).forEach(n => (n.revs || []).forEach(fix)); (tl.characters || []).forEach(ch => (ch.moneyLog || []).forEach(fix)); fix(tl.currentDate); }
       calDraft = null; afterEdit(true); toast(t('calSaved')); renderCalendarCard();
     });
   }
@@ -2647,7 +2684,7 @@
     $('#modalOk').textContent = opt.ok || t('ok'); $('#modalCancel').textContent = t('cancel'); $('#modalCancel').hidden = !!opt.noCancel;
     const close = () => { $('#modal').hidden = true; $('#modalOk').onclick = $('#modalCancel').onclick = null; };
     $('#modalCancel').onclick = close;
-    $('#modalOk').onclick = () => { let r; try { r = onOk(); } catch (e) { alert(e.message); } if (r !== false) close(); };
+    $('#modalOk').onclick = () => { let r; try { r = onOk(); } catch (e) { alert(e.message); r = false; } if (r !== false) close(); };
     $('#modalBody').onkeydown = e => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') $('#modalOk').click(); };
   }
 
@@ -2733,7 +2770,7 @@
       <div class="story-head">
         <div class="story-kicker">📖 ${esc(t('tabStory'))} · ${esc(state.tl.name)}</div>
         <h2>${esc(e ? e.name : t('noEra'))}</h2>
-        ${e ? `<div class="story-years">${esc(fmtYear(e.year))}${end != null ? ' – ' + esc(fmtYear(end)) : ''} · ${esc(t('storyNow'))} ${esc(fmtYear(state.year))}${calOn() && (state.tl.story || []).length ? ` · 📅 ${esc(t('calRpDate'))}: <b>${esc(fmtD(storyOf(null, null).slice(-1)[0]))}</b>` : ''}</div>` : ''}
+        ${e ? `<div class="story-years">${esc(fmtYear(e.year))}${end != null ? ' – ' + esc(fmtYear(end)) : ''} · ${esc(t('storyNow'))} ${esc(fmtYear(state.year))}${curDate() && (calOn() || (state.tl.currentDate)) ? ` · 📅 ${esc(t('calRpDate'))}: <b>${esc(fmtD(curDate()))}</b>` : ''}</div>` : ''}
       </div>
       ${storyEditing ? `<textarea id="storyText" class="story-edit">${esc(e.desc || '')}</textarea>
         <div class="row"><button id="storySave" class="primary">${esc(t('ok'))}</button><button id="storyCancel">${esc(t('cancel'))}</button></div>
@@ -3058,7 +3095,7 @@
   }
   function logMoney(c, before, reason) {
     if ((c.money ?? null) === (before ?? null)) return;
-    const lastSec = (state.tl.story || []).length ? storyOf(null, null).slice(-1)[0] : null;
+    const lastSec = curDate();
     (c.moneyLog ||= []).push({ at: new Date().toISOString(), year: lastSec ? lastSec.year : state.year, ...(lastSec && lastSec.month ? { month: lastSec.month } : {}), ...(lastSec && lastSec.day ? { day: lastSec.day } : {}),
       delta: c.money == null ? null : (Number(c.money) || 0) - (Number(before) || 0), balance: c.money ?? null, reason: reason || '', by: (srvInfo() && srvInfo().user && srvInfo().user.name) || '' });
     if (c.moneyLog.length > 500) c.moneyLog.splice(0, c.moneyLog.length - 500);

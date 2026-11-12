@@ -152,9 +152,13 @@ Pro Zeitlinie lässt sich unter **Einstellungen → 📅 Kalender** ein Kalender
   - *Gregorianisch*
   - *eigener Kalender*: Monate mit beliebigen Namen und Tageszahlen, z. B. für Fantasy-Welten.
 - **Eingabe:** Neben dem Jahr stehen Monat und Tag. Du kannst auch direkt „12. Kelona 3640 VSY“ oder „12.3.3640 VSY“ eintippen. Einträge im selben Jahr werden nach Monat und Tag sortiert. Die Story zeigt das aktuelle RP-Datum, also das des neuesten Abschnitts.
+- **Aktuelles RP-Datum:** In der Zeitleiste unten steht „📅 Datum“. Ein Klick öffnet Setzen und Weiterzählen: −1 Tag, +1 Tag, +1 Woche (im Galaktischen Standardkalender 5 Tage), +1 Monat, +1 Jahr und „Karte auf dieses Jahr“. Ist kein Datum fest gesetzt, gilt das Datum des neuesten Story-Abschnitts (kursiv angezeigt). Neue Weltnotiz-Stände und Geldänderungen übernehmen das aktuelle Datum.
 - **Weltnotizen** können mehrere Stände im selben Jahr haben. In der Jahresansicht gilt der Stand am Jahresende.
 - Abschalten behält die Monats- und Tagesangaben. Beim Wechsel auf einen Kalender mit weniger Monaten oder Tagen verlieren betroffene Einträge nur Monat bzw. Tag, das Jahr bleibt.
 - **ChatGPT:**
+  - `get_current_date`: aktuelles Datum mit Tag im Jahr, Tagen im Monat, verbleibenden Tagen und komplettem Kalender. Mit `compare` liefert es den Abstand zu einem anderen Datum in Tagen.
+  - `set_current_date`: Datum setzen oder weiterzählen (`advanceDays`, `advanceMonths`, `advanceYears`, auch negativ), z. B. nach einer Reise.
+  - `calc_date`: Abstand zwischen zwei Daten (Tage, Jahre + Resttage) oder „Datum in X Tagen/Monaten/Jahren“.
   - `get_calendar` und `set_calendar` (`preset` gsc/gsc10/gregorian/custom, eigene `months`, `enabled`)
   - `add_story_entry`, `update_story_entry`, `upsert_world_note`, `list_world_notes` mit `month` (Name oder Nummer) und `day`. Alternativ ein Datum als Text im Jahresfeld.
   - Geld mit `moneyMonth` und `moneyDay`.
