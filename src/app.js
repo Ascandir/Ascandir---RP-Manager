@@ -582,7 +582,7 @@
     $('#btnPlanner').classList.toggle('active', state.plannerOpen);
     box.hidden = !state.plannerOpen;
     // rechte Seite: Infofeld nur, wenn kein Story-/Charakter-/Welt-Reiter offen ist
-    $('#info').hidden = state.mode === 'story' || state.mode === 'chars' || state.mode === 'world' || state.mode === 'housing';
+    $('#info').hidden = state.mode === 'story' || state.mode === 'chars' || state.mode === 'world' || state.mode === 'housing' || state.mode === 'chat';
     if (!state.plannerOpen) return;
     const P = settings.planner, fan = state.world.type === 'fantasy';
     computePlan();
@@ -2089,7 +2089,8 @@
     $('#tabChars').classList.toggle('active', state.mode === 'chars');
     $('#tabWorld').classList.toggle('active', state.mode === 'world');
     $('#tabHousing').classList.toggle('active', state.mode === 'housing');
-    const curTab = { view: 'tabView', edit: 'tabEdit', story: 'tabStory', chars: 'tabChars', housing: 'tabHousing', world: 'tabWorld', settings: 'tabSettings' }[state.mode] || 'tabView';
+    $('#tabChat').classList.toggle('active', state.mode === 'chat');
+    const curTab = { view: 'tabView', edit: 'tabEdit', story: 'tabStory', chars: 'tabChars', housing: 'tabHousing', chat: 'tabChat', world: 'tabWorld', settings: 'tabSettings' }[state.mode] || 'tabView';
     $('#btnModes').innerHTML = `<span class="mi mi-${curTab}"></span>${esc(t(curTab))} <span class="dim">▾</span>`;
     $('#btnModes').title = t('menu');
     $$('#langSwitch button').forEach(b => { b.classList.toggle('active', b.dataset.l === settings.lang); b.title = window.I18N.langs[b.dataset.l]; });
@@ -2289,9 +2290,9 @@
 
   // ------------------------------------------------------------- Modus & Einstellungen
   function setMode(m) {
-    if (m !== 'view' && m !== 'story' && m !== 'chars' && m !== 'world' && m !== 'settings' && m !== 'housing' && isGuest()) { loginDialog(); return; }
+    if (m !== 'view' && m !== 'story' && m !== 'chars' && m !== 'world' && m !== 'settings' && m !== 'housing' && m !== 'chat' && isGuest()) { loginDialog(); return; }
     state.mode = m;
-    if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars' || m === 'world' || m === 'housing');
+    if (isMobile()) setSheet(m === 'edit' || m === 'story' || m === 'chars' || m === 'world' || m === 'housing' || m === 'chat');
     $('#settingsView').hidden = m !== 'settings';
     if (m === 'settings') renderSettings();
     renderAll(true);
@@ -2302,6 +2303,7 @@
   $('#tabStory').addEventListener('click', () => setMode(state.mode === 'story' ? 'view' : 'story'));
   $('#tabChars').addEventListener('click', () => setMode(state.mode === 'chars' ? 'view' : 'chars'));
   $('#curDateBtn').addEventListener('click', editCurDate);
+  $('#tabChat').addEventListener('click', () => setMode(state.mode === 'chat' ? 'view' : 'chat'));
   $('#tabHousing').addEventListener('click', () => setMode(state.mode === 'housing' ? 'view' : 'housing'));
   $('#tabWorld').addEventListener('click', () => setMode(state.mode === 'world' ? 'view' : 'world'));
   $('#eraDesc').addEventListener('click', () => setMode('story'));
@@ -2879,6 +2881,81 @@
     const cc = $('#ruleCancel'); if (cc) cc.onclick = () => { ruleEdit = null; rerender(); };
     const dl = $('#ruleDel'); if (dl) dl.onclick = () => { const r = state.tl.rules.find(x => x.id === ruleEdit); if (!r || !confirm(t('ruleDelQ', r.title))) return; pushUndo(); state.tl.rules = state.tl.rules.filter(x => x !== r); ruleEdit = null; afterEdit(); rerender(); };
   }
+  // ------------------------------------------------------------- Chatverlauf (ChatGPT schreibt den Chat hinein; Du = Spieler, ChatGPT = Antworten)
+  const chatSt = { tl: null, msgs: [], total: 0, limit: 150, q: '', timer: null, loading: false, err: '' };
+  const chatServer = () => !!(FS && FS.server);
+  async function chatFetch() {
+    const tl = state.tl; if (!tl) return;
+    if (!chatServer()) { const all = tl.chatlog || []; chatSt.total = all.length; chatSt.msgs = all.map((m, i) => Object.assign({ nr: i + 1 }, m)).filter(m => !chatSt.q || m.text.toLowerCase().includes(chatSt.q.toLowerCase())).slice(-chatSt.limit); return; }
+    chatSt.loading = true;
+    try {
+      const r = await fetch(`api/v1/chatlog?timeline=${encodeURIComponent(tl.id)}&last=${chatSt.limit}${chatSt.q ? '&q=' + encodeURIComponent(chatSt.q) : ''}`, { cache: 'no-store' });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+      chatSt.msgs = j.messages; chatSt.total = j.total; chatSt.err = '';
+    } catch (e) { chatSt.err = e.message; } finally { chatSt.loading = false; }
+  }
+  async function chatWrite(method, path, body) {
+    if (!chatServer()) return;
+    const r = await fetch('api/v1/' + path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ timeline: state.tl.id }, body)) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+  }
+  async function renderChatLog(refetch = true) {
+    const box = $('#chatlog'), show = state.mode === 'chat';
+    box.hidden = !show; if (show) $('#info').hidden = true;
+    clearInterval(chatSt.timer); chatSt.timer = null;
+    if (!show) return;
+    if (chatSt.tl !== state.tl.id) { chatSt.tl = state.tl.id; chatSt.limit = 150; chatSt.q = ''; chatSt.msgs = []; }
+    if (refetch) await chatFetch();
+    if (state.mode !== 'chat') return;
+    const ed = !state.tl.readonly && canEditTl(state.tl), atBottom = !box.scrollHeight || box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+    const who = r => r === 'user' ? t('chatYou') : 'ChatGPT';
+    const shown = chatSt.msgs.length;
+    box.innerHTML = `<div class="chat-head"><h3>💬 ${esc(t('tabChat'))}: ${esc(state.tl.name)}</h3>
+        <div class="row"><input id="chatQ" placeholder="${esc(t('chatSearch'))}" value="${esc(chatSt.q)}"><button id="chatRefresh" class="fixed" title="${esc(t('chatRefresh'))}">⟳</button><button id="chatCopy" class="fixed" title="${esc(t('chatCopy'))}">📋</button></div>
+        <p class="hint">${chatSt.err ? '⚠ ' + esc(chatSt.err) : chatSt.total ? esc(t('chatCount', String(shown), String(chatSt.total))) : esc(t('chatEmpty'))}</p></div>
+      ${chatSt.total > shown && !chatSt.q ? `<button id="chatMore" class="wide">${esc(t('chatMore'))}</button>` : ''}
+      <div class="chat-list">${chatSt.msgs.map(m => `<div class="chat-msg ${m.role === 'user' ? 'me' : 'gpt'}" data-cid="${esc(m.id || '')}">
+        <div class="chat-who">${esc(who(m.role))} <span class="dim small">#${m.nr}</span>${ed ? `<button class="chat-del fixed" data-cdel="${esc(m.id || '')}" title="${esc(t('delete'))}">✕</button>` : ''}</div>
+        <div class="chat-text">${rich(m.text)}</div></div>`).join('')}</div>
+      ${ed ? `<details class="chat-add"><summary>${esc(t('chatAddManual'))}</summary>
+        <p class="hint">${esc(t('chatAddHint'))}</p>
+        <div class="row"><select id="chatRole" class="fixed"><option value="user">${esc(t('chatYou'))}</option><option value="assistant">ChatGPT</option></select></div>
+        <textarea id="chatText" rows="5"></textarea>
+        <div class="row"><button id="chatAdd" class="primary">${esc(t('chatAdd'))}</button>${chatSt.total ? `<button id="chatClear" class="danger">🗑 ${esc(t('chatClear'))}</button>` : ''}</div></details>` : ''}`;
+    if (atBottom || refetch) box.scrollTop = box.scrollHeight;
+    const on = (id, ev, fn) => { const el = $('#' + id); if (el) el[ev] = fn; };
+    let qt = null;
+    on('chatQ', 'oninput', e => { clearTimeout(qt); qt = setTimeout(() => { chatSt.q = e.target.value.trim(); renderChatLog().then(() => { const q = $('#chatQ'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }); }, 350); });
+    on('chatRefresh', 'onclick', () => renderChatLog());
+    on('chatMore', 'onclick', () => { chatSt.limit += 300; renderChatLog().then(() => { box.scrollTop = 0; }); });
+    on('chatCopy', 'onclick', async () => {
+      let all = chatSt.msgs;
+      if (chatServer() && chatSt.total > shown) { const r = await fetch(`api/v1/chatlog?timeline=${encodeURIComponent(state.tl.id)}&offset=0&limit=2000`); all = (await r.json()).messages || all; }
+      const txt = all.map(m => `${who(m.role)}: ${m.text}`).join('\n\n');
+      try { await navigator.clipboard.writeText(txt); toast(t('chatCopied')); } catch { toast(t('saveFailed', 'Clipboard')); }
+    });
+    box.querySelectorAll('[data-cdel]').forEach(b => b.onclick = async () => {
+      if (!confirm(t('chatDelQ'))) return; const id = b.dataset.cdel;
+      if (!chatServer()) { pushUndo(); state.tl.chatlog = (state.tl.chatlog || []).filter(m => m.id !== id); saveSoon(); renderChatLog(); return; }
+      try { await chatWrite('DELETE', 'chatlog', { ids: [id] }); renderChatLog(); } catch (e) { toast(e.message); }
+    });
+    on('chatAdd', 'onclick', async () => {
+      const text = $('#chatText').value; if (!text.trim()) return; const role = $('#chatRole').value;
+      if (!chatServer()) { pushUndo(); (state.tl.chatlog ||= []).push({ id: uid('cm'), role, text, at: new Date().toISOString() }); saveSoon(); renderChatLog(); return; }
+      try { const r = await chatWrite('POST', 'chatlog', { text, role }); toast(t('chatAdded', String(r.added))); renderChatLog(); } catch (e) { toast(e.message); }
+    });
+    on('chatClear', 'onclick', () => {
+      modal(t('chatClear'), `<p>${esc(t('chatClearQ', state.tl.name))}</p><input id="chatClearName" autocomplete="off">`, () => {
+        if ($('#chatClearName').value.trim() !== state.tl.name) throw new Error(t('chatClearWrong'));
+        if (!chatServer()) { pushUndo(); state.tl.chatlog = []; saveSoon(); renderChatLog(); return true; }
+        chatWrite('DELETE', 'chatlog', { all: true, confirm: state.tl.name }).then(() => renderChatLog()).catch(e => toast(e.message)); return true;
+      });
+    });
+    // neue Nachrichten von ChatGPT regelmäßig nachladen, solange der Bereich offen ist
+    if (chatServer()) chatSt.timer = setInterval(async () => {
+      if (state.mode !== 'chat' || document.hidden) return; const before = chatSt.total; await chatFetch(); if (chatSt.total !== before && state.mode === 'chat') renderChatLog(false);
+    }, 15000);
+  }
   function renderWorldNotes() {
     const box = $('#wnotes'), show = state.mode === 'world';
     box.hidden = !show; if (show) $('#info').hidden = true;
@@ -3207,7 +3284,7 @@
     editVersion++;
     rebuildTree();
     document.body.classList.toggle('is-sw', isSW());
-    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory(); renderChars(); renderWorldNotes(); if (HS) HS.render();
+    renderTopbar(); renderLeft(); renderFactionFilter(); renderSearchList(); renderEditor(); renderInfo(); renderPlanner(); renderStory(); renderChars(); renderWorldNotes(); renderChatLog(); if (HS) HS.render();
     lastEraId = era() ? era().id : null; renderYear(); updateToolHint(); draw();
   }
 

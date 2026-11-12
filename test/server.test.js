@@ -29,6 +29,11 @@ function seed() {
     guest: { worlds: { '*': 'none' }, timelines: {} }
   }));
 }
+async function call(method, p, body, tok) {
+  const r = await fetch(BASE + p, { method, headers: Object.assign({ 'Content-Type': 'application/json' }, tok ? { Authorization: 'Bearer ' + tok } : {}), body: body ? JSON.stringify(body) : undefined });
+  const txt = await r.text(); let json = null; try { json = JSON.parse(txt); } catch { }
+  return { status: r.status, json, text: txt };
+}
 let rpcId = 1;
 async function rpc(tok, method, params) {
   const r = await fetch(`${BASE}/mcp/${tok}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: rpcId++, method, params }) });
@@ -297,4 +302,28 @@ test('Charakter: Geburtstag, berechnetes Alter, nächster Geburtstag', async () 
   assert.doesNotMatch(g.text, /Geburtstag/);
   await mcp(TOK.editor, 'set_current_date', { timeline: 'Haupt', clear: true });
   await mcp(TOK.editor, 'set_calendar', { timeline: 'Haupt', enabled: false });
+});
+
+test('Chatverlauf: speichern mit Rollen, Textblock aufteilen, lesen, ersetzen, leeren', async () => {
+  const a = await mcp(TOK.editor, 'append_chat_log', { timeline: 'Haupt', messages: [{ role: 'user', text: 'Ich betrete die Cantina.' }, { role: 'assistant', text: 'Rauch hängt in der Luft.\nEin Rodianer mustert dich.' }] });
+  assert.ok(!a.isError, a.text); assert.equal(a.data.added, 2); assert.equal(a.data.user, 1);
+  const b = await mcp(TOK.editor, 'append_chat_log', { timeline: 'Haupt', text: 'Du: Ich setze mich an die Bar.\nChatGPT: Der Barkeeper nickt.\nEr stellt ein Glas hin.\n**Du:** Danke.' });
+  assert.ok(!b.isError, b.text); assert.equal(b.data.added, 3); assert.equal(b.data.total, 5);
+  const g = await mcp(TOK.viewer, 'get_chat_log', { timeline: 'Haupt' });
+  assert.match(g.text, /Nachrichten 1–5 von 5/);
+  assert.match(g.text, /\[3\] Du:\nIch setze mich an die Bar\./); assert.match(g.text, /\[4\] ChatGPT:\nDer Barkeeper nickt\.\nEr stellt ein Glas hin\./);
+  const s = await mcp(TOK.viewer, 'get_chat_log', { timeline: 'Haupt', query: 'rodianer' });
+  assert.match(s.text, /von 1 \(Suche/);
+  const bad = await mcp(TOK.editor, 'append_chat_log', { timeline: 'Haupt', messages: [{ role: 'erzähler2', text: 'x' }] });
+  assert.ok(bad.isError);
+  const ro = await rpc(TOK.viewer, 'tools/list'); assert.ok(!ro.tools.some(t => t.name === 'append_chat_log'));
+  const r = await mcp(TOK.editor, 'append_chat_log', { timeline: 'Haupt', mode: 'replace', messages: [{ role: 'user', text: 'Neu' }] });
+  assert.equal(r.data.total, 1);
+  const tl = JSON.parse(fs.readFileSync(path.join(DATA, 'timelines', 'Haupt.json'), 'utf8'));
+  assert.equal(tl.chatlog, undefined, 'Verlauf liegt nicht in der Zeitlinien-Datei');
+  assert.ok(fs.existsSync(path.join(DATA, 'chatlogs', 't1.json')));
+  const no = await call('DELETE', '/api/v1/chatlog', { timeline: 'Haupt', all: true, confirm: 'falsch' }, TOK.editor);
+  assert.equal(no.status, 400);
+  const yes = await call('DELETE', '/api/v1/chatlog', { timeline: 'Haupt', all: true, confirm: 'Haupt' }, TOK.editor);
+  assert.equal(yes.status, 200); assert.equal(yes.json.total, 0);
 });

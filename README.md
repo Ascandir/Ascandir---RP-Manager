@@ -31,7 +31,7 @@ Installiere nicht nach `C:\Programme`, sonst weicht die App auf `%APPDATA%` aus.
 | Vollbild | F11 |
 | Rückgängig (Editor) | Strg+Z |
 
-**Bereichsmenü oben rechts** (Knopf mit dem aktuellen Bereich, z. B. „🗺 Ansicht ▾“): Ansicht, Editor, Story, Charaktere, Housing, Welt, Einstellungen und die Sprache DE/EN.
+**Bereichsmenü oben rechts** (Knopf mit dem aktuellen Bereich, z. B. „🗺 Ansicht ▾“): Ansicht, Editor, Story, Charaktere, Housing, Chatverlauf, Welt, Einstellungen und die Sprache DE/EN.
 - **Ansicht:** Filter für Objekte (Sonnen, Planeten, Monde, Stationen bzw. Hauptstädte, Städte, Dörfer, Festungen, Wahrzeichen), Einflussbereiche, Hyperraumrouten bzw. Routen, Regionen, Sektoren, Raster, Namen und einzelne Fraktionen
 - **Story:** zeigt den Story-Text (RP-Stand) des aktuellen Zeitalters in voller Länge und alle Kapitel/Zeitalter zum Anklicken; mit Bearbeitungsrechten direkt editierbar (Leerzeile = Absatz, `**fett**`, `*kursiv*`)
 - **Editor:** Zeitalter, Fraktionen, Routen und Werkzeuge (Zuweisen, Region, Einfluss malen, Radieren, Objekt anlegen, Route zeichnen)
@@ -141,6 +141,14 @@ Dazu kommen Tags, Notizen, ein Porträt und eine Bildergalerie.
 - **MCP (ChatGPT/Claude):** `list_characters` (Filter u. a. nach Gruppe), `get_character` (kompletter Steckbrief als Text), `upsert_character` (nur angegebene Felder werden geändert; `append` hängt an, z. B. an Wissen oder Handlungsstränge; `addRelations` ergänzt einzelne Beziehungen; `money`/`moneyDelta` setzt bzw. ändert das Geld (mit `moneyReason` als Grund im Verlauf), `inventory` legt Gegenstände an oder ändert sie (Menge per `qtyDelta`, Menge 0 entfernt), `removeItems` entfernt sie; `group` legt die Gruppe bei Bedarf an), `add_character_image` (Bild per Link – wird heruntergeladen und dauerhaft unter `images/` im Datenordner gespeichert – oder Base64; `portrait: true` setzt es als Porträt), `delete_character`.
 - **REST:** `GET /api/v1/characters`, `GET /api/v1/character?name=…`, `POST/DELETE /api/v1/character`, `POST /api/v1/character/image`.
 - Selbst hochgeladene Bilder werden verkleinert direkt in der Zeitlinien-Datei gespeichert.
+
+### Chatverlauf
+
+Im Bereich **💬 Chatverlauf** (Menü oben rechts) liegt pro Zeitlinie der Verlauf deines ChatGPT-Chats, ohne Datum, einfach als Verlauf. Deine Nachrichten stehen rechts (**Du**, gold), die von ChatGPT links (**ChatGPT**, grün). Fett und kursiv bleiben erhalten.
+
+- **ChatGPT schreibt selbst hinein:** `append_chat_log` mit `messages` (je Nachricht `role` `user` = du bzw. `assistant` = ChatGPT) oder als Textblock mit Zeilen „Du: …“ / „ChatGPT: …“, der automatisch aufgeteilt wird. `mode: "replace"` ersetzt den ganzen Verlauf, sonst wird angehängt. Lange Verläufe kommen in mehreren Teilen. Mit `get_chat_log` liest ChatGPT ihn wieder: die letzten Nachrichten, zum Blättern mit `offset`/`limit`, mit Suche.
+- In der App kannst du suchen, den ganzen Verlauf kopieren (📋), selbst Text einfügen (auch mit „Du:“/„ChatGPT:“-Zeilen), einzelne Nachrichten löschen und den Verlauf leeren (mit Eintippen des Zeitlinien-Namens). Neue Nachrichten von ChatGPT erscheinen nach spätestens 15 Sekunden.
+- Gespeichert wird in einer eigenen Datei `chatlogs/<zeitlinien-id>.json` im Datenordner, damit die Zeitlinie klein und schnell bleibt. Wird die Zeitlinie gelöscht, verschwindet auch der Verlauf. Rechte wie bei der Zeitlinie.
 
 ### Kalender: Monate und Tage
 

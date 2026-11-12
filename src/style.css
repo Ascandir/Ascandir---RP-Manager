@@ -559,3 +559,22 @@ body[data-theme="scifi"] #topbar #modeMenu > button.active { color: #1a1205 !imp
 .cd-now { font-size: 1.25em; font-weight: 600; margin: 4px 0 2px; }
 .cd-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
 .bday { color: var(--accent); font-size: .92em; white-space: nowrap; }
+#tabChat::before, .mi-tabChat::before { content: "💬"; }
+/* ---------------------------------------------------------------- Chatverlauf */
+#chatlog { padding: 0 14px 30px; }
+#chatlog .chat-head { position: sticky; top: 0; background: var(--panel); padding: 12px 0 4px; z-index: 2; }
+#chatlog .chat-head h3 { margin: 0 0 6px; }
+#chatlog .chat-head input { flex: 1; min-width: 0; }
+#chatlog .chat-list { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 12px; }
+#chatlog .chat-msg { max-width: 88%; border-radius: 12px; padding: 7px 11px 9px; line-height: 1.45; border: 1px solid var(--line); }
+#chatlog .chat-msg.gpt { align-self: flex-start; background: var(--panel2); border-top-left-radius: 3px; }
+#chatlog .chat-msg.me { align-self: flex-end; background: color-mix(in srgb, var(--accent) 22%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); border-top-right-radius: 3px; }
+#chatlog .chat-who { font-size: 11px; font-weight: 700; letter-spacing: .3px; margin-bottom: 3px; display: flex; align-items: center; gap: 6px; }
+#chatlog .chat-msg.gpt .chat-who { color: #6fc3a0; }
+#chatlog .chat-msg.me .chat-who { color: var(--accent); justify-content: flex-end; }
+#chatlog .chat-text { white-space: pre-wrap; word-wrap: break-word; }
+#chatlog .chat-del { margin-left: auto; padding: 0 5px; min-height: 0; line-height: 16px; font-size: 11px; opacity: 0; }
+#chatlog .chat-msg.me .chat-del { margin-left: 0; order: -1; margin-right: auto; }
+#chatlog .chat-msg:hover .chat-del { opacity: .7; }
+#chatlog .chat-add textarea { width: 100%; box-sizing: border-box; margin: 4px 0; }
+#chatlog .chat-add summary { cursor: pointer; font-weight: 600; }

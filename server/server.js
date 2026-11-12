@@ -569,6 +569,25 @@ function charText(t, c, lang) {
 }
 // Bilder für Charaktere: Download (URL) oder Base64 -> Datei in DATA_DIR/images, ausgeliefert unter /images/<datei>
 const IMG_DIR = path.join(DATA_DIR, 'images');
+// ---------------------------------------------------------------- Chatverlauf pro Zeitlinie (eigene Datei, damit die Zeitlinie klein bleibt)
+// data/chatlogs/<timeline-id>.json = { timeline, updated, messages: [{ id, role: 'user'|'assistant', text, at }] }
+const CHAT_DIR = path.join(DATA_DIR, 'chatlogs'), CHAT_MAX_BYTES = 30 * 1024 * 1024, CHAT_MAX_CALL = 400000;
+const chatFile = t => path.join(CHAT_DIR, String(t.id).replace(/[^A-Za-z0-9_-]/g, '_') + '.json');
+function chatLoad(t) { try { const j = JSON.parse(fs.readFileSync(chatFile(t), 'utf8')); return Array.isArray(j.messages) ? j : { messages: [] }; } catch { return { messages: [] }; } }
+function chatSave(t, log) { fs.mkdirSync(CHAT_DIR, { recursive: true }); const p = chatFile(t), tmp = p + '.tmp', body = JSON.stringify({ timeline: t.id, updated: new Date().toISOString(), messages: log.messages }); if (Buffer.byteLength(body) > CHAT_MAX_BYTES) throw Object.assign(new Error('Chatverlauf zu groß (max. 30 MB) – ältere Teile löschen oder neue Zeitlinie'), { code: 413 }); fs.writeFileSync(tmp, body, 'utf8'); fs.renameSync(tmp, p); }
+// Rolle erkennen: user = Spieler, assistant = ChatGPT
+function chatRole(v) { const s = String(v || '').trim().toLowerCase().replace(/[:：]$/, ''); if (/^(user|du|ich|me|spieler|player|human|mensch)$/.test(s)) return 'user'; if (/^(assistant|chatgpt|gpt|ai|ki|bot|erzähler|narrator|spielleiter|gm|sl)$/.test(s)) return 'assistant'; return null; }
+// Textblock mit Zeilen wie „Du: …“ / „ChatGPT: …“ in Nachrichten aufteilen
+function chatSplit(text, fallback) {
+  const out = []; let cur = null;
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = line.match(/^\s*\**\s*(user|du|ich|me|spieler|player|human|assistant|chatgpt|gpt|ki|ai|erzähler|narrator|spielleiter)\s*\**\s*[:：]\s?(.*)$/i);
+    if (m && chatRole(m[1])) { if (cur) out.push(cur); cur = { role: chatRole(m[1]), text: m[2] }; }
+    else if (cur) cur.text += '\n' + line; else cur = { role: fallback || 'assistant', text: line };
+  }
+  if (cur) out.push(cur);
+  return out.map(x => ({ role: x.role, text: x.text.replace(/\s+$/, '') })).filter(x => x.text.trim());
+}
 const IMG_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
 // Bildtyp und -größe am Inhalt erkennen (nicht am angegebenen Typ) – so landen nur echte PNG/JPEG/WebP/GIF im Datenordner
 function sniffImage(buf) {
@@ -1029,6 +1048,30 @@ async function apiWrite(req, res, url, parts) {
     t.story = (t.story || []).filter(x => x.id !== id); if (t.story.length === n) return send(res, 404, { error: 'story section not found' });
     saveTimeline(t); return send(res, 200, { ok: true });
   }
+  if (ep === 'chatlog' && req.method === 'POST') {
+    const log = chatLoad(t), mode = b.mode === 'replace' ? 'replace' : 'append';
+    let msgs = [];
+    if (Array.isArray(b.messages)) msgs = b.messages.map((m, i) => { const role = chatRole(m && (m.role || m.speaker)); if (!role) throw Object.assign(new Error(`messages[${i}].role: "user" (du) oder "assistant" (ChatGPT)`), { code: 400 }); return { role, text: String(m.text || m.content || '') }; }).filter(m => m.text.trim());
+    else if (b.text != null) msgs = chatSplit(b.text, chatRole(b.role) || 'assistant');
+    const size = msgs.reduce((n, m) => n + m.text.length, 0);
+    if (!msgs.length && mode === 'append') return send(res, 400, { error: 'messages oder text angeben' });
+    if (size > CHAT_MAX_CALL) return send(res, 413, { error: `zu viel Text in einem Aufruf (max. ${CHAT_MAX_CALL} Zeichen) – in mehreren Teilen anhängen` });
+    const now = new Date().toISOString(), add = msgs.map(m => ({ id: uid('cm'), role: m.role, text: m.text, at: now }));
+    log.messages = mode === 'replace' ? add : log.messages.concat(add);
+    chatSave(t, log);
+    return send(res, 200, { ok: true, mode, added: add.length, user: add.filter(m => m.role === 'user').length, assistant: add.filter(m => m.role === 'assistant').length, total: log.messages.length });
+  }
+  if (ep === 'chatlog' && req.method === 'DELETE') {
+    const log = chatLoad(t);
+    if (b.all) { if (String(b.confirm || '') !== t.name) return send(res, 400, { error: `Zum Leeren confirm = exakter Name der Zeitlinie („${t.name}“)` }); log.messages = []; }
+    else { const ids = [].concat(b.ids || b.id || []); if (!ids.length) return send(res, 400, { error: 'id(s) oder all angeben' }); const n = log.messages.length; log.messages = log.messages.filter(m => !ids.includes(m.id)); if (log.messages.length === n) return send(res, 404, { error: 'message not found' }); }
+    chatSave(t, log); return send(res, 200, { ok: true, total: log.messages.length });
+  }
+  if (ep === 'chatlog/message' && req.method === 'PATCH') {
+    const log = chatLoad(t), m = log.messages.find(x => x.id === b.id); if (!m) return send(res, 404, { error: 'message not found' });
+    if (b.text != null) m.text = String(b.text); if (b.role != null) { const r = chatRole(b.role); if (!r) return send(res, 400, { error: 'role: user oder assistant' }); m.role = r; }
+    chatSave(t, log); return send(res, 200, { ok: true });
+  }
   if (ep === 'date' && (req.method === 'POST' || req.method === 'PATCH')) {
     const c = calOf(t, lang), f = yearFmt(t, lang), before = rpDate(t);
     let d = before;
@@ -1291,6 +1334,19 @@ async function apiV1(req, res, url) {
     r.legs.forEach(l => { delete l.points; l.duration = d(l.hours); });
     return send(res, 200, Object.assign({ year: y, totalDuration: d(r.totalHours), text }, r));
   }
+  if (ep === 'chatlog') {
+    const t = tl(), log = chatLoad(t), de = lang !== 'en', all = log.messages, qq = (q.get('q') || '').toLowerCase();
+    let idx = all.map((m, i) => i); if (qq) idx = idx.filter(i => all[i].text.toLowerCase().includes(qq));
+    const total = idx.length, last = q.get('last') ? Math.max(1, +q.get('last')) : null, off = q.get('offset') ? Math.max(0, +q.get('offset')) : null, lim = Math.min(2000, +q.get('limit') || (q.get('format') === 'text' ? 200 : 500));
+    let sel = off != null ? idx.slice(off, off + lim) : idx.slice(-(last || lim));
+    const first = sel.length ? idx.indexOf(sel[0]) : 0;
+    if (q.get('format') === 'text') {
+      const who = r => r === 'user' ? (de ? 'Du' : 'You') : 'ChatGPT';
+      const head = total ? (de ? `Chatverlauf „${t.name}“: Nachrichten ${first + 1}–${first + sel.length} von ${total}${qq ? ' (Suche „' + qq + '“)' : ''}` : `Chat log “${t.name}”: messages ${first + 1}–${first + sel.length} of ${total}`) : (de ? 'Der Chatverlauf ist leer.' : 'The chat log is empty.');
+      return send(res, 200, [head].concat(sel.map(i => `\n[${i + 1}] ${who(all[i].role)}:\n${all[i].text}`)).join('\n'), 'text/plain; charset=utf-8');
+    }
+    return send(res, 200, { timeline: t.name, total, from: first, messages: sel.map(i => Object.assign({ nr: i + 1 }, all[i])) });
+  }
   if (ep === 'date') {
     const t = tl(), c = calOf(t, lang), f = yearFmt(t, lang), cur = rpDate(t), de = lang !== 'en';
     const out = { timeline: t.name, current: dateInfo(t, lang, cur), source: t.currentDate ? 'set' : 'latest story section', calendar: { enabled: c.enabled, months: CAL.on(c) ? c.months.map((m, i) => ({ nr: i + 1, name: m.name, days: m.days })) : [], daysPerYear: CAL.daysInYear(c) } };
@@ -1469,6 +1525,12 @@ const MCP_TOOLS = [
   { name: 'delete_housing', title: 'Housing löschen', description: 'Löscht ein Raumschiff/Haus komplett (exakter Name oder id). Nur auf ausdrücklichen Wunsch.', destructive: true,
     inputSchema: S({ timeline: TL, name: str('exakter Name oder id') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/housing', {}, { timeline: a.timeline, name: a.name, id: a.name }) },
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
+  { name: 'append_chat_log', title: 'Chatverlauf speichern', description: 'Schreibt den ChatGPT-Chat in den Bereich „Chatverlauf“ der Zeitlinie. Jede Nachricht mit role: "user" = der Spieler (was er geschrieben hat), "assistant" = ChatGPT (deine Antworten). Alternativ text als Block mit Zeilen „Du: …“ / „ChatGPT: …“ – wird automatisch aufgeteilt. mode "append" (Standard) hängt an, "replace" ersetzt den gesamten Verlauf (z.B. beim ersten vollständigen Übertragen). Lange Verläufe in mehreren Aufrufen anhängen (max. 400 000 Zeichen pro Aufruf). Texte unverändert übernehmen, nicht zusammenfassen.',
+    inputSchema: S({ timeline: TL, messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string', enum: ['user', 'assistant'] }, text: { type: 'string' } }, required: ['role', 'text'] } }, text: str('alternativ: Verlauf als Text mit „Du:“/„ChatGPT:“-Zeilen'), mode: { type: 'string', enum: ['append', 'replace'] } }, ['timeline']),
+    run: a => internalCall('POST', '/api/v1/chatlog', {}, a) },
+  { name: 'get_chat_log', title: 'Chatverlauf lesen', description: 'Liest den gespeicherten Chatverlauf der Zeitlinie (Du = Spieler, ChatGPT = Antworten). Standard: die letzten 200 Nachrichten; offset/limit zum Blättern, query zum Suchen.', ro: true,
+    inputSchema: S({ timeline: TL, last: { type: 'number' }, offset: { type: 'number', description: 'ab Nachricht Nr. (0 = Anfang)' }, limit: { type: 'number' }, query: str('Suchtext'), lang: LG }, ['timeline']),
+    run: (a, v) => internalCall('GET', '/api/v1/chatlog', { timeline: a.timeline, last: a.last, offset: a.offset, limit: a.limit, q: a.query, lang: a.lang, format: 'text' }, null, v) },
   { name: 'get_current_date', title: 'Aktuelles Datum', description: 'Aktuelles RP-Datum der Zeitlinie mit Tag im Jahr, Tagen im Monat, verbleibenden Tagen und dem kompletten Kalender (Monate mit Tagen). compare = anderes Datum → Abstand in Tagen. Vor Zeitangaben und Rechnungen aufrufen.', ro: true,
     inputSchema: S({ timeline: TL, compare: str('optional: Datum zum Vergleichen, z.B. "20. Selona 3640 VSY"'), lang: LG }, ['timeline']), run: (a, v) => internalCall('GET', '/api/v1/date', { timeline: a.timeline, compare: a.compare, lang: a.lang, format: 'text' }, null, v) },
   { name: 'set_current_date', title: 'Aktuelles Datum setzen/weiterzählen', description: 'Setzt das aktuelle RP-Datum (date als Text oder year/month/day) oder zählt es weiter: advanceDays/advanceMonths/advanceYears (auch negativ). Beispiel nach einer Reise: advanceDays 3. Das Datum ist Standard für neue Weltnotiz-Stände und Geldänderungen. clear=true = wieder aus dem neuesten Story-Abschnitt ableiten.',
@@ -1503,7 +1565,7 @@ const MCP_INSTRUCTIONS = 'Ascandir RP-Manager: interaktive Karte (Star Wars u. e
   'WICHTIG: Jede Zeitlinie kann feste Weltregeln haben (list_rules). Sie gelten immer, haben Vorrang vor allem anderen und werden zu Beginn mit list_rules oder get_summary gelesen; ändern nur auf ausdrücklichen Wunsch des Nutzers. ' +
   'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
-  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Kalender: Zeitlinien können Monate/Tage und ein festes aktuelles Datum haben (get_current_date zum Lesen und Zählen der Tage, set_current_date setzen/weiterzählen z.B. advanceDays nach Reisen, calc_date für Abstände/Termine; get_calendar, set_calendar); dann bei Story, Weltnotizen und Geld month/day angeben bzw. Datum wie "12. Elona 3640 VSY". Konfliktzonen: Grenzen bedeuten nicht automatisch Krieg; direkte Kämpfe als Konfliktzone markieren (upsert_conflict mit places, factions, from), beendete Kämpfe mit end_conflict abschließen, list_conflicts zeigt aktive. Housing (Raumschiffe, Häuser, Basen) pro Zeitlinie: list_housing/get_housing lesen, upsert_housing, upsert_deck, set_deck_image (Grundriss-Bild), upsert_room (Räume als Rasterflächen oder Markierung, mit Beschreibung, Einrichtung, Gegenständen), move_wall (Wände verschieben); vorher get_housing aufrufen. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
+  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Chatverlauf: Auf Wunsch den Chat mit append_chat_log in den Bereich Chatverlauf schreiben (role user = Spieler, assistant = ChatGPT, Texte unverändert); get_chat_log liest ihn. Kalender: Zeitlinien können Monate/Tage und ein festes aktuelles Datum haben (get_current_date zum Lesen und Zählen der Tage, set_current_date setzen/weiterzählen z.B. advanceDays nach Reisen, calc_date für Abstände/Termine; get_calendar, set_calendar); dann bei Story, Weltnotizen und Geld month/day angeben bzw. Datum wie "12. Elona 3640 VSY". Konfliktzonen: Grenzen bedeuten nicht automatisch Krieg; direkte Kämpfe als Konfliktzone markieren (upsert_conflict mit places, factions, from), beendete Kämpfe mit end_conflict abschließen, list_conflicts zeigt aktive. Housing (Raumschiffe, Häuser, Basen) pro Zeitlinie: list_housing/get_housing lesen, upsert_housing, upsert_deck, set_deck_image (Grundriss-Bild), upsert_room (Räume als Rasterflächen oder Markierung, mit Beschreibung, Einrichtung, Gegenständen), move_wall (Wände verschieben); vorher get_housing aufrufen. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
 async function handleMcp(req, res, url, tv) {
   // tv = Betrachter aus dem Token (null = Gast). Sichtbar ist nur, was dieser Benutzer sehen darf.
   const viewerOf = () => tv || whoIs({ headers: {} }, null);
@@ -1641,7 +1703,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'DELETE') {
         if (existing != null && !adminOk(meta(existing))) return send(res, 403, { error: 'Löschen nur für Admins / admins only' });
-        if (existing != null) fs.unlinkSync(p); return send(res, 200, { ok: true });
+        if (existing != null) { fs.unlinkSync(p); if (dir === 'timelines') { try { const id = JSON.parse(existing).id; if (id) fs.rmSync(chatFile({ id }), { force: true }); } catch { } } } return send(res, 200, { ok: true });
       }
       return send(res, 405, { error: 'method not allowed' });
     }
