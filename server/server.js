@@ -264,18 +264,43 @@ function findPlace(tl, name) {
 }
 // ---------------------------------------------------------------- Konfliktzonen (gestrichelt auf der Karte, eigene Laufzeit von–bis)
 // timeline.conflicts = [{ id, name, from, to, factions: [ids], places: [ids], x, y, r, desc, color }]
+// Fläche um mehrere Orte: konvexe Hülle mit gerundetem Rand (folgt der Form der Orte, kein Kreis)
+function bufferedHull(pts, pad) {
+  const P = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]).filter((p, i, a) => !i || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]);
+  if (P.length < 3) return null;
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], up = [];
+  for (const p of P) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of P.slice().reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  const H = lo.slice(0, -1).concat(up.slice(0, -1)); if (H.length < 3) return null;
+  // Umlaufsinn bestimmen, damit die Normalen nach außen zeigen
+  let area = 0; for (let i = 0; i < H.length; i++) { const a = H[i], b = H[(i + 1) % H.length]; area += a[0] * b[1] - b[0] * a[1]; }
+  const sgn = area > 0 ? 1 : -1, out = [], n = H.length;
+  const nrm = (a, b) => Math.atan2(-(b[0] - a[0]) * sgn, (b[1] - a[1]) * sgn);
+  for (let i = 0; i < n; i++) {
+    const a = H[(i - 1 + n) % n], b = H[i], c = H[(i + 1) % n];
+    let a1 = nrm(a, b), a2 = nrm(b, c), d = a2 - a1;
+    if (sgn > 0) { while (d < 0) d += Math.PI * 2; } else { while (d > 0) d -= Math.PI * 2; }
+    const steps = Math.max(1, Math.ceil(Math.abs(d) / (Math.PI / 8)));
+    for (let k = 0; k <= steps; k++) { const t = a1 + d * k / steps; out.push([Math.round(b[0] + Math.cos(t) * pad), Math.round(b[1] + Math.sin(t) * pad)]); }
+  }
+  return out;
+}
+function pointInPolyS(x, y, poly) { let ins = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) ins = !ins; } return ins; }
 const conflictActive = (c, y) => (c.from == null || y >= c.from) && (c.to == null || y <= c.to);
 function conflictsAt(tl, y) { return (tl.conflicts || []).filter(c => conflictActive(c, y)); }
 function conflictLine(tl, c, f, de) {
   const fac = (c.factions || []).map(id => (tl.factions.find(x => x.id === id) || {}).name).filter(Boolean);
   const pl = (c.places || []).map(id => (tl.objects.find(o => o.id === id) || (atlasFor(tl).find(o => o.id === id)) || {}).name).filter(Boolean);
   const when = `${c.from != null ? fmtYear(c.from, f) : '?'} – ${c.to != null ? fmtYear(c.to, f) : (de ? 'andauernd' : 'ongoing')}`;
-  return `${c.name} [${when}]${fac.length ? (de ? ' · Parteien: ' : ' · sides: ') + fac.join(' vs. ') : ''}${pl.length ? (de ? ' · um ' : ' · around ') + pl.join(', ') : ''}${c.desc ? ' – ' + String(c.desc).replace(/\s*\n\s*/g, ' ') : ''}`;
+  const form = c.kind === 'border' ? (de ? ' · Grenzstreifen' + (c.r ? ' (Abschnitt)' : ' (ganze gemeinsame Grenze)') : ' · border strip' + (c.r ? ' (section)' : ' (whole shared border)')) : c.kind === 'area' ? (de ? ' · Fläche' : ' · area') : '';
+  return `${c.name} [${when}]${form}${fac.length ? (de ? ' · Parteien: ' : ' · sides: ') + fac.join(' vs. ') : ''}${pl.length ? (de ? ' · um ' : ' · around ') + pl.join(', ') : ''}${c.desc ? ' – ' + String(c.desc).replace(/\s*\n\s*/g, ' ') : ''}`;
 }
 function placeInConflict(tl, o, c) {
   if ((c.places || []).includes(o.id)) return true;
   const byId = Object.fromEntries(tl.objects.map(x => [x.id, x])); let k = o, n = 0; while (CHILD.includes(k.type) && k.parent && byId[k.parent] && n++ < 8) k = byId[k.parent];
-  return c.r > 0 && Number.isFinite(k.x) && Math.hypot(k.x - c.x, k.y - c.y) <= c.r;
+  if (!Number.isFinite(k.x)) return false;
+  if (c.kind === 'area' && Array.isArray(c.poly)) return pointInPolyS(k.x, k.y, c.poly);
+  return c.r > 0 && Math.hypot(k.x - c.x, k.y - c.y) <= c.r; // Kreis bzw. Abschnitt eines Grenzstreifens
 }
 function summaryText(tl, year, lang, placeNames, maxPlaces) {
   I18N.setLang(lang);
@@ -959,25 +984,41 @@ async function apiWrite(req, res, url, parts) {
     if (Array.isArray(b.factions)) { const ids = []; for (const n of b.factions) { const fa = findFaction(t, n); if (!fa) return send(res, 404, { error: `Fraktion „${n}“ nicht gefunden` }); ids.push(fa.id); } c.factions = [...new Set(ids)]; }
     if (b.description !== undefined) c.desc = String(b.description || '').slice(0, 5000);
     if (b.color && /^#[0-9a-fA-F]{6}$/.test(b.color)) c.color = b.color;
-    // Fläche: aus Orten berechnen (Kreis um alle genannten Orte) oder direkt x/y/radius
+    // Form: circle (Kreis), area (Fläche um mehrere Orte) oder border (Streifen entlang der Grenze zweier Fraktionen)
+    if (b.kind != null) { if (!['circle', 'area', 'border'].includes(b.kind)) return send(res, 400, { error: 'kind: circle, area oder border' }); c.kind = b.kind; }
+    c.kind = c.kind || 'circle';
+    const SZ = { small: 30, medium: 55, large: 95 }, BW = { small: 18, medium: 32, large: 55 };
+    if (c.kind === 'border') {
+      if (c.factions.length !== 2) return send(res, 400, { error: 'Grenzstreifen: genau zwei Fraktionen angeben (factions)' });
+      if (b.size || !c.width) c.width = BW[b.size] || c.width || 32;
+      if (b.width > 0) c.width = Math.max(6, Math.min(300, Math.round(+b.width)));
+      delete c.poly;
+    }
+    let pts = null;
     if (Array.isArray(b.places) && b.places.length) {
-      const byId = Object.fromEntries(t.objects.map(x => [x.id, x])), pts = [], ids = [];
+      const byId = Object.fromEntries(t.objects.map(x => [x.id, x])), ids = []; pts = [];
       for (const n of b.places) {
-        let o = findPlace(t, n); if (!o) return send(res, 404, { error: `Ort „${n}“ nicht gefunden` });
+        const o = findPlace(t, n); if (!o) return send(res, 404, { error: `Ort „${n}“ nicht gefunden` });
         ids.push(o.id); let k = o, i = 0; while (CHILD.includes(k.type) && k.parent && byId[k.parent] && i++ < 8) k = byId[k.parent];
         if (Number.isFinite(k.x) && Number.isFinite(k.y)) pts.push([k.x, k.y]);
       }
       if (!pts.length) return send(res, 400, { error: 'Die Orte haben keine Kartenposition' });
-      const pad = { small: 30, medium: 55, large: 95 }[b.size] || (b.padding > 0 ? Math.min(400, +b.padding) : 55);
-      const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-      c.x = Math.round(cx); c.y = Math.round(cy); c.r = Math.round(Math.max(...pts.map(p => Math.hypot(p[0] - cx, p[1] - cy))) + pad); c.places = [...new Set(ids)];
+      c.places = [...new Set(ids)];
+    }
+    const circleAround = (P, pad) => { const xs = P.map(p => p[0]), ys = P.map(p => p[1]), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2; return [Math.round(cx), Math.round(cy), Math.round(Math.max(...P.map(p => Math.hypot(p[0] - cx, p[1] - cy))) + pad)]; };
+    if (pts) {
+      const pad = SZ[b.size] || (b.padding > 0 ? Math.min(400, +b.padding) : 55);
+      if (c.kind === 'border') [c.x, c.y, c.r] = circleAround(pts, Math.max(pad, 80)); // nur dieser Abschnitt der Grenze
+      else if (c.kind === 'area' && pts.length >= 3 && bufferedHull(pts, pad)) { c.poly = bufferedHull(pts, pad); [c.x, c.y] = circleAround(pts, 0); c.r = 1; }
+      else { c.kind = 'circle'; delete c.poly; [c.x, c.y, c.r] = circleAround(pts, pad); }
     } else if (b.x != null && b.y != null && b.radius != null) {
       const x = +b.x, y = +b.y, r = +b.radius; if (![x, y, r].every(Number.isFinite) || r < 5 || r > 3000) return send(res, 400, { error: 'x, y, radius ungültig' });
-      c.x = Math.round(x); c.y = Math.round(y); c.r = Math.round(r); if (Array.isArray(b.places)) c.places = [];
+      c.x = Math.round(x); c.y = Math.round(y); c.r = Math.round(r); if (c.kind === 'area') { c.kind = 'circle'; delete c.poly; }
     }
-    if (created) { if (!c.r) return send(res, 400, { error: 'Fläche fehlt: places (Ortsnamen) oder x, y, radius angeben' }); t.conflicts.push(c); }
+    if (c.kind === 'border' && (b.wholeBorder || (created && !pts && b.x == null))) { c.r = 0; c.places = c.places || []; }
+    if (created) { if (!c.r && c.kind !== 'border') return send(res, 400, { error: 'Fläche fehlt: places (Ortsnamen) oder x, y, radius angeben' }); t.conflicts.push(c); }
     saveTimeline(t);
-    return send(res, created ? 201 : 200, { ok: true, created, conflict: { id: c.id, name: c.name, from: fmtYear(c.from, f), to: c.to == null ? null : fmtYear(c.to, f), x: c.x, y: c.y, radius: c.r, factions: c.factions.map(id => (t.factions.find(x => x.id === id) || {}).name) } });
+    return send(res, created ? 201 : 200, { ok: true, created, conflict: { id: c.id, name: c.name, kind: c.kind, width: c.width, polygonPoints: c.poly ? c.poly.length : undefined, from: fmtYear(c.from, f), to: c.to == null ? null : fmtYear(c.to, f), x: c.x, y: c.y, radius: c.r, factions: c.factions.map(id => (t.factions.find(x => x.id === id) || {}).name) } });
   }
   if (ep === 'conflict' && req.method === 'DELETE') {
     const q = String(b.name || '').toLowerCase().trim(), c = (t.conflicts || []).find(x => x.id === b.id || x.id === b.name || x.name.toLowerCase() === q);
@@ -1309,9 +1350,9 @@ const MCP_TOOLS = [
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
   { name: 'list_conflicts', title: 'Konfliktzonen', description: 'Aktive Konfliktzonen (offene Kämpfe) in einem Jahr bzw. mit all=true alle, mit Parteien, Laufzeit und Orten. Grenzen allein bedeuten keinen Krieg – nur Konfliktzonen markieren direkte Kämpfe.', ro: true,
     inputSchema: S({ timeline: TL, year: YR, all: { type: 'boolean' }, lang: LG }, ['timeline']), run: (a, v) => internalCall('GET', '/api/v1/conflicts', { timeline: a.timeline, year: a.year, all: a.all ? '1' : '', lang: a.lang, format: 'text' }, null, v) },
-  { name: 'upsert_conflict', title: 'Konfliktzone markieren', description: 'Markiert eine Konfliktzone (gestrichelte, schraffierte Fläche auf der Karte) für direkte Kämpfe zwischen Fraktionen – z.B. Front, Belagerung, umkämpftes System. Fläche: places = Orte/Systeme, um die ein Kreis gelegt wird (size small|medium|large für den Rand), alternativ x, y, radius in Kartenkoordinaten. from/to = Laufzeit (to leer/"open" = andauernd; Standard from = aktuelles RP-Jahr). Bestehende Zonen (gleicher Name) werden geändert.',
+  { name: 'upsert_conflict', title: 'Konfliktzone markieren', description: 'Markiert eine Konfliktzone (gestrichelt + schraffiert auf der Karte) für direkte Kämpfe – nicht jede Grenze ist Krieg. Formen (kind): "border" = Konfliktstreifen entlang der gemeinsamen Grenze zweier angrenzender Fraktionen (genau 2 factions; ohne places die ganze gemeinsame Grenze, mit places nur der Abschnitt bei diesen Orten; size = Streifenbreite) – typisch für Fronten; "area" = Fläche um mehrere Orte/Systeme (mind. 3 places, folgt ihrer Lage); "circle" = Kreis um Orte (z.B. Belagerung eines Systems) oder x, y, radius. from/to = Laufzeit (to leer/"open" = andauernd; Standard from = aktuelles RP-Jahr). Bestehende Zonen (gleicher Name) werden geändert.',
     inputSchema: S({ timeline: TL, name: str('Name, z.B. "Schlacht um Korriban"'), newName: str('neuer Name'), factions: { type: 'array', items: { type: 'string' }, description: 'beteiligte Fraktionen' }, places: { type: 'array', items: { type: 'string' }, description: 'Orte/Systeme im Kampfgebiet' }, size: { type: 'string', enum: ['small', 'medium', 'large'] },
-      x: { type: 'number' }, y: { type: 'number' }, radius: { type: 'number' }, from: str('Beginn, z.B. "3640 VSY"'), to: str('Ende (leer oder "open" = andauernd)'), description: str('Lage, Verlauf'), color: str('#rrggbb (Standard Rot)') }, ['timeline', 'name']),
+      kind: { type: 'string', enum: ['border', 'area', 'circle'], description: 'Form (Standard circle)' }, wholeBorder: { type: 'boolean', description: 'border: ganze gemeinsame Grenze statt Abschnitt' }, x: { type: 'number' }, y: { type: 'number' }, radius: { type: 'number' }, from: str('Beginn, z.B. "3640 VSY"'), to: str('Ende (leer oder "open" = andauernd)'), description: str('Lage, Verlauf'), color: str('#rrggbb (Standard Rot)') }, ['timeline', 'name']),
     run: a => internalCall('POST', '/api/v1/conflict', {}, a) },
   { name: 'end_conflict', title: 'Konflikt beenden', description: 'Beendet eine Konfliktzone zu einem Jahr (bis einschließlich dieses Jahres sichtbar). Die Zone bleibt für frühere Jahre erhalten.',
     inputSchema: S({ timeline: TL, name: str('Name oder id'), year: YR }, ['timeline', 'name', 'year']), run: a => internalCall('POST', '/api/v1/conflict', {}, { timeline: a.timeline, name: a.name, to: a.year }) },

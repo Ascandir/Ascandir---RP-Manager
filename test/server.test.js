@@ -182,3 +182,21 @@ test('Konfliktzonen: GPT markiert, beendet und löscht', async () => {
   const tl = JSON.parse(fs.readFileSync(path.join(DATA, 'timelines', 'Haupt.json'), 'utf8'));
   assert.equal(tl.conflicts.length, 0); assert.equal(tl.objects.length, 1); assert.ok(tl.eras[0].control, 'Gebiete unberührt');
 });
+
+test('Konfliktzonen: Grenzstreifen und Fläche um mehrere Orte', async () => {
+  for (const [n, x, y] of [['Ostfeste', 400, 100], ['Südwacht', 250, 400]]) { const r = await mcp(TOK.editor, 'upsert_place', { timeline: 'Haupt', name: n, type: 'fortress', x, y }); assert.ok(!r.isError, r.text); }
+  const one = await mcp(TOK.editor, 'upsert_conflict', { timeline: 'Haupt', name: 'Front', kind: 'border', factions: ['Sith'] });
+  assert.ok(one.isError && /zwei Fraktionen/.test(one.text));
+  const whole = await mcp(TOK.editor, 'upsert_conflict', { timeline: 'Haupt', name: 'Grenzkrieg', kind: 'border', factions: ['Sith', 'Republik'], size: 'large', from: '1 n.K.' });
+  assert.ok(!whole.isError, whole.text); assert.equal(whole.data.conflict.kind, 'border'); assert.equal(whole.data.conflict.width, 55); assert.equal(whole.data.conflict.radius, 0);
+  const sec = await mcp(TOK.editor, 'upsert_conflict', { timeline: 'Haupt', name: 'Grenzgefechte Ost', kind: 'border', factions: ['Sith', 'Republik'], places: ['Ostfeste'] });
+  assert.ok(!sec.isError, sec.text); assert.ok(sec.data.conflict.radius >= 80, 'Abschnitt');
+  const area = await mcp(TOK.editor, 'upsert_conflict', { timeline: 'Haupt', name: 'Kampfgebiet', kind: 'area', places: ['Nordhafen', 'Ostfeste', 'Südwacht'], size: 'small', factions: ['Sith'] });
+  assert.ok(!area.isError, area.text); assert.equal(area.data.conflict.kind, 'area'); assert.ok(area.data.conflict.polygonPoints > 6);
+  const tl = JSON.parse(fs.readFileSync(path.join(DATA, 'timelines', 'Haupt.json'), 'utf8')), poly = tl.conflicts.find(c => c.name === 'Kampfgebiet').poly;
+  const inside = (x, y) => { let ins = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) ins = !ins; } return ins; };
+  assert.ok(inside(100, 100) && inside(400, 100) && inside(250, 400) && inside(250, 200), 'Orte und Mitte liegen in der Fläche');
+  assert.ok(!inside(100, 400) && !inside(400, 400), 'Ecken außerhalb – folgt der Lage der Orte, kein Kreis');
+  const s2 = await mcp(TOK.viewer, 'get_summary', { timeline: 'Haupt', year: '2 n.K.', places: ['Ostfeste'] });
+  assert.match(s2.text, /Grenzkrieg.*Grenzstreifen \(ganze gemeinsame Grenze\).*Sith vs\. Republik/); assert.match(s2.text, /Liegt in Konfliktzone: .*Grenzgefechte Ost/);
+});

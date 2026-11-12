@@ -124,7 +124,7 @@
     if (!Array.isArray(tlx.objects) || !Array.isArray(tlx.eras) || !Array.isArray(tlx.factions)) throw new Error('"objects", "eras", "factions" fehlen / missing');
     tlx.world ||= 'starwars';
     tlx.routes = Array.isArray(tlx.routes) ? tlx.routes : [];
-    tlx.conflicts = Array.isArray(tlx.conflicts) ? tlx.conflicts.filter(c => c && c.r > 0) : [];
+    tlx.conflicts = Array.isArray(tlx.conflicts) ? tlx.conflicts.filter(c => c && (c.r > 0 || c.kind === 'border' || (c.kind === 'area' && Array.isArray(c.poly)))) : [];
     const mapRegion = r => GERMAN_REGION[r] || r;
     tlx.objects.forEach(o => { o.id ||= uid('o'); o.x = +o.x || 0; o.y = +o.y || 0; o.region = mapRegion(o.region); o.name ??= '?'; });
     tlx.factions.forEach(f => { f.id ||= uid('f'); f.color ||= '#888888'; f.reach = +f.reach || 120; f.name ??= '?'; });
@@ -1084,29 +1084,78 @@
   // ------------------------------------------------------------- Konfliktzonen (gestrichelt + schraffiert, Laufzeit von–bis)
   const conflictOn = (c, y = state.year) => (c.from == null || y >= c.from) && (c.to == null || y <= c.to);
   const conflictsNow = () => (state.tl.conflicts || []).filter(c => conflictOn(c));
+  // gemeinsame Pfadform für Kreis- und Flächenzonen
+  function conflictPath(c) {
+    const p = new Path2D();
+    if (c.kind === 'area' && Array.isArray(c.poly) && c.poly.length > 2) { c.poly.forEach(([x, y], i) => i ? p.lineTo(x, y) : p.moveTo(x, y)); p.closePath(); }
+    else p.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    return p;
+  }
+  function conflictBox(c) { if (c.kind === 'area' && Array.isArray(c.poly)) { const xs = c.poly.map(q => q[0]), ys = c.poly.map(q => q[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; } return [c.x - c.r, c.y - c.r, c.x + c.r, c.y + c.r]; }
+  function hatch(g, col, z) { // Schraffur über den sichtbaren Bereich (in Weltkoordinaten)
+    const a = s2w(0, 0), b = s2w(W, H), step = 10 / z, span = (b.y - a.y);
+    g.strokeStyle = col; g.lineWidth = 1.4 / z; g.beginPath();
+    for (let k = a.x - span; k <= b.x; k += step) { g.moveTo(k, a.y); g.lineTo(k + span, b.y); }
+    g.stroke();
+  }
+  function conflictLabel(c, sx, sy) {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.font = '600 12px "Segoe UI", Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    const label = '⚔ ' + c.name; ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineJoin = 'round'; ctx.strokeText(label, sx, sy);
+    ctx.fillStyle = '#ffd9d4'; ctx.fillText(label, sx, sy);
+  }
+  let cfMask = null, cfPaint = null, cfProbe = null;
+  const cfCanvas = c => { c = c || document.createElement('canvas'); if (c.width !== canvas.width || c.height !== canvas.height) { c.width = canvas.width; c.height = canvas.height; } return c; };
+  // Grenzstreifen: Bereich, in dem die Grenzen beider Fraktionen dicht beieinander liegen (= gemeinsame Grenze), optional auf einen Abschnitt begrenzt
+  function drawBorderConflict(c, col, z) {
+    const [fa, fb] = c.factions || []; if (!fa || !fb) return;
+    const paths = territories(), pa = paths[fa], pb = paths[fb]; if (!pa || !pb) return;
+    cfMask = cfCanvas(cfMask); const m = cfMask.getContext('2d');
+    m.setTransform(1, 0, 0, 1, 0, 0); m.globalCompositeOperation = 'source-over'; m.clearRect(0, 0, cfMask.width, cfMask.height);
+    worldTransform(m); m.lineJoin = 'round'; m.lineCap = 'round'; m.strokeStyle = '#000'; m.lineWidth = c.width || 32; m.stroke(pa);
+    m.globalCompositeOperation = 'destination-in'; m.stroke(pb);
+    if (c.r > 0) { m.fillStyle = '#000'; m.beginPath(); m.arc(c.x, c.y, c.r, 0, Math.PI * 2); m.fill(); }
+    m.globalCompositeOperation = 'source-over';
+    cfPaint = cfCanvas(cfPaint); const g = cfPaint.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, cfPaint.width, cfPaint.height);
+    worldTransform(g);
+    g.globalAlpha = 0.16; g.fillStyle = col; const a = s2w(0, 0), b = s2w(W, H); g.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    g.globalAlpha = 0.5; hatch(g, col, z);
+    g.globalAlpha = 1; g.strokeStyle = col; g.lineWidth = 2.6 / z; g.setLineDash([10 / z, 6 / z]); g.stroke(pa); g.setLineDash([]);
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-in'; g.drawImage(cfMask, 0, 0); g.globalCompositeOperation = 'source-over';
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(cfPaint, 0, 0);
+    // Beschriftung: Mitte des sichtbaren Streifens
+    cfProbe = cfProbe || document.createElement('canvas'); cfProbe.width = 96; cfProbe.height = Math.max(1, Math.round(96 * canvas.height / canvas.width));
+    const pc = cfProbe.getContext('2d', { willReadFrequently: true }); pc.clearRect(0, 0, cfProbe.width, cfProbe.height); pc.drawImage(cfMask, 0, 0, cfProbe.width, cfProbe.height);
+    const d = pc.getImageData(0, 0, cfProbe.width, cfProbe.height).data; let sx = 0, sy = 0, n = 0, top = Infinity;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 40) { const k = (i - 3) / 4, x = k % cfProbe.width, y = Math.floor(k / cfProbe.width); sx += x; sy += y; n++; }
+    if (n < 2) return;
+    // auf den Streifen selbst setzen: Pixel, das dem Schwerpunkt am nächsten liegt
+    const mx = sx / n, my = sy / n; let best = null, bd = Infinity;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 40) { const k = (i - 3) / 4, x = k % cfProbe.width, y = Math.floor(k / cfProbe.width), dd = (x - mx) ** 2 + (y - my) ** 2; if (dd < bd) { bd = dd; best = [x, y]; } }
+    const lx = (best[0] + 0.5) * W / cfProbe.width, ly = (best[1] + 0.5) * H / cfProbe.height;
+    conflictLabel(c, lx, ly - 4);
+  }
   function drawConflicts() {
     const list = conflictsNow(); if (!list.length) return;
     const z = state.view.z;
     for (const c of list) {
       const col = c.color || '#e0453a';
+      if (c.kind === 'border') { drawBorderConflict(c, col, z); continue; }
+      const path = conflictPath(c);
       worldTransform(ctx);
-      ctx.save(); ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.clip();
-      ctx.fillStyle = col; ctx.globalAlpha = 0.07; ctx.fill();
-      ctx.globalAlpha = 0.32; ctx.strokeStyle = col; ctx.lineWidth = 1.4 / z; ctx.beginPath();
-      const step = 10 / z; for (let k = -c.r * 2; k <= c.r * 2; k += step) { ctx.moveTo(c.x + k - c.r, c.y - c.r); ctx.lineTo(c.x + k + c.r, c.y + c.r); }
-      ctx.stroke(); ctx.restore();
-      ctx.globalAlpha = 0.95; ctx.strokeStyle = col; ctx.lineWidth = 2.4 / z; ctx.setLineDash([10 / z, 6 / z]);
-      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
-      // Beschriftung oben an der Zone
-      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-      const p = w2s(c.x, c.y - c.r); if (c.r * z < 14) continue;
-      ctx.font = '600 12px "Segoe UI", Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      const label = '⚔ ' + c.name; ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineJoin = 'round'; ctx.strokeText(label, p.x, p.y - 3);
-      ctx.fillStyle = '#ffd9d4'; ctx.fillText(label, p.x, p.y - 3);
+      ctx.save(); ctx.clip(path);
+      ctx.fillStyle = col; ctx.globalAlpha = 0.07; ctx.fill(path);
+      ctx.globalAlpha = 0.32; hatch(ctx, col, z); ctx.restore();
+      ctx.globalAlpha = 0.95; ctx.strokeStyle = col; ctx.lineWidth = 2.4 / z; ctx.lineJoin = 'round'; ctx.setLineDash([10 / z, 6 / z]);
+      ctx.stroke(path); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      const bx = conflictBox(c); if ((bx[2] - bx[0]) * z < 14) continue;
+      const p = w2s((bx[0] + bx[2]) / 2, bx[1]); conflictLabel(c, p.x, p.y - 3);
     }
   }
-  const conflictAt = (wx, wy) => conflictsNow().slice().reverse().find(c => Math.hypot(wx - c.x, wy - c.y) <= c.r) || null;
-  function conflictsOfPlace(o) { const r = rootOf(o), p = posOf(r); return conflictsNow().filter(c => (c.places || []).includes(o.id) || (c.places || []).includes(r.id) || Math.hypot(p.x - c.x, p.y - c.y) <= c.r); }
+  const inConflict = (c, x, y) => c.kind === 'area' && Array.isArray(c.poly) ? pointInPoly(x, y, c.poly) : c.r > 0 && Math.hypot(x - c.x, y - c.y) <= c.r;
+  const conflictAt = (wx, wy) => conflictsNow().slice().reverse().find(c => inConflict(c, wx, wy)) || null;
+  function conflictsOfPlace(o) { const r = rootOf(o), p = posOf(r); return conflictsNow().filter(c => (c.places || []).includes(o.id) || (c.places || []).includes(r.id) || inConflict(c, p.x, p.y)); }
   function conflictRow(o) {
     const cs = conflictsOfPlace(o); if (!cs.length) return '';
     return `<span class="k">${esc(t('conflictZone'))}</span><span>${cs.map(c => `<span style="color:${esc(c.color || '#e0453a')}">⚔</span> ${esc(c.name)}${(c.factions || []).length ? ` <span class="dim">(${esc(c.factions.map(id => (facById(id) || {}).name).filter(Boolean).join(' vs. '))})</span>` : ''}`).join('<br>')}</span>`;
@@ -1116,6 +1165,7 @@
     modal(isNew ? t('conflictNew') : t('conflictEdit'), `
       <label class="field"><span>${esc(t('name'))}</span><input id="cfName" value="${esc(c.name)}" maxlength="120"></label>
       <div class="field"><span>${esc(t('conflictSides'))}</span><div class="cf-facs">${tl.factions.map(f => `<label class="chk"><input type="checkbox" value="${esc(f.id)}" ${(c.factions || []).includes(f.id) ? 'checked' : ''}><span style="color:${esc(f.color)}">■</span> ${esc(f.name)}</label>`).join('') || `<span class="dim">${esc(t('noFactionYet'))}</span>`}</div></div>
+      ${c.kind === 'border' ? `<p class="hint">${esc(t('conflictBorderHint'))}</p><label class="field"><span>${esc(t('conflictWidth'))}: <b id="cfWv">${c.width || 32}</b></span><input id="cfW" type="range" min="8" max="160" step="2" value="${c.width || 32}"></label>` : ''}
       <div class="row"><label class="field"><span>${esc(t('conflictFrom'))}</span><input id="cfFrom" value="${esc(fy(c.from))}"></label><label class="field"><span>${esc(t('conflictTo'))}</span><input id="cfTo" value="${esc(fy(c.to))}" placeholder="${esc(t('conflictOngoing'))}"></label></div>
       <label class="field"><span>${esc(t('description'))}</span><textarea id="cfDesc" rows="3">${esc(c.desc || '')}</textarea></label>
       <div class="row"><label class="field fixed" style="width:90px"><span>${esc(t('color'))}</span><input id="cfColor" type="color" value="${esc(c.color || '#e0453a')}"></label>
@@ -1124,18 +1174,34 @@
       const from = $('#cfFrom').value.trim() ? parseYear($('#cfFrom').value) : null, to = $('#cfTo').value.trim() ? parseYear($('#cfTo').value) : null;
       if ($('#cfFrom').value.trim() && from == null || $('#cfTo').value.trim() && to == null) throw new Error(t('conflictYearBad'));
       if (from != null && to != null && to < from) throw new Error(t('conflictYearOrder'));
+      const facs = [...document.querySelectorAll('.cf-facs input:checked')].map(i => i.value);
+      if (c.kind === 'border' && facs.length !== 2) throw new Error(t('conflictTwoFactions'));
       pushUndo();
-      Object.assign(c, { name, from, to, desc: $('#cfDesc').value, color: $('#cfColor').value, factions: [...document.querySelectorAll('.cf-facs input:checked')].map(i => i.value) });
+      Object.assign(c, { name, from, to, desc: $('#cfDesc').value, color: $('#cfColor').value, factions: facs });
+      if (c.kind === 'border') c.width = +$('#cfW').value;
       if (isNew) tl.conflicts.push(c);
       afterEdit(true);
     });
     const del = $('#cfDel'); if (del) del.onclick = () => { if (!confirm(t('conflictDelQ', c.name))) return; pushUndo(); tl.conflicts = tl.conflicts.filter(x => x !== c); $('#modal').hidden = true; afterEdit(true); };
     const end = $('#cfEnd'); if (end) end.onclick = () => { $('#cfTo').value = fmtYear(state.year); };
+    const wr = $('#cfW'); if (wr) wr.oninput = () => { $('#cfWv').textContent = wr.value; };
     setTimeout(() => { if (isNew) { $('#cfName').focus(); $('#cfName').select(); } }, 30);
   }
+  function finishConflictArea() {
+    const d = state.cfDraft; if (!d || d.length < 3) return; state.cfDraft = null; renderToolOpts();
+    const xs = d.map(q => q[0]), ys = d.map(q => q[1]);
+    editConflict({ id: uid('cf'), kind: 'area', name: t('conflictDefault'), from: state.year, to: null, factions: state.activeFaction ? [state.activeFaction] : [], places: [], poly: d, x: Math.round((Math.min(...xs) + Math.max(...xs)) / 2), y: Math.round((Math.min(...ys) + Math.max(...ys)) / 2), r: 1, desc: '', color: '#e0453a' }, true);
+  }
   function drawConflictDraft() {
+    const z = state.view.z;
+    if (state.cfDraft && state.cfDraft.length && editable() && state.tool === 'conflict') {
+      worldTransform(ctx); ctx.strokeStyle = '#e0453a'; ctx.fillStyle = 'rgba(224,69,58,0.1)'; ctx.lineWidth = 2 / z; ctx.setLineDash([8 / z, 5 / z]);
+      const pts = state.cfDraft.concat(mouse.in ? [[s2w(mouse.x, mouse.y).x, s2w(mouse.x, mouse.y).y]] : []);
+      ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); if (pts.length > 2) { ctx.closePath(); ctx.fill(); } ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#e0453a'; for (const [x, y] of state.cfDraft) { ctx.beginPath(); ctx.arc(x, y, 3.5 / z, 0, Math.PI * 2); ctx.fill(); }
+    }
     if (!drag || drag.kind !== 'conflict') return;
-    worldTransform(ctx); const z = state.view.z;
+    worldTransform(ctx);
     ctx.strokeStyle = '#e0453a'; ctx.lineWidth = 2 / z; ctx.setLineDash([10 / z, 6 / z]);
     ctx.beginPath(); ctx.arc(drag.x, drag.y, Math.max(drag.r, 2), 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
   }
@@ -1228,6 +1294,12 @@
       if (!needEra()) return; pushUndo(); drag = { kind: 'erase' }; eraseAt(w);
     } else if (state.tool === 'conflict') {
       const ex = conflictAt(w.x, w.y);
+      if (state.cfShape === 'area') {
+        if (!state.cfDraft && ex) { editConflict(ex, false); return; }
+        const d = state.cfDraft = state.cfDraft || [], last = d[d.length - 1];
+        if (!last || Math.hypot(last[0] - w.x, last[1] - w.y) * state.view.z > 4) d.push([Math.round(w.x), Math.round(w.y)]);
+        renderToolOpts(); draw(); return;
+      }
       drag = { kind: 'conflict', x: Math.round(w.x), y: Math.round(w.y), r: 0, ex };
     } else if (state.tool === 'add') addObjectAt(w, sx, sy);
     else if (state.tool === 'route') {
@@ -1272,7 +1344,7 @@
       tt.innerHTML = `<b>${esc(hit.name)}</b> <span class="dim">· ${esc(typeLabel(hit.type))}</span>${fac ? `<br><span style="color:${esc(fac.color)}">■</span> ${esc(fac.name)}` : ''}`;
       tt.style.left = (sx + 14) + 'px'; tt.style.top = (sy + 12) + 'px'; tt.hidden = false;
     } else tt.hidden = true;
-    const nh = hit ? hit.id : null, cursorTool = editable() && (state.tool === 'paint' || state.tool === 'erase' || (state.tool === 'route' && state.routeDraft));
+    const nh = hit ? hit.id : null, cursorTool = editable() && (state.tool === 'paint' || state.tool === 'erase' || (state.tool === 'route' && state.routeDraft) || (state.tool === 'conflict' && state.cfDraft));
     if (nh !== state.hover || cursorTool) { state.hover = nh; draw(); }
   });
   const pointerEnd = e => {
@@ -1289,10 +1361,14 @@
       else { if (isSW()) d.obj.region = regionAt(d.obj.x, d.obj.y) || d.obj.region; state.selected = d.hit.id; afterEdit(); }
     } else if (d.kind === 'paint' || d.kind === 'erase') afterEdit();
     else if (d.kind === 'conflict') {
-      if (d.r * state.view.z < 8) { if (d.ex) editConflict(d.ex, false); draw(); }
-      else editConflict({ id: uid('cf'), name: t('conflictDefault'), from: state.year, to: null, factions: state.activeFaction ? [state.activeFaction] : [], places: [], x: d.x, y: d.y, r: d.r, desc: '', color: '#e0453a' }, true);
+      const base = { id: uid('cf'), name: t('conflictDefault'), from: state.year, to: null, factions: state.activeFaction ? [state.activeFaction] : [], places: [], desc: '', color: '#e0453a' };
+      const small = d.r * state.view.z < 8;
+      if (state.cfShape === 'border') { if (small && d.ex && d.ex.kind === 'border') editConflict(d.ex, false); else editConflict(Object.assign(base, { kind: 'border', width: 32, x: d.x, y: d.y, r: small ? 0 : d.r }), true); }
+      else if (small) { if (d.ex) editConflict(d.ex, false); draw(); }
+      else editConflict(Object.assign(base, { kind: 'circle', x: d.x, y: d.y, r: d.r }), true);
     }
   };
+  canvas.addEventListener('dblclick', () => { if (editable() && state.tool === 'conflict' && state.cfDraft && state.cfDraft.length >= 3) finishConflictArea(); });
   window.addEventListener('pointerup', pointerEnd);
   window.addEventListener('pointercancel', pointerEnd);
   canvas.addEventListener('wheel', e => { e.preventDefault(); const r = canvas.getBoundingClientRect(); zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
@@ -1371,6 +1447,11 @@
     const tag = (e.target.tagName || '').toLowerCase();
     const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
     if (state.mode === 'housing' && HS && $('#modal').hidden && HS.key(e, typing)) return;
+    if (!typing && $('#modal').hidden && editable() && state.tool === 'conflict' && state.cfDraft) {
+      if (e.key === 'Enter') { e.preventDefault(); finishConflictArea(); return; }
+      if (e.key === 'Escape') { state.cfDraft = null; renderToolOpts(); draw(); return; }
+      if (e.key === 'Backspace') { e.preventDefault(); state.cfDraft.pop(); if (!state.cfDraft.length) state.cfDraft = null; renderToolOpts(); draw(); return; }
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { if (!typing && !isGuest()) { e.preventDefault(); undo(); } return; }
     if (typing || !$('#modal').hidden || state.mode === 'settings') return;
     const step = e.shiftKey ? 10 : 1;
@@ -1900,8 +1981,16 @@
       $('#brush').addEventListener('input', e => { state.brush = +e.target.value; $('#brushVal').textContent = state.brush; draw(); });
     } else if (state.tool === 'conflict') {
       const now = conflictsNow(), all = state.tl.conflicts || [];
-      box.innerHTML = `<p class="hint">${esc(t('conflictToolHelp'))}</p>${all.length ? `<div class="cf-list">${all.map((c, i) => `<button data-cf="${i}" class="${now.includes(c) ? '' : 'dim'}"><span style="color:${esc(c.color || '#e0453a')}">⚔</span> ${esc(c.name)} <span class="dim small">${esc(c.from != null ? fmtYear(c.from) : '?')} – ${esc(c.to != null ? fmtYear(c.to) : t('conflictOngoing'))}</span></button>`).join('')}</div>` : ''}`;
-      box.querySelectorAll('[data-cf]').forEach(b => b.onclick = () => { const c = all[+b.dataset.cf]; state.view.cx = c.x; state.view.cy = c.y; editConflict(c, false); draw(); });
+      state.cfShape = state.cfShape || 'border';
+      const nd = (state.cfDraft || []).length;
+      box.innerHTML = `<div class="seg" style="margin-top:8px">${['border', 'area', 'circle'].map(k => `<button data-cfs="${k}" class="${state.cfShape === k ? 'active' : ''}">${esc(t('cfShape_' + k))}</button>`).join('')}</div>
+        <p class="hint">${esc(t('cfHelp_' + state.cfShape))}</p>
+        ${state.cfShape === 'area' && nd ? `<div class="row"><button id="cfFinish" class="primary" ${nd < 3 ? 'disabled' : ''}>${esc(t('routeFinish'))} (${nd})</button><button id="cfCancel">${esc(t('routeCancel'))}</button></div>` : ''}
+        <p class="hint">${esc(t('conflictToolHelp'))}</p>${all.length ? `<div class="cf-list">${all.map((c, i) => `<button data-cf="${i}" class="${now.includes(c) ? '' : 'dim'}"><span style="color:${esc(c.color || '#e0453a')}">⚔</span> ${esc(c.name)} <span class="dim small">${esc(c.from != null ? fmtYear(c.from) : '?')} – ${esc(c.to != null ? fmtYear(c.to) : t('conflictOngoing'))}</span></button>`).join('')}</div>` : ''}`;
+      box.querySelectorAll('[data-cf]').forEach(b => b.onclick = () => { const c = all[+b.dataset.cf]; if (c.r > 1 || c.kind === 'area') { const bx = conflictBox(c); state.view.cx = (bx[0] + bx[2]) / 2; state.view.cy = (bx[1] + bx[3]) / 2; } editConflict(c, false); draw(); });
+      box.querySelectorAll('[data-cfs]').forEach(b => b.onclick = () => { state.cfShape = b.dataset.cfs; state.cfDraft = null; renderToolOpts(); updateToolHint(); draw(); });
+      const fin = $('#cfFinish'); if (fin) fin.onclick = finishConflictArea;
+      const can = $('#cfCancel'); if (can) can.onclick = () => { state.cfDraft = null; renderToolOpts(); draw(); };
     } else if (state.tool === 'add') {
       if (!wtype().types.includes(state.newType)) state.newType = wtype().types[1] || wtype().types[0];
       box.innerHTML = `

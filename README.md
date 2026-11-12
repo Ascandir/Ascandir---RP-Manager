@@ -144,15 +144,28 @@ Dazu kommen Tags, Notizen, ein Porträt und eine Bildergalerie.
 
 ### Konfliktzonen
 
-Nicht jede Grenze bedeutet Krieg. Direkte Kämpfe (Front, Belagerung, umkämpftes System) markierst du als **Konfliktzone**: eine rot gestrichelte, schraffierte Fläche mit „⚔ Name“.
+Nicht jede Grenze bedeutet Krieg. Direkte Kämpfe markierst du als **Konfliktzone**: rot gestrichelt und schraffiert, mit „⚔ Name“. Das funktioniert in Star Wars, eigenen Sci-Fi-Welten und Fantasy-Welten. Es gibt drei Formen:
 
-- **Im Editor:** Werkzeug **⚔ Konfliktzone**, vom Mittelpunkt aus einen Kreis aufziehen, dann Name, beteiligte Fraktionen, Beschreibung, Farbe und Laufzeit eintragen. Ein Klick in eine bestehende Zone öffnet sie zum Bearbeiten, darin gibt es auch „Im aktuellen Jahr beenden“.
-- **Laufzeit:** Jede Zone hat ein eigenes *von* und *bis einschließlich* (leer = andauernd). Sie hängt also nicht an den Zeitaltern und erscheint auf der Zeitleiste nur in ihren Jahren.
-- Klickst du einen Ort an, der in einer Zone liegt, zeigt das Infofeld die Konfliktzone und die Parteien an. Unter *Anzeige* lassen sich die Zonen ausblenden.
-- **ChatGPT:**
-  - `upsert_conflict` markiert eine Zone selbstständig. Die Fläche ergibt sich aus Orts- oder Systemnamen (`places`, Größe `small`/`medium`/`large`) oder aus `x`/`y`/`radius`.
-  - `end_conflict` beendet einen Konflikt zu einem Jahr, `delete_conflict` löscht ihn ganz.
-  - `list_conflicts` zeigt die aktiven Zonen. In `get_summary` stehen die aktiven Konfliktzonen ebenfalls, ausdrücklich getrennt von den Grenzen.
+- **Grenzstreifen:** ein Konfliktband genau entlang der gemeinsamen Grenze zweier angrenzender Fraktionen, also die typische Front. Ohne Einschränkung gilt es für die ganze gemeinsame Grenze, oder nur für einen Abschnitt. Verschieben sich die Grenzen, wandert der Streifen mit. Die Breite ist einstellbar.
+- **Fläche:** ein freies Vieleck, z. B. ein umkämpftes Gebiet über mehrere Systeme.
+- **Kreis:** z. B. die Belagerung eines einzelnen Systems.
+
+**Im Editor:** Werkzeug **⚔ Konfliktzone** wählen, darunter die Form.
+- Grenzstreifen: auf die Karte klicken = ganze Grenze, Kreis aufziehen = nur dieser Abschnitt. Danach die zwei Fraktionen wählen.
+- Fläche: Punkte setzen, Doppelklick oder Enter schließt die Fläche.
+- Kreis: vom Mittelpunkt aus aufziehen.
+- Danach Name, Parteien, Beschreibung, Farbe und Laufzeit eintragen. Ein Klick in eine bestehende Zone oder auf einen Eintrag in der Liste öffnet sie zum Bearbeiten, inklusive „Im aktuellen Jahr beenden“.
+
+**Laufzeit:** Jede Zone hat ein eigenes *von* und *bis einschließlich* (leer = andauernd). Sie hängt nicht an den Zeitaltern. Klickst du einen Ort in einer Zone an, zeigt das Infofeld die Zone und die Parteien. Unter *Anzeige* lassen sich die Zonen ausblenden.
+
+**ChatGPT:**
+- `upsert_conflict` markiert Zonen selbstständig:
+  - `kind: "border"` mit genau zwei `factions`: Grenzstreifen. Ohne `places` gilt er für die ganze Grenze, mit `places` nur für den Abschnitt bei diesen Orten.
+  - `kind: "area"` mit mindestens drei `places`: Fläche, die der Lage der Orte folgt.
+  - `kind: "circle"`: Kreis um Orte.
+  - `size` (`small`/`medium`/`large`) steuert Breite bzw. Rand.
+- `end_conflict` beendet eine Zone zu einem Jahr, `delete_conflict` löscht sie ganz.
+- `list_conflicts` zeigt die aktiven Zonen. In `get_summary` stehen die aktiven Konfliktzonen ausdrücklich getrennt von den Grenzen.
 
 ### Housing (Raumschiffe, Häuser, Basen)
 
