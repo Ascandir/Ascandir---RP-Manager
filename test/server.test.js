@@ -152,3 +152,33 @@ test('Housing: Grundriss-Bild per Base64 und per Webseiten-Link (Vorschaubild)',
   assert.equal(tl.housing.length, 1); assert.equal(tl.housing[0].decks[0].image, null);
   assert.equal(tl.objects.length, 1, 'Orte unverändert'); assert.equal(tl.characters.length, 1, 'Charaktere unverändert');
 });
+
+// ---------------------------------------------------------------- Konfliktzonen
+test('Konfliktzonen: GPT markiert, beendet und löscht', async () => {
+  for (const [name, color] of [['Sith', '#aa0000'], ['Republik', '#0044aa']]) { const f = await mcp(TOK.editor, 'upsert_faction', { timeline: 'Haupt', name, color }); assert.ok(!f.isError, f.text); }
+  const bad = await mcp(TOK.editor, 'upsert_conflict', { timeline: 'Haupt', name: 'X', places: ['Nordhafen'], factions: ['Unbekannt'] });
+  assert.ok(bad.isError && /Fraktion/.test(bad.text));
+  const noArea = await mcp(TOK.editor, 'upsert_conflict', { timeline: 'Haupt', name: 'Ohne Ort' });
+  assert.ok(noArea.isError && /Fläche/.test(noArea.text));
+  const c = await mcp(TOK.editor, 'upsert_conflict', { timeline: 'Haupt', name: 'Schlacht um Nordhafen', places: ['Nordhafen'], factions: ['Sith', 'Republik'], from: '5 n.K.', size: 'medium', description: 'Belagerung des Hafens' });
+  assert.ok(!c.isError, c.text);
+  assert.equal(c.data.conflict.x, 100); assert.equal(c.data.conflict.radius, 55); assert.deepEqual(c.data.conflict.factions, ['Sith', 'Republik']);
+  const before = await mcp(TOK.viewer, 'list_conflicts', { timeline: 'Haupt', year: '4 n.K.' });
+  assert.match(before.text, /Keine aktiven/);
+  const during = await mcp(TOK.viewer, 'get_summary', { timeline: 'Haupt', year: '7 n.K.', places: ['Nordhafen'] });
+  assert.match(during.text, /Aktive Konfliktzonen/); assert.match(during.text, /Schlacht um Nordhafen.*Sith vs\. Republik/); assert.match(during.text, /Liegt in Konfliktzone: Schlacht um Nordhafen/);
+  const end = await mcp(TOK.editor, 'end_conflict', { timeline: 'Haupt', name: 'Schlacht um Nordhafen', year: '9 n.K.' });
+  assert.ok(!end.isError, end.text);
+  const after = await mcp(TOK.viewer, 'list_conflicts', { timeline: 'Haupt', year: '10 n.K.' });
+  assert.match(after.text, /Keine aktiven/);
+  const all = await mcp(TOK.viewer, 'list_conflicts', { timeline: 'Haupt', all: true });
+  assert.match(all.text, /5 n\.K\. – 9 n\.K\./);
+  const order = await mcp(TOK.editor, 'upsert_conflict', { timeline: 'Haupt', name: 'Schlacht um Nordhafen', to: '1 n.K.' });
+  assert.ok(order.isError, 'Ende vor Beginn');
+  const miss = await mcp(TOK.editor, 'end_conflict', { timeline: 'Haupt', name: 'Gibt es nicht', year: '9 n.K.' });
+  assert.ok(miss.isError && /not found/.test(miss.text));
+  const del = await mcp(TOK.editor, 'delete_conflict', { timeline: 'Haupt', name: 'Schlacht um Nordhafen' });
+  assert.ok(!del.isError);
+  const tl = JSON.parse(fs.readFileSync(path.join(DATA, 'timelines', 'Haupt.json'), 'utf8'));
+  assert.equal(tl.conflicts.length, 0); assert.equal(tl.objects.length, 1); assert.ok(tl.eras[0].control, 'Gebiete unberührt');
+});

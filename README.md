@@ -142,6 +142,18 @@ Dazu kommen Tags, Notizen, ein Porträt und eine Bildergalerie.
 - **REST:** `GET /api/v1/characters`, `GET /api/v1/character?name=…`, `POST/DELETE /api/v1/character`, `POST /api/v1/character/image`.
 - Selbst hochgeladene Bilder werden verkleinert direkt in der Zeitlinien-Datei gespeichert.
 
+### Konfliktzonen
+
+Nicht jede Grenze bedeutet Krieg. Direkte Kämpfe (Front, Belagerung, umkämpftes System) markierst du als **Konfliktzone**: eine rot gestrichelte, schraffierte Fläche mit „⚔ Name“.
+
+- **Im Editor:** Werkzeug **⚔ Konfliktzone**, vom Mittelpunkt aus einen Kreis aufziehen, dann Name, beteiligte Fraktionen, Beschreibung, Farbe und Laufzeit eintragen. Ein Klick in eine bestehende Zone öffnet sie zum Bearbeiten, darin gibt es auch „Im aktuellen Jahr beenden“.
+- **Laufzeit:** Jede Zone hat ein eigenes *von* und *bis einschließlich* (leer = andauernd). Sie hängt also nicht an den Zeitaltern und erscheint auf der Zeitleiste nur in ihren Jahren.
+- Klickst du einen Ort an, der in einer Zone liegt, zeigt das Infofeld die Konfliktzone und die Parteien an. Unter *Anzeige* lassen sich die Zonen ausblenden.
+- **ChatGPT:**
+  - `upsert_conflict` markiert eine Zone selbstständig. Die Fläche ergibt sich aus Orts- oder Systemnamen (`places`, Größe `small`/`medium`/`large`) oder aus `x`/`y`/`radius`.
+  - `end_conflict` beendet einen Konflikt zu einem Jahr, `delete_conflict` löscht ihn ganz.
+  - `list_conflicts` zeigt die aktiven Zonen. In `get_summary` stehen die aktiven Konfliktzonen ebenfalls, ausdrücklich getrennt von den Grenzen.
+
 ### Housing (Raumschiffe, Häuser, Basen)
 
 Im Bereich **🏠 Housing** legst du pro Zeitlinie eigene Raumschiffe, Häuser, Basen, Stationen oder Fahrzeuge an. Jedes Objekt kann Besitzer (Charaktere) und einen Ort der Karte haben und besteht aus einem oder mehreren **Decks bzw. Etagen**.

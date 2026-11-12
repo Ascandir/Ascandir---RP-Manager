@@ -36,7 +36,7 @@
     lang: (navigator.language || 'de').toLowerCase().startsWith('de') ? 'de' : 'en',
     theme: 'auto', mapStyle: 'atlas', autoUpdate: true, terrStyle: 'borders', activeWorld: 'starwars', activeTl: {}, years: {},
     types: Object.assign({ sun: true, planet: true, moon: true, station: true, capital: true, city: true, village: true, fortress: true, landmark: true }, oldSet.types || {}),
-    opts: Object.assign({ influence: true, regions: true, grid: false, names: true, routes: true, sectors: true, atlas: true }, oldSet.opts || {}),
+    opts: Object.assign({ influence: true, conflicts: true, regions: true, grid: false, names: true, routes: true, sectors: true, atlas: true }, oldSet.opts || {}),
     hiddenFactions: oldSet.hiddenFactions || [],
     planner: { stops: ['', ''], cls: 1, stay: 0, mode: 'horse', km: 1 }
   }, loadJSON(STORE_SET, {}));
@@ -124,6 +124,7 @@
     if (!Array.isArray(tlx.objects) || !Array.isArray(tlx.eras) || !Array.isArray(tlx.factions)) throw new Error('"objects", "eras", "factions" fehlen / missing');
     tlx.world ||= 'starwars';
     tlx.routes = Array.isArray(tlx.routes) ? tlx.routes : [];
+    tlx.conflicts = Array.isArray(tlx.conflicts) ? tlx.conflicts.filter(c => c && c.r > 0) : [];
     const mapRegion = r => GERMAN_REGION[r] || r;
     tlx.objects.forEach(o => { o.id ||= uid('o'); o.x = +o.x || 0; o.y = +o.y || 0; o.region = mapRegion(o.region); o.name ??= '?'; });
     tlx.factions.forEach(f => { f.id ||= uid('f'); f.color ||= '#888888'; f.reach = +f.reach || 120; f.name ??= '?'; });
@@ -484,6 +485,7 @@
       if (state.world.mapImage && state.world.mapImage.src) drawWorldImage();
       if (isSW() && settings.opts.regions) { if (atlasStyle()) drawRegionsAtlas(); else drawRegions(); }
       if (settings.opts.influence && era()) { if (settings.terrStyle === 'bubbles') drawInfluence(lowRes); else drawTerritories(); }
+      if (settings.opts.conflicts !== false) drawConflicts();
       if (settings.opts.grid) drawGrid();
       if (settings.opts.routes) drawRoutes();
       if (isSW() && settings.opts.sectors) drawSectors();
@@ -499,6 +501,7 @@
     drawPlan();
     drawRouteDraft();
     drawBrush();
+    drawConflictDraft();
   }
   // ------------------------------------------------------------- Reiseplaner
   const TR = window.IAM_TRAVEL;
@@ -1078,6 +1081,64 @@
   }
 
   let mouse = { x: 0, y: 0, in: false };
+  // ------------------------------------------------------------- Konfliktzonen (gestrichelt + schraffiert, Laufzeit von–bis)
+  const conflictOn = (c, y = state.year) => (c.from == null || y >= c.from) && (c.to == null || y <= c.to);
+  const conflictsNow = () => (state.tl.conflicts || []).filter(c => conflictOn(c));
+  function drawConflicts() {
+    const list = conflictsNow(); if (!list.length) return;
+    const z = state.view.z;
+    for (const c of list) {
+      const col = c.color || '#e0453a';
+      worldTransform(ctx);
+      ctx.save(); ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.clip();
+      ctx.fillStyle = col; ctx.globalAlpha = 0.07; ctx.fill();
+      ctx.globalAlpha = 0.32; ctx.strokeStyle = col; ctx.lineWidth = 1.4 / z; ctx.beginPath();
+      const step = 10 / z; for (let k = -c.r * 2; k <= c.r * 2; k += step) { ctx.moveTo(c.x + k - c.r, c.y - c.r); ctx.lineTo(c.x + k + c.r, c.y + c.r); }
+      ctx.stroke(); ctx.restore();
+      ctx.globalAlpha = 0.95; ctx.strokeStyle = col; ctx.lineWidth = 2.4 / z; ctx.setLineDash([10 / z, 6 / z]);
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      // Beschriftung oben an der Zone
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      const p = w2s(c.x, c.y - c.r); if (c.r * z < 14) continue;
+      ctx.font = '600 12px "Segoe UI", Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      const label = '⚔ ' + c.name; ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineJoin = 'round'; ctx.strokeText(label, p.x, p.y - 3);
+      ctx.fillStyle = '#ffd9d4'; ctx.fillText(label, p.x, p.y - 3);
+    }
+  }
+  const conflictAt = (wx, wy) => conflictsNow().slice().reverse().find(c => Math.hypot(wx - c.x, wy - c.y) <= c.r) || null;
+  function conflictsOfPlace(o) { const r = rootOf(o), p = posOf(r); return conflictsNow().filter(c => (c.places || []).includes(o.id) || (c.places || []).includes(r.id) || Math.hypot(p.x - c.x, p.y - c.y) <= c.r); }
+  function conflictRow(o) {
+    const cs = conflictsOfPlace(o); if (!cs.length) return '';
+    return `<span class="k">${esc(t('conflictZone'))}</span><span>${cs.map(c => `<span style="color:${esc(c.color || '#e0453a')}">⚔</span> ${esc(c.name)}${(c.factions || []).length ? ` <span class="dim">(${esc(c.factions.map(id => (facById(id) || {}).name).filter(Boolean).join(' vs. '))})</span>` : ''}`).join('<br>')}</span>`;
+  }
+  function editConflict(c, isNew) {
+    const tl = state.tl, fy = y => y == null ? '' : fmtYear(y);
+    modal(isNew ? t('conflictNew') : t('conflictEdit'), `
+      <label class="field"><span>${esc(t('name'))}</span><input id="cfName" value="${esc(c.name)}" maxlength="120"></label>
+      <div class="field"><span>${esc(t('conflictSides'))}</span><div class="cf-facs">${tl.factions.map(f => `<label class="chk"><input type="checkbox" value="${esc(f.id)}" ${(c.factions || []).includes(f.id) ? 'checked' : ''}><span style="color:${esc(f.color)}">■</span> ${esc(f.name)}</label>`).join('') || `<span class="dim">${esc(t('noFactionYet'))}</span>`}</div></div>
+      <div class="row"><label class="field"><span>${esc(t('conflictFrom'))}</span><input id="cfFrom" value="${esc(fy(c.from))}"></label><label class="field"><span>${esc(t('conflictTo'))}</span><input id="cfTo" value="${esc(fy(c.to))}" placeholder="${esc(t('conflictOngoing'))}"></label></div>
+      <label class="field"><span>${esc(t('description'))}</span><textarea id="cfDesc" rows="3">${esc(c.desc || '')}</textarea></label>
+      <div class="row"><label class="field fixed" style="width:90px"><span>${esc(t('color'))}</span><input id="cfColor" type="color" value="${esc(c.color || '#e0453a')}"></label>
+      ${isNew ? '' : `<button id="cfEnd" type="button">${esc(t('conflictEndNow'))}</button><button id="cfDel" type="button" class="danger">🗑 ${esc(t('delete'))}</button>`}</div>`, () => {
+      const name = $('#cfName').value.trim(); if (!name) throw new Error(t('name') + '?');
+      const from = $('#cfFrom').value.trim() ? parseYear($('#cfFrom').value) : null, to = $('#cfTo').value.trim() ? parseYear($('#cfTo').value) : null;
+      if ($('#cfFrom').value.trim() && from == null || $('#cfTo').value.trim() && to == null) throw new Error(t('conflictYearBad'));
+      if (from != null && to != null && to < from) throw new Error(t('conflictYearOrder'));
+      pushUndo();
+      Object.assign(c, { name, from, to, desc: $('#cfDesc').value, color: $('#cfColor').value, factions: [...document.querySelectorAll('.cf-facs input:checked')].map(i => i.value) });
+      if (isNew) tl.conflicts.push(c);
+      afterEdit(true);
+    });
+    const del = $('#cfDel'); if (del) del.onclick = () => { if (!confirm(t('conflictDelQ', c.name))) return; pushUndo(); tl.conflicts = tl.conflicts.filter(x => x !== c); $('#modal').hidden = true; afterEdit(true); };
+    const end = $('#cfEnd'); if (end) end.onclick = () => { $('#cfTo').value = fmtYear(state.year); };
+    setTimeout(() => { if (isNew) { $('#cfName').focus(); $('#cfName').select(); } }, 30);
+  }
+  function drawConflictDraft() {
+    if (!drag || drag.kind !== 'conflict') return;
+    worldTransform(ctx); const z = state.view.z;
+    ctx.strokeStyle = '#e0453a'; ctx.lineWidth = 2 / z; ctx.setLineDash([10 / z, 6 / z]);
+    ctx.beginPath(); ctx.arc(drag.x, drag.y, Math.max(drag.r, 2), 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  }
   function drawBrush() {
     if (!editable() || !mouse.in || !['paint', 'erase'].includes(state.tool)) return;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -1165,6 +1226,9 @@
       pushUndo(); drag = { kind: 'paint', last: null }; paintAt(w);
     } else if (state.tool === 'erase') {
       if (!needEra()) return; pushUndo(); drag = { kind: 'erase' }; eraseAt(w);
+    } else if (state.tool === 'conflict') {
+      const ex = conflictAt(w.x, w.y);
+      drag = { kind: 'conflict', x: Math.round(w.x), y: Math.round(w.y), r: 0, ex };
     } else if (state.tool === 'add') addObjectAt(w, sx, sy);
     else if (state.tool === 'route') {
       let hit = hitTest(sx, sy); if (!hit) return;
@@ -1196,6 +1260,7 @@
       } else if (drag.kind === 'move') { drag.moved = true; drag.obj.x = Math.round(w.x - drag.ox); drag.obj.y = Math.round(w.y - drag.oy); bump(); interacting(); }
       else if (drag.kind === 'paint') { paintAt(w); bump(); }
       else if (drag.kind === 'erase') { eraseAt(w); bump(); }
+      else if (drag.kind === 'conflict') { drag.r = Math.round(Math.hypot(w.x - drag.x, w.y - drag.y)); draw(); }
       draw(); return;
     }
     const tt = $('#tooltip');
@@ -1223,6 +1288,10 @@
       if (!d.moved) { state.undo.pop(); state.selected = d.hit.id; renderInfo(); draw(); }
       else { if (isSW()) d.obj.region = regionAt(d.obj.x, d.obj.y) || d.obj.region; state.selected = d.hit.id; afterEdit(); }
     } else if (d.kind === 'paint' || d.kind === 'erase') afterEdit();
+    else if (d.kind === 'conflict') {
+      if (d.r * state.view.z < 8) { if (d.ex) editConflict(d.ex, false); draw(); }
+      else editConflict({ id: uid('cf'), name: t('conflictDefault'), from: state.year, to: null, factions: state.activeFaction ? [state.activeFaction] : [], places: [], x: d.x, y: d.y, r: d.r, desc: '', color: '#e0453a' }, true);
+    }
   };
   window.addEventListener('pointerup', pointerEnd);
   window.addEventListener('pointercancel', pointerEnd);
@@ -1319,7 +1388,7 @@
     const el = $('#toolHint'); el.textContent = msg; el.hidden = false;
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; updateToolHint(); }, 2400);
   }
-  const TOOL_HINT = { select: 'hintSelect', assign: 'hintAssign', region: 'hintRegion', paint: 'hintPaint', erase: 'hintErase', add: 'hintAdd', route: 'hintRoute' };
+  const TOOL_HINT = { select: 'hintSelect', assign: 'hintAssign', region: 'hintRegion', paint: 'hintPaint', erase: 'hintErase', conflict: 'hintConflict', add: 'hintAdd', route: 'hintRoute' };
   function updateToolHint() {
     const el = $('#toolHint');
     if (editable()) { el.textContent = t(TOOL_HINT[state.tool]); el.hidden = false; } else el.hidden = true;
@@ -1581,6 +1650,7 @@
           ${o.sector ? `<span class="k">${esc(t('sector'))}</span><span>${esc(o.sector)}${o.subsector ? ` <span class="dim">(${esc(o.subsector)})</span>` : ''}</span>` : ''}
           ${gridRow}
           <span class="k">${esc(t('control'))}</span><span>${fac ? `<span style="color:${esc(fac.color)}">■</span> ${esc(fac.name)} <span class="dim">(${esc(t('byBorders'))})</span>` : esc(t('neutral'))}</span>
+          ${conflictRow(o)}
         </div>
         <p class="hint">${esc(t('atlasHint'))}</p>
         <div class="row">${canEditTl() ? `<button id="atAdopt" class="primary">＋ ${esc(t('atlasAdopt'))}</button>` : ''}<button id="atPlan">🧭 ${esc(t('plAsDest'))}</button></div>`;
@@ -1598,6 +1668,7 @@
           ${o.sector ? `<span class="k">${esc(t('sector'))}</span><span>${esc(o.sector)}</span>` : ''}
           ${gridRow}
           <span class="k">${esc(t('control'))}</span><span>${fac ? `<span style="color:${esc(fac.color)}">■</span> ${esc(fac.name)}` : esc(t('neutral'))}</span>
+          ${conflictRow(o)}
           ${parent ? `<span class="k">${esc(t('belongsTo'))}</span><span><a href="#" data-go="${esc(parent.id)}">${esc(parent.name)}</a></span>` : ''}
           ${kids.length ? `<span class="k">${esc(t('contains'))}</span><span>${kids.map(k => `<a href="#" data-go="${esc(k.id)}">${esc(k.name)}</a>`).join(', ')}</span>` : ''}
           ${(o.from != null && o.from !== '') || (o.to != null && o.to !== '') ? `<span class="k">${esc(t('exists'))}</span><span>${fmtYear(o.from)} ${esc(t('to'))} ${fmtYear(o.to)}</span>` : ''}
@@ -1721,8 +1792,8 @@
     const tl = state.tl, cur = era(), eras = sortedEras();
     if (state.activeFaction && !facById(state.activeFaction)) state.activeFaction = null;
     if (!state.activeFaction && tl.factions[0]) state.activeFaction = tl.factions[0].id;
-    const tools = ['select', 'assign'].concat(isSW() ? ['region'] : [], ['paint', 'erase', 'add', 'route']);
-    const toolKey = { select: 'toolSelect', assign: 'toolAssign', region: 'toolRegion', paint: 'toolPaint', erase: 'toolErase', add: 'toolAdd', route: 'toolRoute' };
+    const tools = ['select', 'assign'].concat(isSW() ? ['region'] : [], ['paint', 'erase', 'conflict', 'add', 'route']);
+    const toolKey = { select: 'toolSelect', assign: 'toolAssign', region: 'toolRegion', paint: 'toolPaint', erase: 'toolErase', conflict: 'toolConflict', add: 'toolAdd', route: 'toolRoute' };
     ed.innerHTML = `
       <div class="ed-block">
         <h3>${esc(t('timeline'))}</h3>
@@ -1827,6 +1898,10 @@
     if (state.tool === 'paint' || state.tool === 'erase') {
       box.innerHTML = `<label class="field" style="margin-top:8px"><span>${esc(t('brushSize'))}: <b id="brushVal">${state.brush}</b></span><input type="range" id="brush" min="20" max="400" step="5" value="${state.brush}"></label>`;
       $('#brush').addEventListener('input', e => { state.brush = +e.target.value; $('#brushVal').textContent = state.brush; draw(); });
+    } else if (state.tool === 'conflict') {
+      const now = conflictsNow(), all = state.tl.conflicts || [];
+      box.innerHTML = `<p class="hint">${esc(t('conflictToolHelp'))}</p>${all.length ? `<div class="cf-list">${all.map((c, i) => `<button data-cf="${i}" class="${now.includes(c) ? '' : 'dim'}"><span style="color:${esc(c.color || '#e0453a')}">⚔</span> ${esc(c.name)} <span class="dim small">${esc(c.from != null ? fmtYear(c.from) : '?')} – ${esc(c.to != null ? fmtYear(c.to) : t('conflictOngoing'))}</span></button>`).join('')}</div>` : ''}`;
+      box.querySelectorAll('[data-cf]').forEach(b => b.onclick = () => { const c = all[+b.dataset.cf]; state.view.cx = c.x; state.view.cy = c.y; editConflict(c, false); draw(); });
     } else if (state.tool === 'add') {
       if (!wtype().types.includes(state.newType)) state.newType = wtype().types[1] || wtype().types[0];
       box.innerHTML = `

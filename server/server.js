@@ -262,6 +262,21 @@ function findPlace(tl, name) {
   return cands.sort((a, b) => (a.type === 'planet' ? -1 : 0) - (b.type === 'planet' ? -1 : 0))[0] || atl().find(o => o.name.toLowerCase() === q || o.id === q)
     || tl.objects.find(o => o.name.toLowerCase().includes(q)) || atl().find(o => o.name.toLowerCase().startsWith(q)) || null;
 }
+// ---------------------------------------------------------------- Konfliktzonen (gestrichelt auf der Karte, eigene Laufzeit von–bis)
+// timeline.conflicts = [{ id, name, from, to, factions: [ids], places: [ids], x, y, r, desc, color }]
+const conflictActive = (c, y) => (c.from == null || y >= c.from) && (c.to == null || y <= c.to);
+function conflictsAt(tl, y) { return (tl.conflicts || []).filter(c => conflictActive(c, y)); }
+function conflictLine(tl, c, f, de) {
+  const fac = (c.factions || []).map(id => (tl.factions.find(x => x.id === id) || {}).name).filter(Boolean);
+  const pl = (c.places || []).map(id => (tl.objects.find(o => o.id === id) || (atlasFor(tl).find(o => o.id === id)) || {}).name).filter(Boolean);
+  const when = `${c.from != null ? fmtYear(c.from, f) : '?'} – ${c.to != null ? fmtYear(c.to, f) : (de ? 'andauernd' : 'ongoing')}`;
+  return `${c.name} [${when}]${fac.length ? (de ? ' · Parteien: ' : ' · sides: ') + fac.join(' vs. ') : ''}${pl.length ? (de ? ' · um ' : ' · around ') + pl.join(', ') : ''}${c.desc ? ' – ' + String(c.desc).replace(/\s*\n\s*/g, ' ') : ''}`;
+}
+function placeInConflict(tl, o, c) {
+  if ((c.places || []).includes(o.id)) return true;
+  const byId = Object.fromEntries(tl.objects.map(x => [x.id, x])); let k = o, n = 0; while (CHILD.includes(k.type) && k.parent && byId[k.parent] && n++ < 8) k = byId[k.parent];
+  return c.r > 0 && Number.isFinite(k.x) && Math.hypot(k.x - c.x, k.y - c.y) <= c.r;
+}
 function summaryText(tl, year, lang, placeNames, maxPlaces) {
   I18N.setLang(lang);
   const snap = snapshot(tl, year, lang), { e, f } = snap, de = lang !== 'en', L = [];
@@ -279,6 +294,8 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
       L.push(`- ${fa.name}: ${parts.join('; ') || (de ? 'eigene Einflussgebiete' : 'own spheres of influence')}`);
     }
   }
+  const cfs = conflictsAt(tl, year);
+  if (cfs.length) { L.push(de ? 'Aktive Konfliktzonen (offene Kämpfe – nicht jede Grenze ist Krieg):' : 'Active conflict zones (open fighting – not every border is war):'); for (const c of cfs) L.push('- ' + conflictLine(tl, c, f, de)); }
   const st = (tl.story || []).filter(e => e.year <= year).sort(storySortT(tl));
   const rls = rulesOf(tl).filter(r => r.active !== false);
   if (rls.length) L.splice(1, 0, (de ? 'WELTREGELN (gelten immer): ' : 'WORLD RULES (always apply): ') + rls.map((r, i) => `${i + 1}. ${r.title}${r.text ? ': ' + String(r.text).replace(/\s*\n\s*/g, ' ') : ''}`).join(' | '));
@@ -294,6 +311,7 @@ function summaryText(tl, year, lang, placeNames, maxPlaces) {
     rows.push(`${p.name} (${p.typeLabel}${p.region ? ', ' + p.region : ''}${p.sector ? ', ' + (de ? 'Sektor ' : 'sector ') + p.sector : ''})`);
     if (!p.existsInYear) rows.push(de ? '  existiert in diesem Jahr nicht' : '  does not exist in this year');
     rows.push((de ? '  Kontrolle: ' : '  Control: ') + (p.controlledBy || (de ? 'neutral/unbekannt' : 'neutral/unknown')));
+    const inC = cfs.filter(c => placeInConflict(tl, o, c)); if (inC.length) rows.push((de ? '  Liegt in Konfliktzone: ' : '  Inside conflict zone: ') + inC.map(c => c.name).join(', '));
     if (p.description) rows.push('  ' + p.description);
     const labels = de ? { biome: 'Biom', temp: 'Temperatur', pop: 'Bevölkerung', climate: 'Klima', terrain: 'Gelände', species: 'Bewohner', capital: 'Hauptort', notable: 'Besonderheiten' }
       : { biome: 'Biome', temp: 'Temperature', pop: 'Population', climate: 'Climate', terrain: 'Terrain', species: 'Inhabitants', capital: 'Capital', notable: 'Notable' };
@@ -927,6 +945,45 @@ async function apiWrite(req, res, url, parts) {
     t.story = (t.story || []).filter(x => x.id !== id); if (t.story.length === n) return send(res, 404, { error: 'story section not found' });
     saveTimeline(t); return send(res, 200, { ok: true });
   }
+  if (ep === 'conflict' && (req.method === 'POST' || req.method === 'PATCH')) {
+    t.conflicts = Array.isArray(t.conflicts) ? t.conflicts : [];
+    const f = yearFmt(t, lang), q = String(b.name || '').toLowerCase().trim();
+    let c = t.conflicts.find(x => (b.id && x.id === b.id) || x.id === b.name) || t.conflicts.find(x => x.name.toLowerCase() === q);
+    const created = !c;
+    if (!c && b.to !== undefined && !Array.isArray(b.places) && b.x == null) return send(res, 404, { error: 'conflict not found (Name oder id) – list_conflicts mit all=true zeigt alle' });
+    if (!c) { if (!b.name) return send(res, 400, { error: 'name required' }); c = { id: uid('cf'), name: String(b.name).trim().slice(0, 120), from: rpYear(t), to: null, factions: [], places: [], x: 0, y: 0, r: 0, desc: '', color: '#e0453a' }; }
+    if (b.newName) c.name = String(b.newName).trim().slice(0, 120);
+    const yr = (v, k) => { if (v === undefined) return; if (v === null || v === '' || /^(open|offen|andauernd|ongoing)$/i.test(String(v))) { c[k] = null; return; } const y = parseYear(v, f); if (y == null) throw Object.assign(new Error(`${k}: Jahr nicht erkannt (z.B. "3640 VSY")`), { code: 400 }); c[k] = y; };
+    yr(b.from, 'from'); yr(b.to, 'to');
+    if (c.from != null && c.to != null && c.to < c.from) return send(res, 400, { error: 'to liegt vor from' });
+    if (Array.isArray(b.factions)) { const ids = []; for (const n of b.factions) { const fa = findFaction(t, n); if (!fa) return send(res, 404, { error: `Fraktion „${n}“ nicht gefunden` }); ids.push(fa.id); } c.factions = [...new Set(ids)]; }
+    if (b.description !== undefined) c.desc = String(b.description || '').slice(0, 5000);
+    if (b.color && /^#[0-9a-fA-F]{6}$/.test(b.color)) c.color = b.color;
+    // Fläche: aus Orten berechnen (Kreis um alle genannten Orte) oder direkt x/y/radius
+    if (Array.isArray(b.places) && b.places.length) {
+      const byId = Object.fromEntries(t.objects.map(x => [x.id, x])), pts = [], ids = [];
+      for (const n of b.places) {
+        let o = findPlace(t, n); if (!o) return send(res, 404, { error: `Ort „${n}“ nicht gefunden` });
+        ids.push(o.id); let k = o, i = 0; while (CHILD.includes(k.type) && k.parent && byId[k.parent] && i++ < 8) k = byId[k.parent];
+        if (Number.isFinite(k.x) && Number.isFinite(k.y)) pts.push([k.x, k.y]);
+      }
+      if (!pts.length) return send(res, 400, { error: 'Die Orte haben keine Kartenposition' });
+      const pad = { small: 30, medium: 55, large: 95 }[b.size] || (b.padding > 0 ? Math.min(400, +b.padding) : 55);
+      const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      c.x = Math.round(cx); c.y = Math.round(cy); c.r = Math.round(Math.max(...pts.map(p => Math.hypot(p[0] - cx, p[1] - cy))) + pad); c.places = [...new Set(ids)];
+    } else if (b.x != null && b.y != null && b.radius != null) {
+      const x = +b.x, y = +b.y, r = +b.radius; if (![x, y, r].every(Number.isFinite) || r < 5 || r > 3000) return send(res, 400, { error: 'x, y, radius ungültig' });
+      c.x = Math.round(x); c.y = Math.round(y); c.r = Math.round(r); if (Array.isArray(b.places)) c.places = [];
+    }
+    if (created) { if (!c.r) return send(res, 400, { error: 'Fläche fehlt: places (Ortsnamen) oder x, y, radius angeben' }); t.conflicts.push(c); }
+    saveTimeline(t);
+    return send(res, created ? 201 : 200, { ok: true, created, conflict: { id: c.id, name: c.name, from: fmtYear(c.from, f), to: c.to == null ? null : fmtYear(c.to, f), x: c.x, y: c.y, radius: c.r, factions: c.factions.map(id => (t.factions.find(x => x.id === id) || {}).name) } });
+  }
+  if (ep === 'conflict' && req.method === 'DELETE') {
+    const q = String(b.name || '').toLowerCase().trim(), c = (t.conflicts || []).find(x => x.id === b.id || x.id === b.name || x.name.toLowerCase() === q);
+    if (!c) return send(res, 404, { error: 'conflict not found (exakter Name oder id)' });
+    t.conflicts = t.conflicts.filter(x => x !== c); saveTimeline(t); return send(res, 200, { ok: true, deleted: c.id });
+  }
   if (ep === 'control' && req.method === 'POST') {
     const e = eraForWrite(t, b, lang), o = byName(b.place); if (!o) return send(res, 404, { error: 'place not found' });
     const bid = Object.fromEntries(t.objects.map(x => [x.id, x])); let k = o, n = 0; while (CHILD.includes(k.type) && k.parent && bid[k.parent] && n++ < 8) k = bid[k.parent];
@@ -1104,6 +1161,12 @@ async function apiV1(req, res, url) {
     r.legs.forEach(l => { delete l.points; l.duration = d(l.hours); });
     return send(res, 200, Object.assign({ year: y, totalDuration: d(r.totalHours), text }, r));
   }
+  if (ep === 'conflicts') {
+    const t = tl(), f = yearFmt(t, lang), de = lang !== 'en', all = q.get('all') === '1' || q.get('all') === 'true';
+    const y = q.get('year') ? year(t) : rpYear(t), list = all ? (t.conflicts || []) : conflictsAt(t, y);
+    if (q.get('format') === 'text') return send(res, 200, list.length ? list.map(c => `- ${conflictLine(t, c, f, de)} [id: ${c.id}]`).join('\n') : (de ? 'Keine ' + (all ? '' : 'aktiven ') + 'Konfliktzonen.' : 'No ' + (all ? '' : 'active ') + 'conflict zones.'), 'text/plain; charset=utf-8');
+    return send(res, 200, { year: fmtYear(y, f), conflicts: list });
+  }
   if (ep === 'summary') {
     const t = tl(), y = year(t);
     return send(res, 200, summaryText(t, y, lang, q.getAll('place').filter(Boolean), Math.max(3, Math.min(200, +q.get('max') || 25))), 'text/plain; charset=utf-8');
@@ -1244,6 +1307,16 @@ const MCP_TOOLS = [
   { name: 'delete_housing', title: 'Housing löschen', description: 'Löscht ein Raumschiff/Haus komplett (exakter Name oder id). Nur auf ausdrücklichen Wunsch.', destructive: true,
     inputSchema: S({ timeline: TL, name: str('exakter Name oder id') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/housing', {}, { timeline: a.timeline, name: a.name, id: a.name }) },
   { name: 'upsert_era', title: 'Zeitalter anlegen/ändern', description: 'Neues Zeitalter ab einem Jahr (übernimmt den Stand davor) oder Name/Beschreibung ändern.', inputSchema: S({ timeline: TL, name: str('Name'), newName: str('Neuer Name'), year: YR, description: str('Beschreibung') }, ['timeline']), run: a => internalCall('POST', '/api/v1/era', {}, a) },
+  { name: 'list_conflicts', title: 'Konfliktzonen', description: 'Aktive Konfliktzonen (offene Kämpfe) in einem Jahr bzw. mit all=true alle, mit Parteien, Laufzeit und Orten. Grenzen allein bedeuten keinen Krieg – nur Konfliktzonen markieren direkte Kämpfe.', ro: true,
+    inputSchema: S({ timeline: TL, year: YR, all: { type: 'boolean' }, lang: LG }, ['timeline']), run: (a, v) => internalCall('GET', '/api/v1/conflicts', { timeline: a.timeline, year: a.year, all: a.all ? '1' : '', lang: a.lang, format: 'text' }, null, v) },
+  { name: 'upsert_conflict', title: 'Konfliktzone markieren', description: 'Markiert eine Konfliktzone (gestrichelte, schraffierte Fläche auf der Karte) für direkte Kämpfe zwischen Fraktionen – z.B. Front, Belagerung, umkämpftes System. Fläche: places = Orte/Systeme, um die ein Kreis gelegt wird (size small|medium|large für den Rand), alternativ x, y, radius in Kartenkoordinaten. from/to = Laufzeit (to leer/"open" = andauernd; Standard from = aktuelles RP-Jahr). Bestehende Zonen (gleicher Name) werden geändert.',
+    inputSchema: S({ timeline: TL, name: str('Name, z.B. "Schlacht um Korriban"'), newName: str('neuer Name'), factions: { type: 'array', items: { type: 'string' }, description: 'beteiligte Fraktionen' }, places: { type: 'array', items: { type: 'string' }, description: 'Orte/Systeme im Kampfgebiet' }, size: { type: 'string', enum: ['small', 'medium', 'large'] },
+      x: { type: 'number' }, y: { type: 'number' }, radius: { type: 'number' }, from: str('Beginn, z.B. "3640 VSY"'), to: str('Ende (leer oder "open" = andauernd)'), description: str('Lage, Verlauf'), color: str('#rrggbb (Standard Rot)') }, ['timeline', 'name']),
+    run: a => internalCall('POST', '/api/v1/conflict', {}, a) },
+  { name: 'end_conflict', title: 'Konflikt beenden', description: 'Beendet eine Konfliktzone zu einem Jahr (bis einschließlich dieses Jahres sichtbar). Die Zone bleibt für frühere Jahre erhalten.',
+    inputSchema: S({ timeline: TL, name: str('Name oder id'), year: YR }, ['timeline', 'name', 'year']), run: a => internalCall('POST', '/api/v1/conflict', {}, { timeline: a.timeline, name: a.name, to: a.year }) },
+  { name: 'delete_conflict', title: 'Konfliktzone löschen', description: 'Löscht eine Konfliktzone komplett (auch rückwirkend). Zum zeitlichen Beenden end_conflict verwenden.', destructive: true,
+    inputSchema: S({ timeline: TL, name: str('exakter Name oder id') }, ['timeline', 'name']), run: a => internalCall('DELETE', '/api/v1/conflict', {}, a) },
   { name: 'set_control', title: 'Kontrolle setzen', description: 'Legt fest, welche Fraktion einen Ort ab dem Zeitalter des angegebenen Jahres kontrolliert (faction leer = neutral).', inputSchema: S({ timeline: TL, place: str('Ort'), faction: str('Fraktion'), year: YR, era: str('oder Name des Zeitalters') }, ['timeline', 'place']), run: a => internalCall('POST', '/api/v1/control', {}, a) },
   { name: 'set_world_image', title: 'Weltbild setzen', description: 'Setzt ein Bild (z.B. eine gemalte Kontinentkarte als PNG/JPEG) als Hintergrund einer eigenen Welt; es wird eingepasst. Nur für Admins der Welt. clear=true entfernt das Weltbild.',
     inputSchema: S({ world: str('Welt (id oder Name)'), url: str('öffentliche https-URL'), data: str('alternativ: Base64 oder data:-URL'), opacity: { type: 'number', description: '0.05–1, Standard 1' }, clear: { type: 'boolean' } }, ['world']),
@@ -1255,7 +1328,7 @@ const MCP_INSTRUCTIONS = 'Ascandir RP-Manager: interaktive Karte (Star Wars u. e
   'WICHTIG: Jede Zeitlinie kann feste Weltregeln haben (list_rules). Sie gelten immer, haben Vorrang vor allem anderen und werden zu Beginn mit list_rules oder get_summary gelesen; ändern nur auf ausdrücklichen Wunsch des Nutzers. ' +
   'Drei getrennte Quellen: Story-Chronik (was ist passiert, chronologisch), Charakterakten (wer ist wer, wo, was weiß die Person) und Weltnotizen (aktueller Zustand der Welt; list_world_notes/upsert_world_note – lieber aktualisieren als neu anlegen; Weltnotizen ≠ Wissen der Charaktere). ' +
   'Personen werden als Charaktere gepflegt (list_characters/get_character lesen, upsert_character ändern, add_character_image für Bilder). ' +
-  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Housing (Raumschiffe, Häuser, Basen) pro Zeitlinie: list_housing/get_housing lesen, upsert_housing, upsert_deck, set_deck_image (Grundriss-Bild), upsert_room (Räume als Rasterflächen oder Markierung, mit Beschreibung, Einrichtung, Gegenständen), move_wall (Wände verschieben); vorher get_housing aufrufen. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
+  'Die laufende Geschichte wird in Story-Abschnitten dokumentiert, die in Kapiteln mit Titel gruppiert sind: vor dem Weitererzählen list_story lesen (z.B. last=5), neue Ereignisse mit add_story_entry als eigenen Abschnitt anlegen, neue Kapitel mit upsert_chapter bzw. chapter beim Abschnitt. Zeitalter (upsert_era) nur für größere Wendepunkte der Machtverhältnisse. Konfliktzonen: Grenzen bedeuten nicht automatisch Krieg; direkte Kämpfe als Konfliktzone markieren (upsert_conflict mit places, factions, from), beendete Kämpfe mit end_conflict abschließen, list_conflicts zeigt aktive. Housing (Raumschiffe, Häuser, Basen) pro Zeitlinie: list_housing/get_housing lesen, upsert_housing, upsert_deck, set_deck_image (Grundriss-Bild), upsert_room (Räume als Rasterflächen oder Markierung, mit Beschreibung, Einrichtung, Gegenständen), move_wall (Wände verschieben); vorher get_housing aufrufen. Eigene Welten können ein Weltbild (z.B. gemalte Kontinentkarte) als Hintergrund haben: set_world_image (Bild per URL oder Base64).';
 async function handleMcp(req, res, url, tv) {
   // tv = Betrachter aus dem Token (null = Gast). Sichtbar ist nur, was dieser Benutzer sehen darf.
   const viewerOf = () => tv || whoIs({ headers: {} }, null);

@@ -542,3 +542,8 @@ body[data-theme="scifi"] #topbar #modeMenu > button.active { color: #1a1205 !imp
 #housing .hs-item input:first-child { flex: 1.2; min-width: 0; } #housing .hs-item input:nth-child(2) { flex: 1; min-width: 0; }
 #housing .hs-area span { flex: 1; }
 #housing .small { font-size: 11px; }
+/* Konfliktzonen */
+.cf-facs { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; }
+.cf-list { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+.cf-list button { text-align: left; }
+.cf-list button.dim { opacity: .6; }
